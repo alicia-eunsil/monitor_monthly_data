@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -285,13 +286,34 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
     level_chart = series_df.set_index("period")["value"]
     st.line_chart(level_chart)
 
-    yoy_col1, yoy_col2 = st.columns(2)
-    with yoy_col1:
-        st.markdown("#### 전년동월대비 증감(절대)")
-        st.line_chart(series_df.set_index("period")["yoy_abs"])
-    with yoy_col2:
-        st.markdown("#### 전년동월대비 증감률(%)")
-        st.line_chart(series_df.set_index("period")["yoy_pct"])
+    st.markdown("#### ?????? ??(??) / ???(?)")
+    yoy_df = series_df[["period", "yoy_abs", "yoy_pct"]].dropna(
+        subset=["yoy_abs", "yoy_pct"],
+        how="all",
+    )
+    if yoy_df.empty:
+        st.info("YoY ???? ????.")
+    else:
+        base = alt.Chart(yoy_df).encode(
+            x=alt.X("period:T", title="?"),
+            tooltip=[
+                alt.Tooltip("yearmonth(period):T", title="?"),
+                alt.Tooltip("yoy_abs:Q", title="?????? ??", format=",.2f"),
+                alt.Tooltip("yoy_pct:Q", title="?????? ???(%)", format=".2f"),
+            ],
+        )
+        bars = base.mark_bar(color="#4C78A8", opacity=0.55).encode(
+            y=alt.Y("yoy_abs:Q", title="?????? ??")
+        )
+        line = base.mark_line(color="#E45756", point=True).encode(
+            y=alt.Y("yoy_pct:Q", title="?????? ???(%)")
+        )
+        zero = alt.Chart(pd.DataFrame({"zero": [0]})).mark_rule(
+            color="#9CA3AF",
+            strokeDash=[4, 4],
+        ).encode(y="zero:Q")
+        combo = alt.layer(bars, line, zero).resolve_scale(y="independent").properties(height=320)
+        st.altair_chart(combo, use_container_width=True)
 
     st.markdown("#### 리포트 요약")
     st.dataframe(_extreme_rows(stats, "level", unit), use_container_width=True, hide_index=True)
