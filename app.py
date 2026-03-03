@@ -54,10 +54,10 @@ st.markdown(
 
 def _seeded_api_key() -> str:
     try:
-        secret_value = st.secrets.get("api_key", "")
+        secret_value = st.secrets.get("api_key", "") or st.secrets.get("API_KEY", "")
     except Exception:  # noqa: BLE001
         secret_value = ""
-    return str(secret_value or os.getenv("api_key", ""))
+    return str(secret_value or os.getenv("api_key", "") or os.getenv("API_KEY", ""))
 
 
 def _fmt_period(value: object) -> str:
@@ -282,14 +282,10 @@ def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
 st.title("KOSIS 월별 일자리 모니터링 (MVP)")
 st.caption("최신값이 전체기간/최근5년 최고·최저를 갱신하면 붉은색 NEW 표시")
 
-with st.sidebar:
-    st.header("설정")
-    api_key = _seeded_api_key()
-    if st.button("데이터 다시 불러오기"):
-        load_data.clear()
+api_key = _seeded_api_key()
 
 if not api_key:
-    st.warning("API 키가 설정되지 않았습니다.")
+    st.warning("API key is not set.")
     st.stop()
 
 data, load_errors = load_data(api_key=api_key)
