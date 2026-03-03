@@ -105,17 +105,23 @@ class KosisClient:
             config, right_params
         )
 
-    def _try_split_by_region(
-        self, config: DatasetConfig, params: Dict[str, str]
+    def _try_split_by_region(self, config: DatasetConfig, params: Dict[str, str]) -> Optional[List[Dict[str, Any]]]:
+        rows = self._try_split_region_dim(config, params, "objL1")
+        if rows is not None:
+            return rows
+        return self._try_split_region_dim(config, params, "objL2")
+
+    def _try_split_region_dim(
+        self, config: DatasetConfig, params: Dict[str, str], dim_key: str
     ) -> Optional[List[Dict[str, Any]]]:
-        if params.get("objL1") != "ALL":
+        if params.get(dim_key) != "ALL":
             return None
 
         merged: List[Dict[str, Any]] = []
         success_count = 0
         for code in REGION_OBJL1_CODES:
             region_params = dict(params)
-            region_params["objL1"] = code
+            region_params[dim_key] = code
             try:
                 rows = self._fetch_with_fallbacks(config, region_params)
             except RuntimeError:
@@ -154,4 +160,3 @@ class KosisClient:
         year = index // 12
         month = (index % 12) + 1
         return f"{year:04d}{month:02d}"
-
