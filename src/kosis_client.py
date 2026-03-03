@@ -1,11 +1,33 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 
 from .config import KOSIS_BASE_URL, DatasetConfig
+
+# National + 17 provinces/cities (standard region codes commonly used in KOSIS tables)
+REGION_OBJL1_CODES = [
+    "00",
+    "11",
+    "21",
+    "22",
+    "23",
+    "24",
+    "25",
+    "26",
+    "29",
+    "31",
+    "32",
+    "33",
+    "34",
+    "35",
+    "36",
+    "37",
+    "38",
+    "39",
+]
 
 
 class KosisClient:
@@ -15,9 +37,9 @@ class KosisClient:
 
     def fetch(self, config: DatasetConfig, end_prd_de: str) -> List[Dict[str, Any]]:
         params = config.to_params(api_key=self.api_key, end_prd_de=end_prd_de)
-        return self._fetch_with_split(config, params)
+        return self._fetch_with_fallbacks(config, params)
 
-    def _fetch_with_split(self, config: DatasetConfig, params: Dict[str, str]) -> List[Dict[str, Any]]:
+    def _fetch_with_fallbacks(self, config: DatasetConfig, params: Dict[str, str]) -> List[Dict[str, Any]]:
         payload = self._request(params)
 
         if isinstance(payload, list):
@@ -28,23 +50,83 @@ class KosisClient:
             if not error:
                 return [payload]
 
-            # KOSIS error 31 means row limit exceeded; split monthly range and retry.
-            if error == "31" and params.get("prdSe") == "M":
-                start = params.get("startPrdDe", "")
-                end = params.get("endPrdDe", "")
-                if start and end and start < end:
-                    left_end, right_start = self._split_month_range(start, end)
-                    left_params = dict(params)
-                    right_params = dict(params)
-                    left_params["endPrdDe"] = left_end
-                    right_params["startPrdDe"] = right_start
-                    return self._fetch_with_split(config, left_params) + self._fetch_with_split(
-                        config, right_params
-                    )
+            # KOSIS err=31: too many rows. Retry with narrower requests.
+            if error == "31":
+                rows = self._try_split_by_period(config, params)
+                if rows is not None:
+                    return rows
 
-            raise RuntimeError(f"{config.title} 조회 실패: {error}")
+                rows = self._try_split_by_item(config, params)
+                if rows is not None:
+                    return rows
 
-        raise RuntimeError(f"{config.title} 응답 형식이 예상과 다릅니다.")
+                rows = self._try_split_by_region(config, params)
+                if rows is not None:
+                    return rows
+
+            raise RuntimeError(f"{config.title} query failed: {error}")
+
+        raise RuntimeError(f"{config.title} response format is unexpected.")
+
+    def _try_split_by_period(
+        self, config: DatasetConfig, params: Dict[str, str]
+    ) -> Optional[List[Dict[str, Any]]]:
+        if params.get("prdSe") != "M":
+            return None
+        start = params.get("startPrdDe", "")
+        end = params.get("endPrdDe", "")
+        if not (start and end and start < end):
+            return None
+
+        left_end, right_start = self._split_month_range(start, end)
+        left_params = dict(params)
+        right_params = dict(params)
+        left_params["endPrdDe"] = left_end
+        right_params["startPrdDe"] = right_start
+        return self._fetch_with_fallbacks(config, left_params) + self._fetch_with_fallbacks(
+            config, right_params
+        )
+
+    def _try_split_by_item(self, config: DatasetConfig, params: Dict[str, str]) -> Optional[List[Dict[str, Any]]]:
+        raw_items = params.get("itmId", "")
+        items = [x for x in raw_items.split("+") if x]
+        if len(items) <= 1:
+            return None
+
+        mid = len(items) // 2
+        left_items = items[:mid]
+        right_items = items[mid:]
+
+        left_params = dict(params)
+        right_params = dict(params)
+        left_params["itmId"] = "+".join(left_items) + "+"
+        right_params["itmId"] = "+".join(right_items) + "+"
+        return self._fetch_with_fallbacks(config, left_params) + self._fetch_with_fallbacks(
+            config, right_params
+        )
+
+    def _try_split_by_region(
+        self, config: DatasetConfig, params: Dict[str, str]
+    ) -> Optional[List[Dict[str, Any]]]:
+        if params.get("objL1") != "ALL":
+            return None
+
+        merged: List[Dict[str, Any]] = []
+        success_count = 0
+        for code in REGION_OBJL1_CODES:
+            region_params = dict(params)
+            region_params["objL1"] = code
+            try:
+                rows = self._fetch_with_fallbacks(config, region_params)
+            except RuntimeError:
+                continue
+            if rows:
+                merged.extend(rows)
+                success_count += 1
+
+        if success_count > 0:
+            return merged
+        return None
 
     def _request(self, params: Dict[str, str]) -> Any:
         response = requests.get(KOSIS_BASE_URL, params=params, timeout=self.timeout)
