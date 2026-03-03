@@ -4,6 +4,10 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import requests
+from requests.adapters import HTTPAdapter
+from requests.exceptions import RequestException
+from urllib3.util.retry import Retry
+import time
 
 from .config import KOSIS_BASE_URL, DatasetConfig
 
@@ -37,6 +41,34 @@ class KosisClient:
         self.api_key = api_key
         self.timeout = timeout
         self._debug_logs: List[str] = []
+        self._request_retry_count = 4
+        self._session = requests.Session()
+        retry = Retry(
+            total=3,
+            connect=3,
+            read=3,
+            status=3,
+            backoff_factor=0.6,
+            status_forcelist=(429, 500, 502, 503, 504),
+            allowed_methods=frozenset(["GET"]),
+            respect_retry_after_header=True,
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
+        self._session.headers.update(
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/123.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/json,text/plain,*/*",
+                "Referer": "https://kosis.kr/",
+                "Connection": "keep-alive",
+            }
+        )
 
     def fetch(self, config: DatasetConfig, end_prd_de: str) -> List[Dict[str, Any]]:
         params = config.to_params(api_key=self.api_key, end_prd_de=end_prd_de)
@@ -161,9 +193,31 @@ class KosisClient:
         return None
 
     def _request(self, params: Dict[str, str]) -> Any:
-        response = requests.get(KOSIS_BASE_URL, params=params, timeout=self.timeout)
-        response.raise_for_status()
-        return response.json()
+        last_error: Optional[Exception] = None
+        for attempt in range(1, self._request_retry_count + 1):
+            try:
+                response = self._session.get(KOSIS_BASE_URL, params=params, timeout=self.timeout)
+                response.raise_for_status()
+                return response.json()
+            except RequestException as exc:
+                last_error = exc
+                self._log(f"http_error attempt={attempt}/{self._request_retry_count}: {exc}")
+                if attempt < self._request_retry_count:
+                    sleep_sec = 0.8 * (2 ** (attempt - 1))
+                    time.sleep(sleep_sec)
+                    continue
+                raise
+            except ValueError as exc:
+                last_error = exc
+                self._log(f"json_decode_error attempt={attempt}/{self._request_retry_count}: {exc}")
+                if attempt < self._request_retry_count:
+                    time.sleep(0.5)
+                    continue
+                raise
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("request failed without explicit exception")
 
     @staticmethod
     def _split_month_range(start_yyyymm: str, end_yyyymm: str) -> tuple[str, str]:
