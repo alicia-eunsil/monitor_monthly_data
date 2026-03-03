@@ -31,41 +31,59 @@ REGION_OBJL1_CODES = [
 
 
 class KosisClient:
+    _MAX_DEBUG_LOGS = 500
+
     def __init__(self, api_key: str, timeout: int = 30):
         self.api_key = api_key
         self.timeout = timeout
+        self._debug_logs: List[str] = []
 
     def fetch(self, config: DatasetConfig, end_prd_de: str) -> List[Dict[str, Any]]:
         params = config.to_params(api_key=self.api_key, end_prd_de=end_prd_de)
         return self._fetch_with_fallbacks(config, params)
 
+    def fetch_with_debug(self, config: DatasetConfig, end_prd_de: str) -> tuple[List[Dict[str, Any]], List[str]]:
+        self._debug_logs = []
+        params = config.to_params(api_key=self.api_key, end_prd_de=end_prd_de)
+        rows = self._fetch_with_fallbacks(config, params)
+        return rows, list(self._debug_logs)
+
     def _fetch_with_fallbacks(self, config: DatasetConfig, params: Dict[str, str]) -> List[Dict[str, Any]]:
+        self._log(f"request {self._param_summary(params)}")
         payload = self._request(params)
 
         if isinstance(payload, list):
+            self._log(f"success rows={len(payload)}")
             return payload
 
         if isinstance(payload, dict):
             error = str(payload.get("err") or payload.get("error") or "").strip()
             if not error:
+                self._log("success single-row payload")
                 return [payload]
 
             # KOSIS err=31: too many rows. Retry with narrower requests.
             if error == "31":
+                self._log("err=31 detected; trying split strategies")
                 rows = self._try_split_by_period(config, params)
                 if rows is not None:
+                    self._log(f"resolved by period split rows={len(rows)}")
                     return rows
 
                 rows = self._try_split_by_item(config, params)
                 if rows is not None:
+                    self._log(f"resolved by item split rows={len(rows)}")
                     return rows
 
                 rows = self._try_split_by_region(config, params)
                 if rows is not None:
+                    self._log(f"resolved by region split rows={len(rows)}")
                     return rows
 
+            self._log(f"failed err={error}")
             raise RuntimeError(f"{config.title} query failed: {error}")
 
+        self._log(f"failed unexpected_payload_type={type(payload).__name__}")
         raise RuntimeError(f"{config.title} response format is unexpected.")
 
     def _try_split_by_period(
@@ -79,6 +97,7 @@ class KosisClient:
             return None
 
         left_end, right_start = self._split_month_range(start, end)
+        self._log(f"period split {start}-{end} -> {start}-{left_end} | {right_start}-{end}")
         left_params = dict(params)
         right_params = dict(params)
         left_params["endPrdDe"] = left_end
@@ -96,6 +115,9 @@ class KosisClient:
         mid = len(items) // 2
         left_items = items[:mid]
         right_items = items[mid:]
+        self._log(
+            f"item split count={len(items)} -> left={len(left_items)} right={len(right_items)}"
+        )
 
         left_params = dict(params)
         right_params = dict(params)
@@ -119,6 +141,7 @@ class KosisClient:
 
         merged: List[Dict[str, Any]] = []
         success_count = 0
+        self._log(f"region split on {dim_key}")
         for code in REGION_OBJL1_CODES:
             region_params = dict(params)
             region_params[dim_key] = code
@@ -129,9 +152,12 @@ class KosisClient:
             if rows:
                 merged.extend(rows)
                 success_count += 1
+                self._log(f"region {dim_key}={code} rows={len(rows)}")
 
         if success_count > 0:
+            self._log(f"region split success {dim_key} success_count={success_count}")
             return merged
+        self._log(f"region split failed {dim_key}")
         return None
 
     def _request(self, params: Dict[str, str]) -> Any:
@@ -160,3 +186,17 @@ class KosisClient:
         year = index // 12
         month = (index % 12) + 1
         return f"{year:04d}{month:02d}"
+
+    def _log(self, message: str) -> None:
+        if len(self._debug_logs) < self._MAX_DEBUG_LOGS:
+            self._debug_logs.append(message)
+        elif len(self._debug_logs) == self._MAX_DEBUG_LOGS:
+            self._debug_logs.append("... log truncated ...")
+
+    @staticmethod
+    def _param_summary(params: Dict[str, str]) -> str:
+        items = [x for x in str(params.get("itmId", "")).split("+") if x]
+        return (
+            f"prd={params.get('startPrdDe','')}-{params.get('endPrdDe','')}, "
+            f"itm={len(items)}, objL1={params.get('objL1','')}, objL2={params.get('objL2','')}"
+        )

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import pandas as pd
 import streamlit as st
@@ -93,20 +93,22 @@ def _card(title: str, value: str, sub: str, is_new: bool = False) -> None:
 
 
 @st.cache_data(ttl=60 * 30, show_spinner=False)
-def fetch_records_cached(api_key: str, dataset_key: str, end_period: str) -> List[Dict]:
+def fetch_records_cached(api_key: str, dataset_key: str, end_period: str) -> Dict[str, Any]:
     cfg = next((x for x in DATASETS if x.key == dataset_key), None)
     if cfg is None:
         raise RuntimeError(f"Unknown dataset key: {dataset_key}")
     client = KosisClient(api_key=api_key)
-    return client.fetch(cfg, end_prd_de=end_period)
+    records, debug_logs = client.fetch_with_debug(cfg, end_prd_de=end_period)
+    return {"records": records, "debug_logs": debug_logs}
 
 
-def load_data_with_progress(api_key: str) -> tuple[pd.DataFrame, List[str]]:
+def load_data_with_progress(api_key: str) -> tuple[pd.DataFrame, List[str], List[str]]:
     end_period = default_end_period()
     total_steps = len(DATASETS) * 2 + 1
     step = 0
     frames: List[pd.DataFrame] = []
     errors: List[str] = []
+    debug_logs: List[str] = []
 
     progress = st.progress(0)
     status = st.empty()
@@ -114,15 +116,20 @@ def load_data_with_progress(api_key: str) -> tuple[pd.DataFrame, List[str]]:
     for cfg in DATASETS:
         status.info(f"데이터 불러오는 중: {cfg.title}")
         try:
-            records = fetch_records_cached(api_key=api_key, dataset_key=cfg.key, end_period=end_period)
+            result = fetch_records_cached(api_key=api_key, dataset_key=cfg.key, end_period=end_period)
+            records = result.get("records", [])
+            for line in result.get("debug_logs", []):
+                debug_logs.append(f"[{cfg.key}] {line}")
         except Exception as exc:  # noqa: BLE001
             records = []
             errors.append(f"{cfg.title}: {exc}")
+            debug_logs.append(f"[{cfg.key}] ERROR: {exc}")
         step += 1
         progress.progress(min(100, int(step * 100 / total_steps)))
 
         status.info(f"파싱 중: {cfg.title}")
         parsed = normalize_records(cfg, records)
+        debug_logs.append(f"[{cfg.key}] parsed_rows={len(parsed)} raw_rows={len(records)}")
         if not parsed.empty:
             frames.append(parsed)
         step += 1
@@ -132,14 +139,15 @@ def load_data_with_progress(api_key: str) -> tuple[pd.DataFrame, List[str]]:
     if not frames:
         progress.progress(100)
         status.error("데이터 로딩 실패")
-        return pd.DataFrame(), errors
+        return pd.DataFrame(), errors, debug_logs
 
     combined = pd.concat(frames, ignore_index=True)
     combined = add_yoy(combined)
+    debug_logs.append(f"[all] combined_rows={len(combined)}")
     step += 1
     progress.progress(100)
     status.success("로딩 완료")
-    return combined, errors
+    return combined, errors, debug_logs
 
 
 def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str) -> pd.DataFrame:
@@ -317,6 +325,7 @@ if st.button("데이터 새로고침"):
     st.session_state.pop("_loaded_api_key", None)
     st.session_state.pop("_loaded_data", None)
     st.session_state.pop("_loaded_errors", None)
+    st.session_state.pop("_loaded_debug_logs", None)
     st.rerun()
 
 api_key = _seeded_api_key()
@@ -328,16 +337,22 @@ if not api_key:
 if st.session_state.get("_loaded_api_key") == api_key and "_loaded_data" in st.session_state:
     data = st.session_state["_loaded_data"]
     load_errors = st.session_state.get("_loaded_errors", [])
+    debug_logs = st.session_state.get("_loaded_debug_logs", [])
 else:
-    data, load_errors = load_data_with_progress(api_key=api_key)
+    data, load_errors, debug_logs = load_data_with_progress(api_key=api_key)
     st.session_state["_loaded_api_key"] = api_key
     st.session_state["_loaded_data"] = data
     st.session_state["_loaded_errors"] = load_errors
+    st.session_state["_loaded_debug_logs"] = debug_logs
 
 if load_errors:
     st.error("일부 데이터셋 조회 중 오류가 발생했습니다.")
     for err in load_errors:
         st.write(f"- {err}")
+
+if debug_logs:
+    with st.expander("진단 로그 보기", expanded=bool(load_errors)):
+        st.code("\n".join(debug_logs[-300:]))
 
 if data.empty:
     st.warning("조회된 데이터가 없습니다. API 파라미터를 확인하세요.")
