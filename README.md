@@ -16,7 +16,7 @@
 
 ## 설치
 ```powershell
-cd kosis_employment_monitor
+cd monitor_monthly_data
 python -m venv .venv
 . .venv/Scripts/Activate.ps1
 pip install -r requirements.txt
@@ -24,7 +24,7 @@ pip install -r requirements.txt
 
 ## API Key 설정
 ```powershell
-$env:KOSIS_API_KEY="YOUR_NEW_KEY"
+$env:api_key="YOUR_NEW_KEY"
 ```
 
 주의:
@@ -45,4 +45,3 @@ python scripts/collect_api.py --end-prd-de 202603 --outdir data
 - `data/raw_*.json`
 - `data/normalized_*.csv`
 - `data/normalized_all_with_yoy.csv`
-

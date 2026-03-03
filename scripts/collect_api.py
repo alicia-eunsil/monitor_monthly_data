@@ -18,7 +18,11 @@ from src.transform import add_yoy, normalize_records
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="KOSIS API 수집 스크립트")
-    parser.add_argument("--api-key", default=os.getenv("KOSIS_API_KEY", ""), help="KOSIS API Key")
+    parser.add_argument(
+        "--api-key",
+        default=os.getenv("api_key", ""),
+        help="KOSIS API Key",
+    )
     parser.add_argument("--end-prd-de", default=default_end_period(), help="종료월 YYYYMM")
     parser.add_argument("--outdir", default="data", help="저장 폴더")
     return parser.parse_args()
@@ -27,7 +31,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     if not args.api_key:
-        raise SystemExit("API Key가 없습니다. --api-key 또는 KOSIS_API_KEY를 설정하세요.")
+        raise SystemExit("API Key가 없습니다. --api-key 또는 api_key 환경변수를 설정하세요.")
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)

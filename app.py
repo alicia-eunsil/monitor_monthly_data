@@ -54,10 +54,10 @@ st.markdown(
 
 def _seeded_api_key() -> str:
     try:
-        secret_value = st.secrets.get("KOSIS_API_KEY", "")
+        secret_value = st.secrets.get("api_key", "")
     except Exception:  # noqa: BLE001
         secret_value = ""
-    return str(secret_value or os.getenv("KOSIS_API_KEY", ""))
+    return str(secret_value or os.getenv("api_key", ""))
 
 
 def _fmt_period(value: object) -> str:
@@ -283,14 +283,13 @@ st.caption("최신값이 전체기간/최근5년 최고·최저를 갱신하면 
 
 with st.sidebar:
     st.header("설정")
-    seeded_key = _seeded_api_key()
-    api_key = st.text_input("KOSIS API Key", value=seeded_key, type="password")
+    api_key = _seeded_api_key()
     end_period = st.text_input("종료월(YYYYMM)", value=default_end_period())
     if st.button("데이터 다시 불러오기"):
         load_data.clear()
 
 if not api_key:
-    st.warning("사이드바에 KOSIS API Key를 입력하세요.")
+    st.warning("`api_key` 환경변수(또는 Streamlit secrets `api_key`)를 설정하세요.")
     st.stop()
 
 data, load_errors = load_data(api_key=api_key, end_period=end_period)
