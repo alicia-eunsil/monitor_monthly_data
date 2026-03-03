@@ -93,8 +93,9 @@ def _card(title: str, value: str, sub: str, is_new: bool = False) -> None:
 
 
 @st.cache_data(ttl=60 * 30, show_spinner=False)
-def load_data(api_key: str, end_period: str) -> tuple[pd.DataFrame, List[str]]:
+def load_data(api_key: str) -> tuple[pd.DataFrame, List[str]]:
     client = KosisClient(api_key=api_key)
+    end_period = default_end_period()
     frames: List[pd.DataFrame] = []
     errors: List[str] = []
     for cfg in DATASETS:
@@ -284,15 +285,14 @@ st.caption("최신값이 전체기간/최근5년 최고·최저를 갱신하면 
 with st.sidebar:
     st.header("설정")
     api_key = _seeded_api_key()
-    end_period = st.text_input("종료월(YYYYMM)", value=default_end_period())
     if st.button("데이터 다시 불러오기"):
         load_data.clear()
 
 if not api_key:
-    st.warning("`api_key` 환경변수(또는 Streamlit secrets `api_key`)를 설정하세요.")
+    st.warning("API 키가 설정되지 않았습니다.")
     st.stop()
 
-data, load_errors = load_data(api_key=api_key, end_period=end_period)
+data, load_errors = load_data(api_key=api_key)
 
 if load_errors:
     st.error("일부 데이터셋 조회 중 오류가 발생했습니다.")
