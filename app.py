@@ -1,0 +1,324 @@
+from __future__ import annotations
+
+import os
+from typing import Dict, List
+
+import pandas as pd
+import streamlit as st
+
+from src.config import DATASETS, TARGET_REGIONS, default_end_period
+from src.kosis_client import KosisClient
+from src.transform import add_yoy, build_stats, normalize_records, series_filter
+
+st.set_page_config(
+    page_title="KOSIS 월별 고용 모니터링",
+    page_icon=":bar_chart:",
+    layout="wide",
+)
+
+st.markdown(
+    """
+<style>
+.metric-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: #ffffff;
+}
+.metric-title {
+  font-size: 0.88rem;
+  color: #4b5563;
+}
+.metric-value {
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin-top: 4px;
+}
+.metric-sub {
+  margin-top: 3px;
+  color: #6b7280;
+  font-size: 0.82rem;
+}
+.new-badge {
+  display: inline-block;
+  margin-left: 6px;
+  color: #b91c1c;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+
+def _seeded_api_key() -> str:
+    try:
+        secret_value = st.secrets.get("KOSIS_API_KEY", "")
+    except Exception:  # noqa: BLE001
+        secret_value = ""
+    return str(secret_value or os.getenv("KOSIS_API_KEY", ""))
+
+
+def _fmt_period(value: object) -> str:
+    ts = pd.Timestamp(value)
+    if pd.isna(ts):
+        return "-"
+    return ts.strftime("%Y-%m")
+
+
+def _fmt_num(value: object, unit: str = "", digits: int = 1) -> str:
+    if value is None or pd.isna(value):
+        return "-"
+    if unit and "%" in unit:
+        digits = 2
+    return f"{float(value):,.{digits}f}{unit}"
+
+
+def _new(flag: bool) -> str:
+    return "<span class='new-badge'>NEW</span>" if flag else ""
+
+
+def _card(title: str, value: str, sub: str, is_new: bool = False) -> None:
+    st.markdown(
+        f"""
+<div class="metric-card">
+  <div class="metric-title">{title}{_new(is_new)}</div>
+  <div class="metric-value">{value}</div>
+  <div class="metric-sub">{sub}</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+@st.cache_data(ttl=60 * 30, show_spinner=False)
+def load_data(api_key: str, end_period: str) -> tuple[pd.DataFrame, List[str]]:
+    client = KosisClient(api_key=api_key)
+    frames: List[pd.DataFrame] = []
+    errors: List[str] = []
+    for cfg in DATASETS:
+        try:
+            records = client.fetch(cfg, end_prd_de=end_period)
+            frames.append(normalize_records(cfg, records))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{cfg.title}: {exc}")
+    if not frames:
+        return pd.DataFrame(), errors
+    combined = pd.concat(frames, ignore_index=True)
+    combined = add_yoy(combined)
+    return combined, errors
+
+
+def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str) -> pd.DataFrame:
+    labels = {
+        "level": "원자료",
+        "yoy_abs": "전년동월대비 증감(절대)",
+        "yoy_pct": "전년동월대비 증감률",
+    }
+    label = labels[prefix]
+    rows = [
+        {
+            "구간": "전체기간",
+            "지표": label,
+            "최고": _fmt_num(stats.get(f"{prefix}_max_all_value"), unit if prefix == "level" else ""),
+            "최고 시점": _fmt_period(stats.get(f"{prefix}_max_all_period")),
+            "최저": _fmt_num(stats.get(f"{prefix}_min_all_value"), unit if prefix == "level" else ""),
+            "최저 시점": _fmt_period(stats.get(f"{prefix}_min_all_period")),
+            "최신값 NEW": "YES"
+            if stats.get(f"{prefix}_is_new_max_all") or stats.get(f"{prefix}_is_new_min_all")
+            else "",
+        },
+        {
+            "구간": "최근 5년",
+            "지표": label,
+            "최고": _fmt_num(stats.get(f"{prefix}_max_5y_value"), unit if prefix == "level" else ""),
+            "최고 시점": _fmt_period(stats.get(f"{prefix}_max_5y_period")),
+            "최저": _fmt_num(stats.get(f"{prefix}_min_5y_value"), unit if prefix == "level" else ""),
+            "최저 시점": _fmt_period(stats.get(f"{prefix}_min_5y_period")),
+            "최신값 NEW": "YES"
+            if stats.get(f"{prefix}_is_new_max_5y") or stats.get(f"{prefix}_is_new_min_5y")
+            else "",
+        },
+    ]
+    return pd.DataFrame(rows)
+
+
+def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
+    cfg = next(x for x in DATASETS if x.key == dataset_key)
+    subset = df[df["dataset_key"] == dataset_key].copy()
+    st.subheader(cfg.title)
+    if subset.empty:
+        st.warning("해당 데이터가 없습니다.")
+        return
+
+    region_options = [r for r in TARGET_REGIONS if r in subset["region_name"].unique()]
+    if not region_options:
+        region_options = sorted(subset["region_name"].dropna().unique().tolist())
+
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col1:
+        region = st.selectbox("지역", region_options, key=f"region_{dataset_key}")
+
+    indicators = sorted(subset["indicator_name"].dropna().unique().tolist())
+    with col2:
+        indicator = st.selectbox("지표", indicators, key=f"indicator_{dataset_key}")
+
+    category = ""
+    if cfg.has_category:
+        categories = sorted(
+            c for c in subset["category_name"].dropna().unique().tolist() if str(c).strip() != ""
+        )
+        with col3:
+            category = st.selectbox(cfg.category_label, categories, key=f"category_{dataset_key}")
+
+    series_df = series_filter(
+        df=subset,
+        dataset_key=dataset_key,
+        region_name=region,
+        indicator_name=indicator,
+        category_name=category,
+    )
+    if series_df.empty:
+        st.info("선택한 조건의 시계열 데이터가 없습니다.")
+        return
+
+    stats = build_stats(series_df)
+    latest_period = _fmt_period(stats.get("latest_period"))
+    unit = str(series_df["unit"].dropna().iloc[-1]) if not series_df["unit"].dropna().empty else ""
+
+    st.caption(f"최신 기준월: {latest_period}")
+    cols = st.columns(4)
+    with cols[0]:
+        _card(
+            "최신 원자료",
+            _fmt_num(stats.get("level_latest_value"), unit),
+            latest_period,
+            False,
+        )
+    with cols[1]:
+        _card(
+            "원자료 전체기간 최고",
+            _fmt_num(stats.get("level_max_all_value"), unit),
+            _fmt_period(stats.get("level_max_all_period")),
+            bool(stats.get("level_is_new_max_all")),
+        )
+    with cols[2]:
+        _card(
+            "원자료 전체기간 최저",
+            _fmt_num(stats.get("level_min_all_value"), unit),
+            _fmt_period(stats.get("level_min_all_period")),
+            bool(stats.get("level_is_new_min_all")),
+        )
+    with cols[3]:
+        _card(
+            "최근 5년 범위 NEW",
+            "YES"
+            if stats.get("level_is_new_max_5y") or stats.get("level_is_new_min_5y")
+            else "NO",
+            "원자료 기준",
+            bool(stats.get("level_is_new_max_5y") or stats.get("level_is_new_min_5y")),
+        )
+
+    st.markdown("#### 월별 추이")
+    level_chart = series_df.set_index("period")["value"]
+    st.line_chart(level_chart)
+
+    yoy_col1, yoy_col2 = st.columns(2)
+    with yoy_col1:
+        st.markdown("#### 전년동월대비 증감(절대)")
+        st.line_chart(series_df.set_index("period")["yoy_abs"])
+    with yoy_col2:
+        st.markdown("#### 전년동월대비 증감률(%)")
+        st.line_chart(series_df.set_index("period")["yoy_pct"])
+
+    st.markdown("#### 리포트 요약")
+    st.dataframe(_extreme_rows(stats, "level", unit), use_container_width=True, hide_index=True)
+    st.dataframe(_extreme_rows(stats, "yoy_abs", ""), use_container_width=True, hide_index=True)
+    st.dataframe(_extreme_rows(stats, "yoy_pct", "%"), use_container_width=True, hide_index=True)
+
+    st.markdown("#### 최근 12개월 데이터")
+    latest_12 = series_df.tail(12).copy()
+    latest_12["period"] = latest_12["period"].dt.strftime("%Y-%m")
+    latest_12 = latest_12[
+        ["period", "value", "yoy_abs", "yoy_pct", "unit", "region_name", "indicator_name", "category_name"]
+    ]
+    latest_12.columns = ["월", "원자료", "전년동월대비 증감", "전년동월대비 증감률(%)", "단위", "지역", "지표", "분류"]
+    st.dataframe(latest_12, use_container_width=True, hide_index=True)
+
+
+def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
+    rows: List[Dict[str, str]] = []
+    key_cols = ["dataset_key", "dataset_title", "region_name", "indicator_name", "category_name"]
+    for _, series in df.groupby(key_cols, dropna=False):
+        series = series.sort_values("period")
+        stats = build_stats(series)
+        latest_month = _fmt_period(stats.get("latest_period"))
+        base = {
+            "데이터셋": str(series["dataset_title"].iloc[0]),
+            "지역": str(series["region_name"].iloc[0]),
+            "지표": str(series["indicator_name"].iloc[0]),
+            "분류": str(series["category_name"].iloc[0]),
+            "기준월": latest_month,
+        }
+        if stats.get("level_is_new_max_all"):
+            rows.append({**base, "이벤트": "원자료 전체기간 최고 NEW"})
+        if stats.get("level_is_new_min_all"):
+            rows.append({**base, "이벤트": "원자료 전체기간 최저 NEW"})
+        if stats.get("yoy_abs_is_new_max_all"):
+            rows.append({**base, "이벤트": "YoY(절대) 전체기간 최고 NEW"})
+        if stats.get("yoy_abs_is_new_min_all"):
+            rows.append({**base, "이벤트": "YoY(절대) 전체기간 최저 NEW"})
+        if stats.get("yoy_pct_is_new_max_all"):
+            rows.append({**base, "이벤트": "YoY(증감률) 전체기간 최고 NEW"})
+        if stats.get("yoy_pct_is_new_min_all"):
+            rows.append({**base, "이벤트": "YoY(증감률) 전체기간 최저 NEW"})
+    if not rows:
+        return pd.DataFrame(columns=["데이터셋", "지역", "지표", "분류", "기준월", "이벤트"])
+    return pd.DataFrame(rows)
+
+
+st.title("KOSIS 월별 일자리 모니터링 (MVP)")
+st.caption("최신값이 전체기간/최근5년 최고·최저를 갱신하면 붉은색 NEW 표시")
+
+with st.sidebar:
+    st.header("설정")
+    seeded_key = _seeded_api_key()
+    api_key = st.text_input("KOSIS API Key", value=seeded_key, type="password")
+    end_period = st.text_input("종료월(YYYYMM)", value=default_end_period())
+    if st.button("데이터 다시 불러오기"):
+        load_data.clear()
+
+if not api_key:
+    st.warning("사이드바에 KOSIS API Key를 입력하세요.")
+    st.stop()
+
+data, load_errors = load_data(api_key=api_key, end_period=end_period)
+
+if load_errors:
+    st.error("일부 데이터셋 조회 중 오류가 발생했습니다.")
+    for err in load_errors:
+        st.write(f"- {err}")
+
+if data.empty:
+    st.warning("조회된 데이터가 없습니다. API 파라미터를 확인하세요.")
+    st.stop()
+
+tab1, tab2, tab3, tab4 = st.tabs(["경제활동인구현황", "산업별 취업자수", "직종별 취업자수", "NEW 알림판"])
+with tab1:
+    _render_dataset(data, "activity")
+with tab2:
+    _render_dataset(data, "industry")
+with tab3:
+    _render_dataset(data, "occupation")
+with tab4:
+    st.subheader("최신값 갱신 NEW 이벤트")
+    events = _collect_new_events(data)
+    if events.empty:
+        st.info("현재 기준월에서 새롭게 갱신된 최고/최저 이벤트가 없습니다.")
+    else:
+        st.dataframe(events, use_container_width=True, hide_index=True)
+        st.markdown(
+            "<p style='color:#b91c1c;font-weight:700'>NEW 이벤트는 최신 기준월에 극값(최고/최저)을 갱신한 경우만 표시합니다.</p>",
+            unsafe_allow_html=True,
+        )

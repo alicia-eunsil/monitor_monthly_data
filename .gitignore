@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual env
+.venv/
+venv/
+
+# Local secrets
+.env
+.streamlit/secrets.toml
+
+# Local data/cache
+data/
+.pytest_cache/
+.mypy_cache/

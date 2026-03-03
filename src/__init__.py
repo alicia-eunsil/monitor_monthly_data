@@ -1,0 +1,2 @@
+"""KOSIS employment monitor package."""
+
