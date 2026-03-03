@@ -72,12 +72,29 @@ class KosisClient:
 
     def fetch(self, config: DatasetConfig, end_prd_de: str) -> List[Dict[str, Any]]:
         params = config.to_params(api_key=self.api_key, end_prd_de=end_prd_de)
-        return self._fetch_with_fallbacks(config, params)
+        rows = self._fetch_with_fallbacks(config, params)
+        if self._is_dt_only_rows(rows):
+            self._log("dt-only payload detected; trying alternate outputFields")
+            for output_fields in [
+                "TBL_ID+TBL_NM+OBJ_ID+OBJ_NM+ITM_ID+ITM_NM+UNIT_NM+PRD_SE+PRD_DE+",
+                "TBL_ID+TBL_NM+ITM_ID+ITM_NM+PRD_SE+PRD_DE+DT+OBJ_ID+OBJ_NM+",
+                "",
+            ]:
+                alt_params = dict(params)
+                if output_fields:
+                    alt_params["outputFields"] = output_fields
+                else:
+                    alt_params.pop("outputFields", None)
+                alt_rows = self._fetch_with_fallbacks(config, alt_params)
+                if not self._is_dt_only_rows(alt_rows):
+                    self._log("dt-only resolved with alternate outputFields")
+                    return alt_rows
+            self._log("dt-only still unresolved after alternate outputFields")
+        return rows
 
     def fetch_with_debug(self, config: DatasetConfig, end_prd_de: str) -> tuple[List[Dict[str, Any]], List[str]]:
         self._debug_logs = []
-        params = config.to_params(api_key=self.api_key, end_prd_de=end_prd_de)
-        rows = self._fetch_with_fallbacks(config, params)
+        rows = self.fetch(config, end_prd_de=end_prd_de)
         return rows, list(self._debug_logs)
 
     def _fetch_with_fallbacks(self, config: DatasetConfig, params: Dict[str, str]) -> List[Dict[str, Any]]:
@@ -252,5 +269,16 @@ class KosisClient:
         items = [x for x in str(params.get("itmId", "")).split("+") if x]
         return (
             f"prd={params.get('startPrdDe','')}-{params.get('endPrdDe','')}, "
-            f"itm={len(items)}, objL1={params.get('objL1','')}, objL2={params.get('objL2','')}"
+            f"itm={len(items)}, objL1={params.get('objL1','')}, objL2={params.get('objL2','')}, "
+            f"outputFields={'Y' if 'outputFields' in params else 'N'}"
         )
+
+    @staticmethod
+    def _is_dt_only_rows(rows: List[Dict[str, Any]]) -> bool:
+        if not rows:
+            return False
+        sample = rows[0]
+        if not isinstance(sample, dict):
+            return False
+        keys = set(sample.keys())
+        return keys == {"DT"}

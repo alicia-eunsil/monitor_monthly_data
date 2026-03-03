@@ -93,7 +93,12 @@ def _card(title: str, value: str, sub: str, is_new: bool = False) -> None:
 
 
 @st.cache_data(ttl=60 * 30, show_spinner=False)
-def fetch_records_cached(api_key: str, dataset_key: str, end_period: str) -> Dict[str, Any]:
+def fetch_records_cached(
+    api_key: str,
+    dataset_key: str,
+    end_period: str,
+    config_signature: str,
+) -> Dict[str, Any]:
     cfg = next((x for x in DATASETS if x.key == dataset_key), None)
     if cfg is None:
         raise RuntimeError(f"Unknown dataset key: {dataset_key}")
@@ -116,7 +121,15 @@ def load_data_with_progress(api_key: str) -> tuple[pd.DataFrame, List[str], List
     for cfg in DATASETS:
         status.info(f"데이터 불러오는 중: {cfg.title}")
         try:
-            result = fetch_records_cached(api_key=api_key, dataset_key=cfg.key, end_period=end_period)
+            config_signature = "|".join(
+                [cfg.tbl_id, cfg.itm_id, cfg.obj_l1, cfg.obj_l2, cfg.output_fields, cfg.start_prd_de]
+            )
+            result = fetch_records_cached(
+                api_key=api_key,
+                dataset_key=cfg.key,
+                end_period=end_period,
+                config_signature=config_signature,
+            )
             records = result.get("records", [])
             for line in result.get("debug_logs", []):
                 debug_logs.append(f"[{cfg.key}] {line}")
