@@ -66,6 +66,7 @@ DATASETS = [
         tbl_id="DT_1DA7004S",
         itm_id="T10+T20+T30+T40+T50+T60+T80+T90+T100+",
         start_prd_de="199906",
+        output_fields="TBL_ID+TBL_NM+ITM_ID+ITM_NM+PRD_SE+PRD_DE+DT+UNIT_NM_ENG+C1+C1_OBJ_NM+",
         has_category=False,
     ),
     DatasetConfig(
