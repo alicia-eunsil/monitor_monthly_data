@@ -66,7 +66,6 @@ DATASETS = [
         tbl_id="DT_1DA7004S",
         itm_id="T10+T20+T30+T40+T50+T60+T80+T90+T100+",
         start_prd_de="199906",
-        output_fields="TBL_ID+TBL_NM+OBJ_ID+OBJ_NM+ITM_ID+ITM_NM+UNIT_NM+PRD_SE+PRD_DE+",
         has_category=False,
     ),
     DatasetConfig(
@@ -116,4 +115,3 @@ TARGET_REGIONS = [
     "경상남도",
     "제주특별자치도",
 ]
-
