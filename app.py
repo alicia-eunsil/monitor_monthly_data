@@ -310,8 +310,7 @@ def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-st.title("KOSIS 월별 일자리 모니터링 (MVP)")
-st.caption("최신값이 전체기간/최근5년 최고·최저를 갱신하면 붉은색 NEW 표시")
+st.title("경제활동인구 월별 모니터링")
 
 if st.button("데이터 새로고침"):
     fetch_records_cached.clear()
