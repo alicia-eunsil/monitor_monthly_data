@@ -93,21 +93,52 @@ def _card(title: str, value: str, sub: str, is_new: bool = False) -> None:
 
 
 @st.cache_data(ttl=60 * 30, show_spinner=False)
-def load_data(api_key: str) -> tuple[pd.DataFrame, List[str]]:
+def fetch_records_cached(api_key: str, dataset_key: str, end_period: str) -> List[Dict]:
+    cfg = next((x for x in DATASETS if x.key == dataset_key), None)
+    if cfg is None:
+        raise RuntimeError(f"Unknown dataset key: {dataset_key}")
     client = KosisClient(api_key=api_key)
+    return client.fetch(cfg, end_prd_de=end_period)
+
+
+def load_data_with_progress(api_key: str) -> tuple[pd.DataFrame, List[str]]:
     end_period = default_end_period()
+    total_steps = len(DATASETS) * 2 + 1
+    step = 0
     frames: List[pd.DataFrame] = []
     errors: List[str] = []
+
+    progress = st.progress(0)
+    status = st.empty()
+
     for cfg in DATASETS:
+        status.info(f"데이터 불러오는 중: {cfg.title}")
         try:
-            records = client.fetch(cfg, end_prd_de=end_period)
-            frames.append(normalize_records(cfg, records))
+            records = fetch_records_cached(api_key=api_key, dataset_key=cfg.key, end_period=end_period)
         except Exception as exc:  # noqa: BLE001
+            records = []
             errors.append(f"{cfg.title}: {exc}")
+        step += 1
+        progress.progress(min(100, int(step * 100 / total_steps)))
+
+        status.info(f"파싱 중: {cfg.title}")
+        parsed = normalize_records(cfg, records)
+        if not parsed.empty:
+            frames.append(parsed)
+        step += 1
+        progress.progress(min(100, int(step * 100 / total_steps)))
+
+    status.info("지표 계산 및 통합 중...")
     if not frames:
+        progress.progress(100)
+        status.error("데이터 로딩 실패")
         return pd.DataFrame(), errors
+
     combined = pd.concat(frames, ignore_index=True)
     combined = add_yoy(combined)
+    step += 1
+    progress.progress(100)
+    status.success("로딩 완료")
     return combined, errors
 
 
@@ -282,13 +313,27 @@ def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
 st.title("KOSIS 월별 일자리 모니터링 (MVP)")
 st.caption("최신값이 전체기간/최근5년 최고·최저를 갱신하면 붉은색 NEW 표시")
 
+if st.button("데이터 새로고침"):
+    fetch_records_cached.clear()
+    st.session_state.pop("_loaded_api_key", None)
+    st.session_state.pop("_loaded_data", None)
+    st.session_state.pop("_loaded_errors", None)
+    st.rerun()
+
 api_key = _seeded_api_key()
 
 if not api_key:
     st.warning("API key is not set.")
     st.stop()
 
-data, load_errors = load_data(api_key=api_key)
+if st.session_state.get("_loaded_api_key") == api_key and "_loaded_data" in st.session_state:
+    data = st.session_state["_loaded_data"]
+    load_errors = st.session_state.get("_loaded_errors", [])
+else:
+    data, load_errors = load_data_with_progress(api_key=api_key)
+    st.session_state["_loaded_api_key"] = api_key
+    st.session_state["_loaded_data"] = data
+    st.session_state["_loaded_errors"] = load_errors
 
 if load_errors:
     st.error("일부 데이터셋 조회 중 오류가 발생했습니다.")
