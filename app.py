@@ -120,6 +120,14 @@ def load_data_with_progress(api_key: str) -> tuple[pd.DataFrame, List[str], List
             records = result.get("records", [])
             for line in result.get("debug_logs", []):
                 debug_logs.append(f"[{cfg.key}] {line}")
+            if records:
+                sample = records[0]
+                debug_logs.append(
+                    f"[{cfg.key}] sample_keys={list(sample.keys())[:12]}"
+                )
+                debug_logs.append(
+                    f"[{cfg.key}] sample_PRD_DE={sample.get('PRD_DE')} sample_DT={sample.get('DT')}"
+                )
         except Exception as exc:  # noqa: BLE001
             records = []
             errors.append(f"{cfg.title}: {exc}")

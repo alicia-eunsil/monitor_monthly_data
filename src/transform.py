@@ -41,10 +41,29 @@ def _pick_first(columns: Iterable[str], candidates: Iterable[str]) -> Optional[s
 
 def _to_timestamp(value: str) -> pd.Timestamp:
     text = str(value).strip()
+    if not text or text in {"None", "nan", "NaN", "null"}:
+        return pd.NaT
+
+    # Common monthly formats from KOSIS: YYYYMM, YYYY.MM, YYYY-MM, YYYYMmm
     if len(text) == 6 and text.isdigit():
         return pd.to_datetime(text + "01", format="%Y%m%d", errors="coerce")
     if len(text) == 4 and text.isdigit():
         return pd.to_datetime(text + "0101", format="%Y%m%d", errors="coerce")
+
+    m = re.search(r"^(\d{4})\D*([01]?\d)$", text)
+    if m:
+        year = int(m.group(1))
+        month = int(m.group(2))
+        if 1 <= month <= 12:
+            return pd.to_datetime(f"{year:04d}{month:02d}01", format="%Y%m%d", errors="coerce")
+
+    digits = re.sub(r"\D", "", text)
+    if len(digits) >= 6:
+        year = int(digits[:4])
+        month = int(digits[4:6])
+        if 1 <= month <= 12:
+            return pd.to_datetime(f"{year:04d}{month:02d}01", format="%Y%m%d", errors="coerce")
+
     return pd.NaT
 
 
@@ -73,8 +92,14 @@ def canonical_region(raw_name: object) -> str:
 
 
 def _dimension_columns(df: pd.DataFrame) -> Tuple[list[str], list[str]]:
-    name_cols = sorted([c for c in df.columns if re.fullmatch(r"C\d+_OBJ_NM", c)])
-    code_cols = sorted([c for c in df.columns if re.fullmatch(r"C\d+_OBJ_CD", c)])
+    name_cols = sorted(
+        [c for c in df.columns if re.fullmatch(r"C\d+_(OBJ_NM|NM)", c)],
+        key=lambda x: int(re.search(r"C(\d+)_", x).group(1)),
+    )
+    code_cols = sorted(
+        [c for c in df.columns if re.fullmatch(r"C\d+_(OBJ_CD|CD)", c)],
+        key=lambda x: int(re.search(r"C(\d+)_", x).group(1)),
+    )
     if not name_cols and "OBJ_NM" in df.columns:
         name_cols = ["OBJ_NM"]
     if not code_cols and "OBJ_ID" in df.columns:
@@ -83,7 +108,7 @@ def _dimension_columns(df: pd.DataFrame) -> Tuple[list[str], list[str]]:
 
 
 def _dim_no(name_col: str) -> Optional[str]:
-    match = re.fullmatch(r"C(\d+)_OBJ_NM", name_col)
+    match = re.fullmatch(r"C(\d+)_.*", name_col)
     return match.group(1) if match else None
 
 
@@ -91,8 +116,13 @@ def _matching_code_col(name_col: str, code_cols: list[str]) -> Optional[str]:
     no = _dim_no(name_col)
     if no is None:
         return "OBJ_ID" if "OBJ_ID" in code_cols else None
-    wanted = f"C{no}_OBJ_CD"
-    return wanted if wanted in code_cols else None
+    wanted_1 = f"C{no}_OBJ_CD"
+    wanted_2 = f"C{no}_CD"
+    if wanted_1 in code_cols:
+        return wanted_1
+    if wanted_2 in code_cols:
+        return wanted_2
+    return None
 
 
 def _select_region_column(df: pd.DataFrame, name_cols: list[str]) -> Optional[str]:
