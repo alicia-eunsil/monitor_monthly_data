@@ -427,16 +427,6 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
     )
     _render_extreme_table(summary_df)
 
-    st.markdown("#### 최근 12개월 데이터")
-    latest_12 = series_df.tail(12).copy()
-    latest_12["period"] = latest_12["period"].dt.strftime("%Y-%m")
-    latest_12 = latest_12[
-        ["period", "value", "yoy_abs", "yoy_pct", "unit", "region_name", "indicator_name", "category_name"]
-    ]
-    latest_12.columns = ["월", "원자료", "전년동월대비 증감", "전년동월대비 증감률(%)", "단위", "지역", "지표", "분류"]
-    st.dataframe(latest_12, use_container_width=True, hide_index=True)
-
-
 def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
     rows: List[Dict[str, str]] = []
     key_cols = ["dataset_key", "dataset_title", "region_name", "indicator_name", "category_name"]
