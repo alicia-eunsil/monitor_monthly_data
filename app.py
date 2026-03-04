@@ -103,8 +103,11 @@ def _card(title: str, value: str, sub: str, is_new: bool = False, value_class: s
 def _style_extreme_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     styler = df.style.set_properties(**{"text-align": "center"}).set_table_styles(
         [
-            {"selector": "th", "props": [("text-align", "center")]},
-        ]
+            {"selector": "table", "props": [("width", "100%")]},
+            {"selector": "th", "props": [("text-align", "center !important")]},
+            {"selector": "td", "props": [("text-align", "center !important")]},
+        ],
+        overwrite=False,
     )
     if "최고" in df.columns:
         styler = styler.applymap(lambda _: "color:#b91c1c;font-weight:700;", subset=["최고"])
@@ -116,6 +119,13 @@ def _style_extreme_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
             subset=["비고"],
         )
     return styler
+
+
+def _render_extreme_table(df: pd.DataFrame) -> None:
+    st.markdown(
+        _style_extreme_table(df).hide(axis="index").to_html(),
+        unsafe_allow_html=True,
+    )
 
 
 def _auto_y_domain(values: pd.Series, pad_ratio: float = 0.08) -> List[float] | None:
@@ -398,21 +408,9 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         st.altair_chart(combo, use_container_width=True)
 
     st.markdown("#### 리포트 요약")
-    st.dataframe(
-        _style_extreme_table(_extreme_rows(stats, "level", unit)),
-        use_container_width=True,
-        hide_index=True,
-    )
-    st.dataframe(
-        _style_extreme_table(_extreme_rows(stats, "yoy_abs", "")),
-        use_container_width=True,
-        hide_index=True,
-    )
-    st.dataframe(
-        _style_extreme_table(_extreme_rows(stats, "yoy_pct", "%")),
-        use_container_width=True,
-        hide_index=True,
-    )
+    _render_extreme_table(_extreme_rows(stats, "level", unit))
+    _render_extreme_table(_extreme_rows(stats, "yoy_abs", ""))
+    _render_extreme_table(_extreme_rows(stats, "yoy_pct", "%"))
 
     st.markdown("#### 최근 12개월 데이터")
     latest_12 = series_df.tail(12).copy()
