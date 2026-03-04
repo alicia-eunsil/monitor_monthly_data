@@ -224,7 +224,10 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
 
     indicators = sorted(subset["indicator_name"].dropna().unique().tolist())
     with col2:
-        indicator = st.selectbox("지표", indicators, key=f"indicator_{dataset_key}")
+        if dataset_key == "activity":
+            indicator = st.radio("지표", indicators, key=f"indicator_{dataset_key}")
+        else:
+            indicator = st.selectbox("지표", indicators, key=f"indicator_{dataset_key}")
 
     category = ""
     if cfg.has_category:
