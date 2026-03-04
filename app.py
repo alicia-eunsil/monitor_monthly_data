@@ -232,13 +232,19 @@ def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str) -> pd.DataFr
         "yoy_pct": "전년동월대비 증감률",
     }
     label = labels[prefix]
+    if prefix == "level":
+        display_unit = unit
+    elif prefix == "yoy_abs":
+        display_unit = "%p" if "%" in unit else unit
+    else:
+        display_unit = ""
     rows = [
         {
             "지표": label,
             "구간": "전체기간",
-            "최고": _fmt_num(stats.get(f"{prefix}_max_all_value"), unit if prefix == "level" else ""),
+            "최고": _fmt_num(stats.get(f"{prefix}_max_all_value"), display_unit),
             "최고 시점": _fmt_period(stats.get(f"{prefix}_max_all_period")),
-            "최저": _fmt_num(stats.get(f"{prefix}_min_all_value"), unit if prefix == "level" else ""),
+            "최저": _fmt_num(stats.get(f"{prefix}_min_all_value"), display_unit),
             "최저 시점": _fmt_period(stats.get(f"{prefix}_min_all_period")),
             "비고": "NEW"
             if stats.get(f"{prefix}_is_new_max_all") or stats.get(f"{prefix}_is_new_min_all")
@@ -247,9 +253,9 @@ def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str) -> pd.DataFr
         {
             "지표": label,
             "구간": "최근 5년",
-            "최고": _fmt_num(stats.get(f"{prefix}_max_5y_value"), unit if prefix == "level" else ""),
+            "최고": _fmt_num(stats.get(f"{prefix}_max_5y_value"), display_unit),
             "최고 시점": _fmt_period(stats.get(f"{prefix}_max_5y_period")),
-            "최저": _fmt_num(stats.get(f"{prefix}_min_5y_value"), unit if prefix == "level" else ""),
+            "최저": _fmt_num(stats.get(f"{prefix}_min_5y_value"), display_unit),
             "최저 시점": _fmt_period(stats.get(f"{prefix}_min_5y_period")),
             "비고": "NEW"
             if stats.get(f"{prefix}_is_new_max_5y") or stats.get(f"{prefix}_is_new_min_5y")
@@ -411,9 +417,15 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         st.altair_chart(combo, use_container_width=True)
 
     st.markdown("#### 리포트 요약")
-    _render_extreme_table(_extreme_rows(stats, "level", unit))
-    _render_extreme_table(_extreme_rows(stats, "yoy_abs", ""))
-    _render_extreme_table(_extreme_rows(stats, "yoy_pct", "%"))
+    summary_df = pd.concat(
+        [
+            _extreme_rows(stats, "level", unit),
+            _extreme_rows(stats, "yoy_abs", ""),
+            _extreme_rows(stats, "yoy_pct", "%"),
+        ],
+        ignore_index=True,
+    )
+    _render_extreme_table(summary_df)
 
     st.markdown("#### 최근 12개월 데이터")
     latest_12 = series_df.tail(12).copy()
