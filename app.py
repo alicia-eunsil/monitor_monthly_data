@@ -122,8 +122,11 @@ def _style_extreme_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
 
 
 def _render_extreme_table(df: pd.DataFrame) -> None:
+    html = _style_extreme_table(df).hide(axis="index").to_html(
+        table_attributes='style="width:100%; table-layout:fixed; margin:0;"'
+    )
     st.markdown(
-        _style_extreme_table(df).hide(axis="index").to_html(),
+        f"<div style='width:100%; overflow-x:auto;'>{html}</div>",
         unsafe_allow_html=True,
     )
 
