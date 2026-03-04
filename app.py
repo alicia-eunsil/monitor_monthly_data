@@ -286,27 +286,27 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
     level_chart = series_df.set_index("period")["value"]
     st.line_chart(level_chart)
 
-    st.markdown("#### ?????? ??(??) / ???(?)")
+    st.markdown("#### 전년동월대비 증감(막대) / 증감률(선)")
     yoy_df = series_df[["period", "yoy_abs", "yoy_pct"]].dropna(
         subset=["yoy_abs", "yoy_pct"],
         how="all",
     )
     if yoy_df.empty:
-        st.info("YoY ???? ????.")
+        st.info("YoY 데이터가 없습니다.")
     else:
         base = alt.Chart(yoy_df).encode(
-            x=alt.X("period:T", title="?"),
+            x=alt.X("period:T", title="월"),
             tooltip=[
-                alt.Tooltip("yearmonth(period):T", title="?"),
-                alt.Tooltip("yoy_abs:Q", title="?????? ??", format=",.2f"),
-                alt.Tooltip("yoy_pct:Q", title="?????? ???(%)", format=".2f"),
+                alt.Tooltip("yearmonth(period):T", title="월"),
+                alt.Tooltip("yoy_abs:Q", title="전년동월대비 증감", format=",.2f"),
+                alt.Tooltip("yoy_pct:Q", title="전년동월대비 증감률(%)", format=".2f"),
             ],
         )
         bars = base.mark_bar(color="#4C78A8", opacity=0.55).encode(
-            y=alt.Y("yoy_abs:Q", title="?????? ??")
+            y=alt.Y("yoy_abs:Q", title="전년동월대비 증감")
         )
         line = base.mark_line(color="#E45756", point=True).encode(
-            y=alt.Y("yoy_pct:Q", title="?????? ???(%)")
+            y=alt.Y("yoy_pct:Q", title="전년동월대비 증감률(%)")
         )
         zero = alt.Chart(pd.DataFrame({"zero": [0]})).mark_rule(
             color="#9CA3AF",
