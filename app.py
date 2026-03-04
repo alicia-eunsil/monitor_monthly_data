@@ -237,7 +237,7 @@ def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str) -> pd.DataFr
     elif prefix == "yoy_abs":
         display_unit = "%p" if "%" in unit else unit
     else:
-        display_unit = ""
+        display_unit = "%"
     rows = [
         {
             "지표": label,
@@ -420,8 +420,8 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
     summary_df = pd.concat(
         [
             _extreme_rows(stats, "level", unit),
-            _extreme_rows(stats, "yoy_abs", ""),
-            _extreme_rows(stats, "yoy_pct", "%"),
+            _extreme_rows(stats, "yoy_abs", unit),
+            _extreme_rows(stats, "yoy_pct", unit),
         ],
         ignore_index=True,
     )
