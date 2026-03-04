@@ -101,11 +101,20 @@ def _card(title: str, value: str, sub: str, is_new: bool = False, value_class: s
 
 
 def _style_extreme_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
-    styler = df.style
+    styler = df.style.set_properties(**{"text-align": "center"}).set_table_styles(
+        [
+            {"selector": "th", "props": [("text-align", "center")]},
+        ]
+    )
     if "최고" in df.columns:
         styler = styler.applymap(lambda _: "color:#b91c1c;font-weight:700;", subset=["최고"])
     if "최저" in df.columns:
         styler = styler.applymap(lambda _: "color:#1d4ed8;font-weight:700;", subset=["최저"])
+    if "비고" in df.columns:
+        styler = styler.applymap(
+            lambda v: "color:#f59e0b;font-weight:700;" if str(v).strip() == "NEW" else "",
+            subset=["비고"],
+        )
     return styler
 
 
@@ -212,29 +221,30 @@ def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str) -> pd.DataFr
     label = labels[prefix]
     rows = [
         {
-            "구간": "전체기간",
             "지표": label,
+            "구간": "전체기간",
             "최고": _fmt_num(stats.get(f"{prefix}_max_all_value"), unit if prefix == "level" else ""),
             "최고 시점": _fmt_period(stats.get(f"{prefix}_max_all_period")),
             "최저": _fmt_num(stats.get(f"{prefix}_min_all_value"), unit if prefix == "level" else ""),
             "최저 시점": _fmt_period(stats.get(f"{prefix}_min_all_period")),
-            "최신값 NEW": "YES"
+            "비고": "NEW"
             if stats.get(f"{prefix}_is_new_max_all") or stats.get(f"{prefix}_is_new_min_all")
             else "",
         },
         {
-            "구간": "최근 5년",
             "지표": label,
+            "구간": "최근 5년",
             "최고": _fmt_num(stats.get(f"{prefix}_max_5y_value"), unit if prefix == "level" else ""),
             "최고 시점": _fmt_period(stats.get(f"{prefix}_max_5y_period")),
             "최저": _fmt_num(stats.get(f"{prefix}_min_5y_value"), unit if prefix == "level" else ""),
             "최저 시점": _fmt_period(stats.get(f"{prefix}_min_5y_period")),
-            "최신값 NEW": "YES"
+            "비고": "NEW"
             if stats.get(f"{prefix}_is_new_max_5y") or stats.get(f"{prefix}_is_new_min_5y")
             else "",
         },
     ]
-    return pd.DataFrame(rows)
+    cols = ["지표", "구간", "최고", "최고 시점", "최저", "최저 시점", "비고"]
+    return pd.DataFrame(rows)[cols]
 
 
 def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
