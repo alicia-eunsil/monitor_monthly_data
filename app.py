@@ -35,6 +35,12 @@ st.markdown(
   font-weight: 700;
   margin-top: 4px;
 }
+.value-max {
+  color: #b91c1c;
+}
+.value-min {
+  color: #1d4ed8;
+}
 .metric-sub {
   margin-top: 3px;
   color: #6b7280;
@@ -80,17 +86,27 @@ def _new(flag: bool) -> str:
     return "<span class='new-badge'>NEW</span>" if flag else ""
 
 
-def _card(title: str, value: str, sub: str, is_new: bool = False) -> None:
+def _card(title: str, value: str, sub: str, is_new: bool = False, value_class: str = "") -> None:
+    value_cls = f"metric-value {value_class}".strip()
     st.markdown(
         f"""
 <div class="metric-card">
   <div class="metric-title">{title}{_new(is_new)}</div>
-  <div class="metric-value">{value}</div>
+  <div class="{value_cls}">{value}</div>
   <div class="metric-sub">{sub}</div>
 </div>
 """,
         unsafe_allow_html=True,
     )
+
+
+def _style_extreme_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
+    styler = df.style
+    if "최고" in df.columns:
+        styler = styler.applymap(lambda _: "color:#b91c1c;font-weight:700;", subset=["최고"])
+    if "최저" in df.columns:
+        styler = styler.applymap(lambda _: "color:#1d4ed8;font-weight:700;", subset=["최저"])
+    return styler
 
 
 @st.cache_data(ttl=60 * 30, show_spinner=False)
@@ -225,7 +241,12 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
     indicators = sorted(subset["indicator_name"].dropna().unique().tolist())
     with col2:
         if dataset_key == "activity":
-            indicator = st.radio("지표", indicators, key=f"indicator_{dataset_key}")
+            indicator = st.radio(
+                "지표",
+                indicators,
+                key=f"indicator_{dataset_key}",
+                horizontal=True,
+            )
         else:
             indicator = st.selectbox("지표", indicators, key=f"indicator_{dataset_key}")
 
@@ -253,7 +274,7 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
     unit = str(series_df["unit"].dropna().iloc[-1]) if not series_df["unit"].dropna().empty else ""
 
     st.caption(f"최신 기준월: {latest_period}")
-    cols = st.columns(4)
+    cols = st.columns(5)
     with cols[0]:
         _card(
             "최신 원자료",
@@ -267,6 +288,7 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
             _fmt_num(stats.get("level_max_all_value"), unit),
             _fmt_period(stats.get("level_max_all_period")),
             bool(stats.get("level_is_new_max_all")),
+            "value-max",
         )
     with cols[2]:
         _card(
@@ -274,15 +296,23 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
             _fmt_num(stats.get("level_min_all_value"), unit),
             _fmt_period(stats.get("level_min_all_period")),
             bool(stats.get("level_is_new_min_all")),
+            "value-min",
         )
     with cols[3]:
         _card(
-            "최근 5년 범위 NEW",
-            "YES"
-            if stats.get("level_is_new_max_5y") or stats.get("level_is_new_min_5y")
-            else "NO",
-            "원자료 기준",
-            bool(stats.get("level_is_new_max_5y") or stats.get("level_is_new_min_5y")),
+            "최근 5년 중 최고",
+            _fmt_num(stats.get("level_max_5y_value"), unit),
+            _fmt_period(stats.get("level_max_5y_period")),
+            bool(stats.get("level_is_new_max_5y")),
+            "value-max",
+        )
+    with cols[4]:
+        _card(
+            "최근 5년 중 최저",
+            _fmt_num(stats.get("level_min_5y_value"), unit),
+            _fmt_period(stats.get("level_min_5y_period")),
+            bool(stats.get("level_is_new_min_5y")),
+            "value-min",
         )
 
     st.markdown("#### 월별 추이")
@@ -319,9 +349,21 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         st.altair_chart(combo, use_container_width=True)
 
     st.markdown("#### 리포트 요약")
-    st.dataframe(_extreme_rows(stats, "level", unit), use_container_width=True, hide_index=True)
-    st.dataframe(_extreme_rows(stats, "yoy_abs", ""), use_container_width=True, hide_index=True)
-    st.dataframe(_extreme_rows(stats, "yoy_pct", "%"), use_container_width=True, hide_index=True)
+    st.dataframe(
+        _style_extreme_table(_extreme_rows(stats, "level", unit)),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.dataframe(
+        _style_extreme_table(_extreme_rows(stats, "yoy_abs", "")),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.dataframe(
+        _style_extreme_table(_extreme_rows(stats, "yoy_pct", "%")),
+        use_container_width=True,
+        hide_index=True,
+    )
 
     st.markdown("#### 최근 12개월 데이터")
     latest_12 = series_df.tail(12).copy()
