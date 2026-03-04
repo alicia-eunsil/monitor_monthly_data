@@ -109,6 +109,21 @@ def _style_extreme_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     return styler
 
 
+def _auto_y_domain(values: pd.Series, pad_ratio: float = 0.08) -> List[float] | None:
+    valid = values.dropna()
+    if valid.empty:
+        return None
+    vmin = float(valid.min())
+    vmax = float(valid.max())
+    if vmin == vmax:
+        base = abs(vmin) if vmin != 0 else 1.0
+        pad = base * pad_ratio
+        return [vmin - pad, vmax + pad]
+    span = vmax - vmin
+    pad = span * pad_ratio
+    return [vmin - pad, vmax + pad]
+
+
 @st.cache_data(ttl=60 * 30, show_spinner=False)
 def fetch_records_cached(
     api_key: str,
@@ -233,10 +248,16 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
     region_options = [r for r in TARGET_REGIONS if r in subset["region_name"].unique()]
     if not region_options:
         region_options = sorted(subset["region_name"].dropna().unique().tolist())
+    default_region_index = region_options.index("경기도") if "경기도" in region_options else 0
 
     col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
-        region = st.selectbox("지역", region_options, key=f"region_{dataset_key}")
+        region = st.selectbox(
+            "지역",
+            region_options,
+            index=default_region_index,
+            key=f"region_{dataset_key}",
+        )
 
     indicators = sorted(subset["indicator_name"].dropna().unique().tolist())
     with col2:
@@ -316,8 +337,26 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         )
 
     st.markdown("#### 월별 추이")
-    level_chart = series_df.set_index("period")["value"]
-    st.line_chart(level_chart)
+    level_df = series_df[["period", "value"]].dropna(subset=["value"]).copy()
+    if level_df.empty:
+        st.info("월별 추이 데이터가 없습니다.")
+    else:
+        level_title = "원자료" if not unit else f"원자료 ({unit})"
+        level_domain = _auto_y_domain(level_df["value"])
+        level_chart = (
+            alt.Chart(level_df)
+            .mark_line(color="#4C78A8")
+            .encode(
+                x=alt.X("period:T", title="월"),
+                y=alt.Y("value:Q", title=level_title, scale=alt.Scale(domain=level_domain)),
+                tooltip=[
+                    alt.Tooltip("yearmonth(period):T", title="월"),
+                    alt.Tooltip("value:Q", title=level_title, format=",.2f"),
+                ],
+            )
+            .properties(height=320)
+        )
+        st.altair_chart(level_chart, use_container_width=True)
 
     st.markdown("#### 전년동월대비 증감(막대) / 증감률(선)")
     yoy_df = series_df[["period", "yoy_abs", "yoy_pct"]].dropna(
