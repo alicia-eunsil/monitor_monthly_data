@@ -316,25 +316,26 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         )
 
     indicators = sorted(subset["indicator_name"].dropna().unique().tolist())
+    indicator = indicators[0] if indicators else ""
+    category_container = col3
     if dataset_key == "activity":
         indicators = _order_activity_indicators(indicators)
-    with col2:
-        if dataset_key == "activity":
+        with col2:
             indicator = st.radio(
                 "지표",
                 indicators,
                 key=f"indicator_{dataset_key}",
                 horizontal=True,
             )
-        else:
-            indicator = st.selectbox("지표", indicators, key=f"indicator_{dataset_key}")
+    else:
+        category_container = col2
 
     category = ""
     if cfg.has_category:
         categories = sorted(
             c for c in subset["category_name"].dropna().unique().tolist() if str(c).strip() != ""
         )
-        with col3:
+        with category_container:
             category = st.selectbox(cfg.category_label, categories, key=f"category_{dataset_key}")
 
     series_df = series_filter(

@@ -138,6 +138,30 @@ def _select_region_column(df: pd.DataFrame, name_cols: list[str]) -> Optional[st
     return best_col
 
 
+def _select_category_column(
+    df: pd.DataFrame,
+    name_cols: list[str],
+    region_name_col: Optional[str],
+) -> Optional[str]:
+    candidates = [c for c in name_cols if c != region_name_col]
+    if not candidates:
+        return None
+
+    def _uniq_count(col: str) -> int:
+        series = df[col].astype(str).str.strip()
+        return int(series[series != ""].nunique(dropna=True))
+
+    # Prefer value columns like C2_NM over descriptor columns like C2_OBJ_NM.
+    value_cols = [c for c in candidates if re.fullmatch(r"C\d+_NM", c)]
+    value_cols = [c for c in value_cols if _uniq_count(c) > 1]
+    if value_cols:
+        return sorted(value_cols, key=lambda c: _uniq_count(c), reverse=True)[0]
+
+    non_obj_cols = [c for c in candidates if not c.endswith("_OBJ_NM")]
+    ranked = non_obj_cols or candidates
+    return sorted(ranked, key=lambda c: _uniq_count(c), reverse=True)[0]
+
+
 def normalize_records(config: DatasetConfig, records: list[Dict]) -> pd.DataFrame:
     if not records:
         return pd.DataFrame()
@@ -155,9 +179,8 @@ def normalize_records(config: DatasetConfig, records: list[Dict]) -> pd.DataFram
     category_name_col = None
     category_code_col = None
     if config.has_category:
-        category_candidates = [c for c in name_dims if c != region_name_col]
-        if category_candidates:
-            category_name_col = category_candidates[0]
+        category_name_col = _select_category_column(df, name_dims, region_name_col)
+        if category_name_col:
             category_code_col = _matching_code_col(category_name_col, code_dims)
 
     out = pd.DataFrame(
