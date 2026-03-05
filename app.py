@@ -87,6 +87,35 @@ OCCUPATION_CATEGORY_ORDER = [
     "기타",
 ]
 
+STATUS_CATEGORY_ORDER = [
+    "비임금근로자",
+    "*자영업자",
+    "-고용원이 있는 자영업자",
+    "-고용원이 없는 자영업자",
+    "-무급가족종사자",
+    "임금근로자",
+    "-상용근로자",
+    "-임시근로자",
+    "-일용근로자",
+    "계",
+]
+
+AGE_CATEGORY_ORDER = [
+    "15~24",
+    "15~29",
+    "15~64",
+    "15~19",
+    "20~29",
+    "30~39",
+    "40~49",
+    "50~59",
+    "60세이상",
+    "63세이상",
+    "65세이상",
+    "70세이상",
+    "계",
+]
+
 DATA_MODEL_VERSION = "2026-03-05-add-age-status-datasets-v3"
 
 
@@ -121,6 +150,42 @@ def _order_occupation_categories(categories: List[str]) -> List[str]:
     return sorted(
         categories,
         key=lambda x: (order_map.get(_norm_occupation_category(x), 999), x),
+    )
+
+
+def _norm_age_category(text: str) -> str:
+    s = str(text).strip()
+    s = re.sub(r"\s+", "", s)
+    s = s.replace("-", "~")
+    s = s.replace("~세", "~")
+    return s
+
+
+def _order_age_categories(categories: List[str]) -> List[str]:
+    order_map = {_norm_age_category(name): idx for idx, name in enumerate(AGE_CATEGORY_ORDER)}
+    return sorted(
+        categories,
+        key=lambda x: (order_map.get(_norm_age_category(x), 999), x),
+    )
+
+
+def _norm_status_category(text: str) -> str:
+    s = str(text).strip()
+    s = re.sub(r"^\*+\s*", "", s)
+    s = re.sub(r"^-\s*", "", s)
+    s = re.sub(r"\s+", "", s)
+    return s
+
+
+def _order_status_categories(categories: List[str]) -> List[str]:
+    exact_order_map = {str(name).strip(): idx for idx, name in enumerate(STATUS_CATEGORY_ORDER)}
+    norm_order_map = {_norm_status_category(name): idx for idx, name in enumerate(STATUS_CATEGORY_ORDER)}
+    return sorted(
+        categories,
+        key=lambda x: (
+            exact_order_map.get(str(x).strip(), norm_order_map.get(_norm_status_category(x), 999)),
+            x,
+        ),
     )
 
 
@@ -405,6 +470,10 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
             cleaned = [c for c in categories if str(c).strip() not in drop_labels]
             if cleaned:
                 categories = cleaned
+        if dataset_key == "age":
+            categories = _order_age_categories(categories)
+        if dataset_key == "status":
+            categories = _order_status_categories(categories)
         if dataset_key == "occupation":
             categories = _order_occupation_categories(categories)
         with category_container:
