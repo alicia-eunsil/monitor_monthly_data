@@ -13,7 +13,7 @@ from src.kosis_client import KosisClient
 from src.transform import add_yoy, build_stats, normalize_records, series_filter
 
 st.set_page_config(
-    page_title="🍦 Data Monitoring",
+    page_title="Data Monitoring",
     page_icon="🍦",
     layout="wide",
 )
