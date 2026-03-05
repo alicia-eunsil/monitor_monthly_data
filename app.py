@@ -109,10 +109,7 @@ AGE_CATEGORY_ORDER = [
     "30~39",
     "40~49",
     "50~59",
-    "60세이상",
-    "63세이상",
-    "65세이상",
-    "70세이상",
+    "60세 이상",
     "계",
 ]
 
@@ -157,7 +154,8 @@ def _norm_age_category(text: str) -> str:
     s = str(text).strip()
     s = re.sub(r"\s+", "", s)
     s = s.replace("-", "~")
-    s = s.replace("~세", "~")
+    s = s.replace("세이상", "이상")
+    s = s.replace("세", "")
     return s
 
 
