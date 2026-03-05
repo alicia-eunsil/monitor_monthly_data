@@ -83,6 +83,8 @@ def canonical_region(raw_name: object) -> str:
     text = str(raw_name or "").strip()
     if not text:
         return ""
+    if text == "계":
+        return "전국"
     compact = re.sub(r"\s+", "", text)
     for canonical, patterns in REGION_PATTERNS.items():
         for p in patterns:

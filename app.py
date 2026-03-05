@@ -13,8 +13,8 @@ from src.kosis_client import KosisClient
 from src.transform import add_yoy, build_stats, normalize_records, series_filter
 
 st.set_page_config(
-    page_title="KOSIS 월별 고용 모니터링",
-    page_icon=":bar_chart:",
+    page_title="🍦 Data Monotoring",
+    page_icon="🍦",
     layout="wide",
 )
 
@@ -565,7 +565,7 @@ def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-st.title("경제활동인구 월별 모니터링")
+st.title("🍦 Data Monotoring")
 
 with st.sidebar:
     st.subheader("데이터 제어")
@@ -638,3 +638,9 @@ with tab4:
             "<p style='color:#b91c1c;font-weight:700'>NEW 이벤트는 최신 기준월에 극값(최고/최저)을 갱신한 경우만 표시합니다.</p>",
             unsafe_allow_html=True,
         )
+
+st.markdown(
+    "<hr style='margin-top:2rem; margin-bottom:0.5rem;'>"
+    "<p style='text-align:center; color:#6b7280; font-size:0.9rem;'>created by alicia</p>",
+    unsafe_allow_html=True,
+)
