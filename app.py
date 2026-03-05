@@ -360,7 +360,7 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         region_options = sorted(subset["region_name"].dropna().unique().tolist())
     default_region_index = region_options.index("경기도") if "경기도" in region_options else 0
 
-    if dataset_key in {"industry", "occupation"}:
+    if dataset_key in {"industry", "occupation", "age", "status"}:
         col1, col2 = st.columns([1, 2])
         col3 = st.container()
     else:
@@ -401,7 +401,7 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         if dataset_key == "occupation":
             categories = _order_occupation_categories(categories)
         with category_container:
-            if dataset_key in {"industry", "occupation"}:
+            if dataset_key in {"industry", "occupation", "age", "status"}:
                 category = st.radio(
                     cfg.category_label,
                     categories,
