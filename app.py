@@ -200,7 +200,11 @@ def fetch_records_cached(
     return {"records": records, "debug_logs": debug_logs}
 
 
-def load_data_with_progress(api_key: str) -> tuple[pd.DataFrame, List[str], List[str]]:
+def load_data_with_progress(
+    api_key: str,
+    status_box: Any,
+    progress_box: Any,
+) -> tuple[pd.DataFrame, List[str], List[str]]:
     end_period = default_end_period()
     total_steps = len(DATASETS) * 2 + 1
     step = 0
@@ -208,8 +212,8 @@ def load_data_with_progress(api_key: str) -> tuple[pd.DataFrame, List[str], List
     errors: List[str] = []
     debug_logs: List[str] = []
 
-    progress = st.progress(0)
-    status = st.empty()
+    progress = progress_box.progress(0)
+    status = status_box
 
     for cfg in DATASETS:
         status.info(f"데이터 불러오는 중: {cfg.title}")
@@ -363,11 +367,15 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
                 category = st.radio(
                     cfg.category_label,
                     categories,
-                    key=f"category_{dataset_key}",
+                    key=f"category_radio_{dataset_key}",
                     horizontal=True,
                 )
             else:
-                category = st.selectbox(cfg.category_label, categories, key=f"category_{dataset_key}")
+                category = st.selectbox(
+                    cfg.category_label,
+                    categories,
+                    key=f"category_select_{dataset_key}",
+                )
 
     series_df = series_filter(
         df=subset,
@@ -521,14 +529,18 @@ def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
 
 st.title("경제활동인구 월별 모니터링")
 
-if st.button("데이터 새로고침"):
-    fetch_records_cached.clear()
-    st.session_state.pop("_loaded_api_key", None)
-    st.session_state.pop("_loaded_data_version", None)
-    st.session_state.pop("_loaded_data", None)
-    st.session_state.pop("_loaded_errors", None)
-    st.session_state.pop("_loaded_debug_logs", None)
-    st.rerun()
+with st.sidebar:
+    st.subheader("데이터 제어")
+    if st.button("데이터 새로고침"):
+        fetch_records_cached.clear()
+        st.session_state.pop("_loaded_api_key", None)
+        st.session_state.pop("_loaded_data_version", None)
+        st.session_state.pop("_loaded_data", None)
+        st.session_state.pop("_loaded_errors", None)
+        st.session_state.pop("_loaded_debug_logs", None)
+        st.rerun()
+    sidebar_status = st.empty()
+    sidebar_progress_box = st.empty()
 
 api_key = _seeded_api_key()
 
@@ -545,7 +557,11 @@ if (
     load_errors = st.session_state.get("_loaded_errors", [])
     debug_logs = st.session_state.get("_loaded_debug_logs", [])
 else:
-    data, load_errors, debug_logs = load_data_with_progress(api_key=api_key)
+    data, load_errors, debug_logs = load_data_with_progress(
+        api_key=api_key,
+        status_box=sidebar_status,
+        progress_box=sidebar_progress_box,
+    )
     st.session_state["_loaded_api_key"] = api_key
     st.session_state["_loaded_data_version"] = DATA_MODEL_VERSION
     st.session_state["_loaded_data"] = data
@@ -558,8 +574,9 @@ if load_errors:
         st.write(f"- {err}")
 
 if debug_logs:
-    with st.expander("진단 로그 보기", expanded=bool(load_errors)):
-        st.code("\n".join(debug_logs[-300:]))
+    with st.sidebar:
+        with st.expander("진단 로그 보기", expanded=bool(load_errors)):
+            st.code("\n".join(debug_logs[-300:]))
 
 if data.empty:
     st.warning("조회된 데이터가 없습니다. API 파라미터를 확인하세요.")
