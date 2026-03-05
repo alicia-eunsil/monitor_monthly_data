@@ -49,7 +49,7 @@ st.markdown(
 .new-badge {
   display: inline-block;
   margin-left: 6px;
-  color: #b91c1c;
+  color: #f59e0b;
   font-size: 0.74rem;
   font-weight: 800;
 }
@@ -69,6 +69,8 @@ ACTIVITY_INDICATOR_ORDER = [
     "실업률",
     "실업자",
 ]
+
+DATA_MODEL_VERSION = "2026-03-05-industry-category-fix-v1"
 
 
 def _norm_indicator_name(text: str) -> str:
@@ -113,6 +115,16 @@ def _new(flag: bool) -> str:
     return "<span class='new-badge'>NEW</span>" if flag else ""
 
 
+def _remark_new(is_new_max: bool, is_new_min: bool) -> str:
+    if is_new_max and is_new_min:
+        return "최고·최저 NEW"
+    if is_new_max:
+        return "최고 NEW"
+    if is_new_min:
+        return "최저 NEW"
+    return ""
+
+
 def _card(title: str, value: str, sub: str, is_new: bool = False, value_class: str = "") -> None:
     value_cls = f"metric-value {value_class}".strip()
     st.markdown(
@@ -142,7 +154,7 @@ def _style_extreme_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         styler = styler.applymap(lambda _: "color:#1d4ed8;font-weight:700;", subset=["최저"])
     if "비고" in df.columns:
         styler = styler.applymap(
-            lambda v: "color:#f59e0b;font-weight:700;" if str(v).strip() == "NEW" else "",
+            lambda v: "color:#f59e0b;font-weight:700;" if "NEW" in str(v).strip() else "",
             subset=["비고"],
         )
     return styler
@@ -273,9 +285,10 @@ def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str) -> pd.DataFr
             "최고 시점": _fmt_period(stats.get(f"{prefix}_max_all_period")),
             "최저": _fmt_num(stats.get(f"{prefix}_min_all_value"), display_unit),
             "최저 시점": _fmt_period(stats.get(f"{prefix}_min_all_period")),
-            "비고": "NEW"
-            if stats.get(f"{prefix}_is_new_max_all") or stats.get(f"{prefix}_is_new_min_all")
-            else "",
+            "비고": _remark_new(
+                bool(stats.get(f"{prefix}_is_new_max_all")),
+                bool(stats.get(f"{prefix}_is_new_min_all")),
+            ),
         },
         {
             "지표": label,
@@ -284,9 +297,10 @@ def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str) -> pd.DataFr
             "최고 시점": _fmt_period(stats.get(f"{prefix}_max_5y_period")),
             "최저": _fmt_num(stats.get(f"{prefix}_min_5y_value"), display_unit),
             "최저 시점": _fmt_period(stats.get(f"{prefix}_min_5y_period")),
-            "비고": "NEW"
-            if stats.get(f"{prefix}_is_new_max_5y") or stats.get(f"{prefix}_is_new_min_5y")
-            else "",
+            "비고": _remark_new(
+                bool(stats.get(f"{prefix}_is_new_max_5y")),
+                bool(stats.get(f"{prefix}_is_new_min_5y")),
+            ),
         },
     ]
     cols = ["지표", "구간", "최고", "최고 시점", "최저", "최저 시점", "비고"]
@@ -335,6 +349,11 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         categories = sorted(
             c for c in subset["category_name"].dropna().unique().tolist() if str(c).strip() != ""
         )
+        if dataset_key in {"industry", "occupation"}:
+            drop_labels = {"시도별", "산업별", "직업별", "직종별"}
+            cleaned = [c for c in categories if str(c).strip() not in drop_labels]
+            if cleaned:
+                categories = cleaned
         with category_container:
             category = st.selectbox(cfg.category_label, categories, key=f"category_{dataset_key}")
 
@@ -493,6 +512,7 @@ st.title("경제활동인구 월별 모니터링")
 if st.button("데이터 새로고침"):
     fetch_records_cached.clear()
     st.session_state.pop("_loaded_api_key", None)
+    st.session_state.pop("_loaded_data_version", None)
     st.session_state.pop("_loaded_data", None)
     st.session_state.pop("_loaded_errors", None)
     st.session_state.pop("_loaded_debug_logs", None)
@@ -504,13 +524,18 @@ if not api_key:
     st.warning("API key is not set.")
     st.stop()
 
-if st.session_state.get("_loaded_api_key") == api_key and "_loaded_data" in st.session_state:
+if (
+    st.session_state.get("_loaded_api_key") == api_key
+    and st.session_state.get("_loaded_data_version") == DATA_MODEL_VERSION
+    and "_loaded_data" in st.session_state
+):
     data = st.session_state["_loaded_data"]
     load_errors = st.session_state.get("_loaded_errors", [])
     debug_logs = st.session_state.get("_loaded_debug_logs", [])
 else:
     data, load_errors, debug_logs = load_data_with_progress(api_key=api_key)
     st.session_state["_loaded_api_key"] = api_key
+    st.session_state["_loaded_data_version"] = DATA_MODEL_VERSION
     st.session_state["_loaded_data"] = data
     st.session_state["_loaded_errors"] = load_errors
     st.session_state["_loaded_debug_logs"] = debug_logs
