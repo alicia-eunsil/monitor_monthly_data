@@ -355,7 +355,15 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
             if cleaned:
                 categories = cleaned
         with category_container:
-            category = st.selectbox(cfg.category_label, categories, key=f"category_{dataset_key}")
+            if dataset_key == "industry":
+                category = st.radio(
+                    cfg.category_label,
+                    categories,
+                    key=f"category_{dataset_key}",
+                    horizontal=True,
+                )
+            else:
+                category = st.selectbox(cfg.category_label, categories, key=f"category_{dataset_key}")
 
     series_df = series_filter(
         df=subset,
