@@ -390,9 +390,16 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
 
     category = ""
     if cfg.has_category:
+        category_pool = subset[subset["region_name"] == region]
+        if indicator:
+            category_pool = category_pool[category_pool["indicator_name"] == indicator]
         categories = sorted(
-            c for c in subset["category_name"].dropna().unique().tolist() if str(c).strip() != ""
+            c for c in category_pool["category_name"].dropna().unique().tolist() if str(c).strip() != ""
         )
+        if not categories:
+            categories = sorted(
+                c for c in subset["category_name"].dropna().unique().tolist() if str(c).strip() != ""
+            )
         if dataset_key in {"industry", "occupation"}:
             drop_labels = {"시도별", "산업별", "직업별", "직종별"}
             cleaned = [c for c in categories if str(c).strip() not in drop_labels]
