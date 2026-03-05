@@ -13,7 +13,7 @@ from src.kosis_client import KosisClient
 from src.transform import add_yoy, build_stats, normalize_records, series_filter
 
 st.set_page_config(
-    page_title="🍦 Data Monotoring",
+    page_title="🍦 Data Monitoring",
     page_icon="🍦",
     layout="wide",
 )
@@ -87,7 +87,7 @@ OCCUPATION_CATEGORY_ORDER = [
     "기타",
 ]
 
-DATA_MODEL_VERSION = "2026-03-05-industry-category-fix-v1"
+DATA_MODEL_VERSION = "2026-03-05-add-age-status-datasets-v3"
 
 
 def _norm_indicator_name(text: str) -> str:
@@ -565,7 +565,7 @@ def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-st.title("🍦 Data Monotoring")
+st.title("경제활동인구 월별 모니터링")
 
 with st.sidebar:
     st.subheader("데이터 제어")
@@ -620,14 +620,27 @@ if data.empty:
     st.warning("조회된 데이터가 없습니다. API 파라미터를 확인하세요.")
     st.stop()
 
-tab1, tab2, tab3, tab4 = st.tabs(["경제활동인구현황", "산업별 취업자수", "직종별 취업자수", "NEW 알림판"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    [
+        "경제활동인구현황",
+        "연령별 취업자",
+        "종사상지위별 취업자",
+        "산업별 취업자수",
+        "직종별 취업자수",
+        "NEW 알림판",
+    ]
+)
 with tab1:
     _render_dataset(data, "activity")
 with tab2:
-    _render_dataset(data, "industry")
+    _render_dataset(data, "age")
 with tab3:
-    _render_dataset(data, "occupation")
+    _render_dataset(data, "status")
 with tab4:
+    _render_dataset(data, "industry")
+with tab5:
+    _render_dataset(data, "occupation")
+with tab6:
     st.subheader("최신값 갱신 NEW 이벤트")
     events = _collect_new_events(data)
     if events.empty:
@@ -641,6 +654,6 @@ with tab4:
 
 st.markdown(
     "<hr style='margin-top:2rem; margin-bottom:0.5rem;'>"
-    "<p style='text-align:center; color:#6b7280; font-size:0.9rem;'>created by alicia</p>",
+    "<p style='text-align:center; color:#6b7280; font-size:0.9rem;'>- created by alicia -</p>",
     unsafe_allow_html=True,
 )

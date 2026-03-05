@@ -204,6 +204,9 @@ def normalize_records(config: DatasetConfig, records: list[Dict]) -> pd.DataFram
             ),
         }
     )
+    # KOSIS national total can appear as "계" or region code "00".
+    out["region_name"] = out["region_name"].replace({"계": "전국", "합계": "전국"})
+    out.loc[out["region_code"].astype(str).str.strip() == "00", "region_name"] = "전국"
     out["region_name"] = out["region_name"].map(canonical_region)
     out["indicator_name"] = out["indicator_name"].replace("", pd.NA).fillna(out["indicator_code"])
     out["indicator_name"] = out["indicator_name"].replace("", "값")
