@@ -58,6 +58,33 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+ACTIVITY_INDICATOR_ORDER = [
+    "15세이상인구",
+    "경제활동인구",
+    "경제활동참가율",
+    "비경제활동인구",
+    "고용률",
+    "취업자",
+    "15~64세 고용률",
+    "실업률",
+    "실업자",
+]
+
+
+def _norm_indicator_name(text: str) -> str:
+    s = str(text).strip()
+    for token in [" ", "~", "-", "–", "ㅡ"]:
+        s = s.replace(token, "")
+    return s
+
+
+def _order_activity_indicators(indicators: List[str]) -> List[str]:
+    order_map = { _norm_indicator_name(name): idx for idx, name in enumerate(ACTIVITY_INDICATOR_ORDER) }
+    return sorted(
+        indicators,
+        key=lambda x: (order_map.get(_norm_indicator_name(x), 999), x),
+    )
+
 
 def _seeded_api_key() -> str:
     try:
@@ -289,6 +316,8 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         )
 
     indicators = sorted(subset["indicator_name"].dropna().unique().tolist())
+    if dataset_key == "activity":
+        indicators = _order_activity_indicators(indicators)
     with col2:
         if dataset_key == "activity":
             indicator = st.radio(
@@ -327,14 +356,14 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
     cols = st.columns(5)
     with cols[0]:
         _card(
-            "최신 원자료",
+            "최신",
             _fmt_num(stats.get("level_latest_value"), unit),
             latest_period,
             False,
         )
     with cols[1]:
         _card(
-            "원자료 전체기간 최고",
+            "전체기간 최고",
             _fmt_num(stats.get("level_max_all_value"), unit),
             _fmt_period(stats.get("level_max_all_period")),
             bool(stats.get("level_is_new_max_all")),
@@ -342,7 +371,7 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         )
     with cols[2]:
         _card(
-            "원자료 전체기간 최저",
+            "전체기간 최저",
             _fmt_num(stats.get("level_min_all_value"), unit),
             _fmt_period(stats.get("level_min_all_period")),
             bool(stats.get("level_is_new_min_all")),
