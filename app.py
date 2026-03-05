@@ -320,7 +320,11 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         region_options = sorted(subset["region_name"].dropna().unique().tolist())
     default_region_index = region_options.index("경기도") if "경기도" in region_options else 0
 
-    col1, col2, col3 = st.columns([1, 1, 1])
+    if dataset_key in {"industry", "occupation"}:
+        col1, col2 = st.columns([1, 2])
+        col3 = st.container()
+    else:
+        col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
         region = st.selectbox(
             "지역",
@@ -355,7 +359,7 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
             if cleaned:
                 categories = cleaned
         with category_container:
-            if dataset_key == "industry":
+            if dataset_key in {"industry", "occupation"}:
                 category = st.radio(
                     cfg.category_label,
                     categories,
