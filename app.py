@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Dict, List
 
 import altair as alt
@@ -70,6 +71,22 @@ ACTIVITY_INDICATOR_ORDER = [
     "실업자",
 ]
 
+OCCUPATION_CATEGORY_ORDER = [
+    "관리자전문가",
+    "관리자",
+    "전문가및관련종사자",
+    "사무종사자",
+    "서비스판매종사자",
+    "서비스종사자",
+    "판매종사자",
+    "농림어업숙련종사자",
+    "기능기계조작조립단순노무종사자",
+    "기능원및관련기능종사자",
+    "장치기계조작및조립종사자",
+    "단순노무종사자",
+    "기타",
+]
+
 DATA_MODEL_VERSION = "2026-03-05-industry-category-fix-v1"
 
 
@@ -85,6 +102,25 @@ def _order_activity_indicators(indicators: List[str]) -> List[str]:
     return sorted(
         indicators,
         key=lambda x: (order_map.get(_norm_indicator_name(x), 999), x),
+    )
+
+
+def _norm_occupation_category(text: str) -> str:
+    s = str(text).strip()
+    s = re.sub(r"^\*+\s*", "", s)
+    s = re.sub(r"^\d+\s*", "", s)
+    s = re.sub(r"\([^)]*\)", "", s)
+    s = re.sub(r"[^0-9A-Za-z가-힣]", "", s)
+    return s
+
+
+def _order_occupation_categories(categories: List[str]) -> List[str]:
+    order_map = {
+        _norm_occupation_category(name): idx for idx, name in enumerate(OCCUPATION_CATEGORY_ORDER)
+    }
+    return sorted(
+        categories,
+        key=lambda x: (order_map.get(_norm_occupation_category(x), 999), x),
     )
 
 
@@ -362,6 +398,8 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
             cleaned = [c for c in categories if str(c).strip() not in drop_labels]
             if cleaned:
                 categories = cleaned
+        if dataset_key == "occupation":
+            categories = _order_occupation_categories(categories)
         with category_container:
             if dataset_key in {"industry", "occupation"}:
                 category = st.radio(
