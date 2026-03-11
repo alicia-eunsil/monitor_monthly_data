@@ -720,7 +720,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
         "종사상지위별 취업자",
         "산업별 취업자수",
         "직종별 취업자수",
-        "NEW 알림판",
+        "NEW HISTORY",
     ]
 )
 with tab1:
@@ -734,7 +734,7 @@ with tab4:
 with tab5:
     _render_dataset(data, "occupation")
 with tab6:
-    st.subheader("NEW 이벤트 이력")
+    st.subheader("NEW HISTORY")
     events = _collect_new_events(data)
     if events.empty:
         st.info("집계된 NEW 이벤트 이력이 없습니다.")
