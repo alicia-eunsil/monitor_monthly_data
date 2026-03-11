@@ -613,30 +613,49 @@ def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
     key_cols = ["dataset_key", "dataset_title", "region_name", "indicator_name", "category_name"]
     for _, series in df.groupby(key_cols, dropna=False):
         series = series.sort_values("period")
-        stats = build_stats(series)
-        latest_month = _fmt_period(stats.get("latest_period"))
-        base = {
+        meta = {
             "데이터셋": str(series["dataset_title"].iloc[0]),
             "지역": str(series["region_name"].iloc[0]),
             "지표": str(series["indicator_name"].iloc[0]),
             "분류": str(series["category_name"].iloc[0]),
-            "기준월": latest_month,
         }
-        if stats.get("level_is_new_max_all"):
-            rows.append({**base, "이벤트": "원자료 전체기간 최고 NEW"})
-        if stats.get("level_is_new_min_all"):
-            rows.append({**base, "이벤트": "원자료 전체기간 최저 NEW"})
-        if stats.get("yoy_abs_is_new_max_all"):
-            rows.append({**base, "이벤트": "YoY(절대) 전체기간 최고 NEW"})
-        if stats.get("yoy_abs_is_new_min_all"):
-            rows.append({**base, "이벤트": "YoY(절대) 전체기간 최저 NEW"})
-        if stats.get("yoy_pct_is_new_max_all"):
-            rows.append({**base, "이벤트": "YoY(증감률) 전체기간 최고 NEW"})
-        if stats.get("yoy_pct_is_new_min_all"):
-            rows.append({**base, "이벤트": "YoY(증감률) 전체기간 최저 NEW"})
+
+        for metric_col, metric_label in [
+            ("value", "원자료"),
+            ("yoy_abs", "YoY(절대)"),
+            ("yoy_pct", "YoY(증감률)"),
+        ]:
+            metric_df = series[["period", metric_col]].dropna(subset=[metric_col]).copy()
+            if metric_df.empty:
+                continue
+
+            prev_max = metric_df[metric_col].cummax().shift(1)
+            prev_min = metric_df[metric_col].cummin().shift(1)
+            is_new_max = metric_df[metric_col] > prev_max
+            is_new_min = metric_df[metric_col] < prev_min
+
+            for _, row in metric_df[is_new_max].iterrows():
+                rows.append(
+                    {
+                        **meta,
+                        "기준월": _fmt_period(row["period"]),
+                        "기준월_ts": pd.Timestamp(row["period"]),
+                        "이벤트": f"{metric_label} 전체기간 최고 NEW",
+                    }
+                )
+            for _, row in metric_df[is_new_min].iterrows():
+                rows.append(
+                    {
+                        **meta,
+                        "기준월": _fmt_period(row["period"]),
+                        "기준월_ts": pd.Timestamp(row["period"]),
+                        "이벤트": f"{metric_label} 전체기간 최저 NEW",
+                    }
+                )
     if not rows:
         return pd.DataFrame(columns=["데이터셋", "지역", "지표", "분류", "기준월", "이벤트"])
-    return pd.DataFrame(rows)
+    out = pd.DataFrame(rows).sort_values(["기준월_ts", "데이터셋", "지역", "지표", "분류"], ascending=[False, True, True, True, True])
+    return out.drop(columns=["기준월_ts"], errors="ignore")
 
 
 st.title("경제활동인구 월별 모니터링")
@@ -715,14 +734,14 @@ with tab4:
 with tab5:
     _render_dataset(data, "occupation")
 with tab6:
-    st.subheader("최신값 갱신 NEW 이벤트")
+    st.subheader("NEW 이벤트 이력")
     events = _collect_new_events(data)
     if events.empty:
-        st.info("현재 기준월에서 새롭게 갱신된 최고/최저 이벤트가 없습니다.")
+        st.info("집계된 NEW 이벤트 이력이 없습니다.")
     else:
         st.dataframe(events, use_container_width=True, hide_index=True)
         st.markdown(
-            "<p style='color:#b91c1c;font-weight:700'>NEW 이벤트는 최신 기준월에 극값(최고/최저)을 갱신한 경우만 표시합니다.</p>",
+            "<p style='color:#b91c1c;font-weight:700'>NEW 이벤트는 해당 월 시점 기준으로 전체기간 최고/최저를 새로 갱신한 이력을 표시합니다.</p>",
             unsafe_allow_html=True,
         )
 
