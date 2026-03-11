@@ -871,29 +871,50 @@ def _render_new_monthly_report(events: pd.DataFrame) -> None:
         st.info("경기도 기준 NEW 이벤트가 없습니다.")
         return
 
-    month_list = (
+    month_table = (
         view[["기준월", "기준월_dt"]]
         .drop_duplicates()
-        .sort_values("기준월_dt", ascending=False)["기준월"]
-        .tolist()
+        .sort_values("기준월_dt", ascending=False)
+        .reset_index(drop=True)
     )
+    month_list = month_table["기준월"].tolist()
     selected_month = st.selectbox("리포트 기준월", month_list, key="report_month")
     month_df = view[view["기준월"] == selected_month].copy()
     if month_df.empty:
         st.info("선택한 기준월의 NEW 이벤트가 없습니다.")
         return
+    selected_idx_list = month_table.index[month_table["기준월"] == selected_month].tolist()
+    prev_month = (
+        month_table.loc[selected_idx_list[0] + 1, "기준월"]
+        if selected_idx_list and (selected_idx_list[0] + 1) < len(month_table)
+        else None
+    )
+    prev_month_df = view[view["기준월"] == prev_month].copy() if prev_month else pd.DataFrame(columns=view.columns)
+
+    def _fmt_delta(cur: int, prev: int | None) -> str:
+        if prev is None:
+            return ""
+        diff = int(cur) - int(prev)
+        if diff > 0:
+            return f" (▲{diff:,})"
+        if diff < 0:
+            return f" (▼{abs(diff):,})"
+        return " (→0)"
 
     st.markdown(f"#### {selected_month} 월간 NEW 리포트 (경기도)")
     total_count = len(month_df)
     max_count = int((month_df["유형"] == "최고").sum())
     min_count = int((month_df["유형"] == "최저").sum())
+    prev_total_count = len(prev_month_df) if prev_month else None
+    prev_max_count = int((prev_month_df["유형"] == "최고").sum()) if prev_month else None
+    prev_min_count = int((prev_month_df["유형"] == "최저").sum()) if prev_month else None
     st.markdown(
         "\n".join(
             [
                 "##### 월간 요약",
-                f"- 총 NEW 이벤트: **{total_count:,}건**",
-                f"- 최고 NEW: **{max_count:,}건**",
-                f"- 최저 NEW: **{min_count:,}건**",
+                f"- 총 NEW 이벤트: **{total_count:,}건**{_fmt_delta(total_count, prev_total_count)}",
+                f"- 최고 NEW: **{max_count:,}건**{_fmt_delta(max_count, prev_max_count)}",
+                f"- 최저 NEW: **{min_count:,}건**{_fmt_delta(min_count, prev_min_count)}",
             ]
         )
     )
@@ -912,8 +933,22 @@ def _render_new_monthly_report(events: pd.DataFrame) -> None:
         ascending=[True, True],
         na_position="last",
     ).drop(columns=["정렬순서"])
+    prev_ds_map: Dict[str, int] = {}
+    if prev_month:
+        prev_ds_map = (
+            prev_month_df.groupby("데이터셋")
+            .size()
+            .astype(int)
+            .to_dict()
+        )
     ds_lines = ["##### 데이터셋별 건수"]
-    ds_lines.extend([f"- {row['데이터셋']}: **{int(row['NEW 건수']):,}건**" for _, row in ds_summary.iterrows()])
+    ds_lines.extend(
+        [
+            f"- {row['데이터셋']}: **{int(row['NEW 건수']):,}건**"
+            f"{_fmt_delta(int(row['NEW 건수']), prev_ds_map.get(str(row['데이터셋']))) if prev_month else ''}"
+            for _, row in ds_summary.iterrows()
+        ]
+    )
     st.markdown("\n".join(ds_lines))
 
     type_summary = (
@@ -930,10 +965,19 @@ def _render_new_monthly_report(events: pd.DataFrame) -> None:
     type_summary = type_summary.sort_values(
         ["정렬_구분", "정렬_범위", "정렬_유형", "구분", "범위", "유형"]
     ).drop(columns=["정렬_구분", "정렬_범위", "정렬_유형"])
+    prev_type_map: Dict[tuple, int] = {}
+    if prev_month:
+        prev_type_map = (
+            prev_month_df.groupby(["구분", "범위", "유형"])
+            .size()
+            .astype(int)
+            .to_dict()
+        )
     type_lines = ["##### 구분/범위/유형별 건수"]
     type_lines.extend(
         [
             f"- {row['구분']} / {row['범위']} / {row['유형']}: **{int(row['NEW 건수']):,}건**"
+            f"{_fmt_delta(int(row['NEW 건수']), prev_type_map.get((row['구분'], row['범위'], row['유형']))) if prev_month else ''}"
             for _, row in type_summary.iterrows()
         ]
     )
