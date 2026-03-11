@@ -687,168 +687,172 @@ def _render_new_event_charts(events_view: pd.DataFrame) -> None:
         return
 
     st.markdown("##### NEW 이벤트 분석 그래프")
+    dataset_tab_order = [cfg.title for cfg in DATASETS]
+    dataset_order_map = {name: idx for idx, name in enumerate(dataset_tab_order)}
 
-    row1_col1, row1_col2 = st.columns([1, 1])
-    with row1_col1:
-        month_summary = (
-            view.groupby(["기준월", "기준월_dt"], as_index=False)
-            .size()
-            .rename(columns={"size": "NEW 건수"})
-            .sort_values("기준월_dt")
-        )
-        month_chart = (
-            alt.Chart(month_summary)
-            .mark_line(point=True, color="#2563eb")
-            .encode(
-                x=alt.X("기준월_dt:T", title="기준월"),
-                y=alt.Y("NEW 건수:Q", title="NEW 건수"),
-                tooltip=[
-                    alt.Tooltip("기준월:N", title="기준월"),
-                    alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
-                ],
+    def _render_six_charts(base_df: pd.DataFrame, section_title: str) -> None:
+        st.markdown(f"###### {section_title}")
+        if base_df.empty:
+            st.info(f"{section_title} 데이터가 없습니다.")
+            return
+
+        row1_col1, row1_col2 = st.columns([1, 1])
+        with row1_col1:
+            month_summary = (
+                base_df.groupby(["기준월", "기준월_dt"], as_index=False)
+                .size()
+                .rename(columns={"size": "NEW 건수"})
+                .sort_values("기준월_dt")
             )
-            .properties(height=300, title="월별 NEW 건수 추이")
-        )
-        st.altair_chart(month_chart, use_container_width=True)
-
-    with row1_col2:
-        type_summary = (
-            view.groupby("유형", as_index=False)
-            .size()
-            .rename(columns={"size": "NEW 건수"})
-            .sort_values("NEW 건수", ascending=False)
-        )
-        type_chart = (
-            alt.Chart(type_summary)
-            .mark_arc(innerRadius=65)
-            .encode(
-                theta=alt.Theta("NEW 건수:Q"),
-                color=alt.Color("유형:N", title="유형", scale=alt.Scale(range=["#E45756", "#1D4ED8"])),
-                tooltip=[
-                    alt.Tooltip("유형:N", title="유형"),
-                    alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
-                ],
+            month_chart = (
+                alt.Chart(month_summary)
+                .mark_line(point=True, color="#2563eb")
+                .encode(
+                    x=alt.X("기준월_dt:T", title="기준월"),
+                    y=alt.Y("NEW 건수:Q", title="NEW 건수"),
+                    tooltip=[
+                        alt.Tooltip("기준월:N", title="기준월"),
+                        alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
+                    ],
+                )
+                .properties(height=300, title="월별 NEW 건수 추이")
             )
-            .properties(height=300, title="최고/최저 NEW 비중")
-        )
-        st.altair_chart(type_chart, use_container_width=True)
+            st.altair_chart(month_chart, use_container_width=True)
 
-    row2_col1, row2_col2 = st.columns([1, 1])
-    with row2_col1:
-        indicator_summary = (
-            view.groupby("지표", as_index=False)
-            .size()
-            .rename(columns={"size": "NEW 건수"})
-            .sort_values("NEW 건수", ascending=False)
-        )
-        indicator_chart = (
-            alt.Chart(indicator_summary)
-            .mark_bar(color="#2E8B57")
-            .encode(
-                x=alt.X("NEW 건수:Q", title="NEW 건수"),
-                y=alt.Y("지표:N", sort="-x", title="지표"),
-                tooltip=[
-                    alt.Tooltip("지표:N", title="지표"),
-                    alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
-                ],
+        with row1_col2:
+            type_summary = (
+                base_df.groupby("유형", as_index=False)
+                .size()
+                .rename(columns={"size": "NEW 건수"})
+                .sort_values("NEW 건수", ascending=False)
             )
-            .properties(height=max(260, len(indicator_summary) * 22), title="지표별 NEW 건수")
-        )
-        st.altair_chart(indicator_chart, use_container_width=True)
-
-    with row2_col2:
-        dataset_summary = (
-            view.groupby("데이터셋", as_index=False)
-            .size()
-            .rename(columns={"size": "NEW 건수"})
-            .sort_values("NEW 건수", ascending=False)
-        )
-        dataset_chart = (
-            alt.Chart(dataset_summary)
-            .mark_bar(color="#7c3aed")
-            .encode(
-                x=alt.X("NEW 건수:Q", title="NEW 건수"),
-                y=alt.Y("데이터셋:N", sort="-x", title="데이터셋"),
-                tooltip=[
-                    alt.Tooltip("데이터셋:N", title="데이터셋"),
-                    alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
-                ],
+            type_ratio_chart = (
+                alt.Chart(type_summary)
+                .mark_arc(innerRadius=65)
+                .encode(
+                    theta=alt.Theta("NEW 건수:Q"),
+                    color=alt.Color("유형:N", title="유형", scale=alt.Scale(range=["#E45756", "#1D4ED8"])),
+                    tooltip=[
+                        alt.Tooltip("유형:N", title="유형"),
+                        alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
+                    ],
+                )
+                .properties(height=300, title="유형별 NEW 비중")
             )
-            .properties(height=max(260, len(dataset_summary) * 22), title="데이터셋별 NEW 건수")
-        )
-        st.altair_chart(dataset_chart, use_container_width=True)
+            st.altair_chart(type_ratio_chart, use_container_width=True)
 
-    row3_col1, row3_col2 = st.columns([1, 1])
-    with row3_col1:
-        metric_type_summary = (
-            view.groupby(["구분", "유형"], as_index=False)
-            .size()
-            .rename(columns={"size": "NEW 건수"})
-            .sort_values(["구분", "유형"])
-        )
-        metric_type_chart = (
-            alt.Chart(metric_type_summary)
-            .mark_bar()
-            .encode(
-                x=alt.X("구분:N", title="구분"),
-                y=alt.Y("NEW 건수:Q", title="NEW 건수"),
-                color=alt.Color("유형:N", title="유형", scale=alt.Scale(range=["#E45756", "#1D4ED8"])),
-                tooltip=[
-                    alt.Tooltip("구분:N", title="구분"),
-                    alt.Tooltip("유형:N", title="유형"),
-                    alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
-                ],
+        row2_col1, row2_col2 = st.columns([1, 1])
+        with row2_col1:
+            indicator_summary = (
+                base_df.groupby("지표", as_index=False)
+                .size()
+                .rename(columns={"size": "NEW 건수"})
+                .sort_values("NEW 건수", ascending=False)
             )
-            .properties(height=300, title="구분/유형별 NEW 건수")
-        )
-        st.altair_chart(metric_type_chart, use_container_width=True)
-
-    with row3_col2:
-        region_summary = (
-            view.groupby("지역", as_index=False)
-            .size()
-            .rename(columns={"size": "NEW 건수"})
-            .sort_values("NEW 건수", ascending=False)
-            .head(20)
-        )
-        region_chart = (
-            alt.Chart(region_summary)
-            .mark_bar(color="#4C78A8")
-            .encode(
-                x=alt.X("NEW 건수:Q", title="NEW 건수"),
-                y=alt.Y("지역:N", sort="-x", title="지역"),
-                tooltip=[
-                    alt.Tooltip("지역:N", title="지역"),
-                    alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
-                ],
+            indicator_chart = (
+                alt.Chart(indicator_summary)
+                .mark_bar(color="#2E8B57")
+                .encode(
+                    x=alt.X("NEW 건수:Q", title="NEW 건수"),
+                    y=alt.Y("지표:N", sort="-x", title="지표"),
+                    tooltip=[
+                        alt.Tooltip("지표:N", title="지표"),
+                        alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
+                    ],
+                )
+                .properties(height=max(260, len(indicator_summary) * 22), title="지표별 NEW 건수")
             )
-            .properties(height=max(260, len(region_summary) * 18), title="지역별 NEW 건수 (상위 20)")
-        )
-        st.altair_chart(region_chart, use_container_width=True)
+            st.altair_chart(indicator_chart, use_container_width=True)
 
-    category_df = view.copy()
-    category_df["분류"] = category_df["분류"].astype(str).str.strip().replace({"": "전체"})
-    category_summary = (
-        category_df.groupby("분류", as_index=False)
-        .size()
-        .rename(columns={"size": "NEW 건수"})
-        .sort_values("NEW 건수", ascending=False)
-        .head(15)
+        with row2_col2:
+            dataset_summary = (
+                base_df.groupby("데이터셋", as_index=False)
+                .size()
+                .rename(columns={"size": "NEW 건수"})
+            )
+            dataset_summary["정렬순서"] = dataset_summary["데이터셋"].map(dataset_order_map).fillna(999)
+            dataset_summary = dataset_summary.sort_values(["정렬순서", "데이터셋"]).drop(columns=["정렬순서"])
+            dataset_chart = (
+                alt.Chart(dataset_summary)
+                .mark_bar(color="#7c3aed")
+                .encode(
+                    x=alt.X("NEW 건수:Q", title="NEW 건수"),
+                    y=alt.Y("데이터셋:N", sort=dataset_tab_order, title="데이터셋"),
+                    tooltip=[
+                        alt.Tooltip("데이터셋:N", title="데이터셋"),
+                        alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
+                    ],
+                )
+                .properties(height=max(260, len(dataset_summary) * 24), title="데이터셋별 NEW 건수")
+            )
+            st.altair_chart(dataset_chart, use_container_width=True)
+
+        row3_col1, row3_col2 = st.columns([1, 1])
+        with row3_col1:
+            category_df = base_df.copy()
+            category_df["분류"] = category_df["분류"].astype(str).str.strip().replace({"": "전체"})
+            category_summary = (
+                category_df.groupby("분류", as_index=False)
+                .size()
+                .rename(columns={"size": "NEW 건수"})
+                .sort_values("NEW 건수", ascending=False)
+                .head(15)
+            )
+            category_chart = (
+                alt.Chart(category_summary)
+                .mark_bar(color="#9467BD")
+                .encode(
+                    x=alt.X("NEW 건수:Q", title="NEW 건수"),
+                    y=alt.Y("분류:N", sort="-x", title="분류"),
+                    tooltip=[
+                        alt.Tooltip("분류:N", title="분류"),
+                        alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
+                    ],
+                )
+                .properties(height=max(260, len(category_summary) * 18), title="분류별 NEW 건수")
+            )
+            st.altair_chart(category_chart, use_container_width=True)
+
+        with row3_col2:
+            type_count_summary = (
+                base_df.groupby("유형", as_index=False)
+                .size()
+                .rename(columns={"size": "NEW 건수"})
+                .sort_values("NEW 건수", ascending=False)
+            )
+            type_count_chart = (
+                alt.Chart(type_count_summary)
+                .mark_bar(color="#f97316")
+                .encode(
+                    x=alt.X("유형:N", title="유형"),
+                    y=alt.Y("NEW 건수:Q", title="NEW 건수"),
+                    tooltip=[
+                        alt.Tooltip("유형:N", title="유형"),
+                        alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
+                    ],
+                )
+                .properties(height=300, title="유형별 NEW 건수")
+            )
+            st.altair_chart(type_count_chart, use_container_width=True)
+
+    nation_df = view[view["지역"] == "전국"].copy()
+    _render_six_charts(nation_df, "전국 요약 (기본)")
+
+    region_options = sorted([r for r in view["지역"].dropna().unique().tolist() if r and r != "전국"])
+    if not region_options:
+        return
+
+    st.markdown("---")
+    st.markdown("###### 지역 선택 요약")
+    default_region = "경기도" if "경기도" in region_options else region_options[0]
+    selected_region = st.selectbox(
+        "지역 선택",
+        region_options,
+        index=region_options.index(default_region),
+        key="history_chart_region",
     )
-    category_chart = (
-        alt.Chart(category_summary)
-        .mark_bar(color="#9467BD")
-        .encode(
-            x=alt.X("NEW 건수:Q", title="NEW 건수"),
-            y=alt.Y("분류:N", sort="-x", title="분류"),
-            tooltip=[
-                alt.Tooltip("분류:N", title="분류"),
-                alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
-            ],
-        )
-        .properties(height=max(260, len(category_summary) * 18), title="분류별 NEW 건수 (상위 15)")
-    )
-    st.altair_chart(category_chart, use_container_width=True)
+    region_df = view[view["지역"] == selected_region].copy()
+    _render_six_charts(region_df, f"{selected_region} 요약")
 
 
 def _render_new_monthly_report(events: pd.DataFrame) -> None:
