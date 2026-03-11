@@ -729,6 +729,48 @@ def _render_new_monthly_report(events: pd.DataFrame) -> None:
     )
     st.markdown("\n".join(type_lines))
 
+    st.markdown("##### 상세 이벤트 분석 그래프")
+    chart_col1, chart_col2 = st.columns([1, 1])
+    with chart_col1:
+        region_summary = (
+            month_df.groupby("지역", as_index=False)
+            .size()
+            .rename(columns={"size": "NEW 건수"})
+            .sort_values("NEW 건수", ascending=False)
+        )
+        region_chart = (
+            alt.Chart(region_summary)
+            .mark_bar(color="#4C78A8")
+            .encode(
+                x=alt.X("NEW 건수:Q", title="NEW 건수"),
+                y=alt.Y("지역:N", sort="-x", title="지역"),
+                tooltip=[
+                    alt.Tooltip("지역:N", title="지역"),
+                    alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
+                ],
+            )
+            .properties(height=max(280, len(region_summary) * 20), title="지역별 NEW 건수")
+        )
+        st.altair_chart(region_chart, use_container_width=True)
+
+    with chart_col2:
+        type_chart = (
+            alt.Chart(type_summary)
+            .mark_bar()
+            .encode(
+                x=alt.X("구분:N", title="구분"),
+                y=alt.Y("NEW 건수:Q", title="NEW 건수"),
+                color=alt.Color("유형:N", title="유형", scale=alt.Scale(range=["#E45756", "#1D4ED8"])),
+                tooltip=[
+                    alt.Tooltip("구분:N", title="구분"),
+                    alt.Tooltip("유형:N", title="유형"),
+                    alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
+                ],
+            )
+            .properties(height=320, title="구분/유형별 NEW 건수")
+        )
+        st.altair_chart(type_chart, use_container_width=True)
+
     st.markdown("##### 상세 이벤트")
     detail_df = month_df[
         ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "유형", "이벤트"]
