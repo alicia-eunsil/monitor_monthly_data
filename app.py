@@ -691,39 +691,58 @@ def _render_new_monthly_report(events: pd.DataFrame) -> None:
         return
 
     st.markdown(f"#### {selected_month} 월간 NEW 리포트")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("총 NEW 이벤트", f"{len(month_df):,}건")
-    c2.metric("최고 NEW", f"{(month_df['유형'] == '최고').sum():,}건")
-    c3.metric("최저 NEW", f"{(month_df['유형'] == '최저').sum():,}건")
-    c4.metric("발생 지역 수", f"{month_df['지역'].nunique():,}개")
+    total_count = len(month_df)
+    max_count = int((month_df["유형"] == "최고").sum())
+    min_count = int((month_df["유형"] == "최저").sum())
+    region_count = int(month_df["지역"].nunique())
+    st.markdown(
+        "\n".join(
+            [
+                "##### 월간 요약",
+                f"- 총 NEW 이벤트: **{total_count:,}건**",
+                f"- 최고 NEW: **{max_count:,}건**",
+                f"- 최저 NEW: **{min_count:,}건**",
+                f"- 발생 지역 수: **{region_count:,}개**",
+            ]
+        )
+    )
 
-    left, right = st.columns([1, 1])
-    with left:
-        st.markdown("##### 데이터셋별 건수")
-        ds_summary = (
-            month_df.groupby("데이터셋", as_index=False)
-            .size()
-            .rename(columns={"size": "NEW 건수"})
-            .sort_values("NEW 건수", ascending=False)
-        )
-        st.dataframe(ds_summary, use_container_width=True, hide_index=True)
-    with right:
-        st.markdown("##### 구분/유형별 건수")
-        type_summary = (
-            month_df.groupby(["구분", "유형"], as_index=False)
-            .size()
-            .rename(columns={"size": "NEW 건수"})
-            .sort_values(["구분", "유형"])
-        )
-        st.dataframe(type_summary, use_container_width=True, hide_index=True)
+    ds_summary = (
+        month_df.groupby("데이터셋", as_index=False)
+        .size()
+        .rename(columns={"size": "NEW 건수"})
+        .sort_values("NEW 건수", ascending=False)
+    )
+    ds_lines = ["##### 데이터셋별 건수"]
+    ds_lines.extend([f"- {row['데이터셋']}: **{int(row['NEW 건수']):,}건**" for _, row in ds_summary.iterrows()])
+    st.markdown("\n".join(ds_lines))
+
+    type_summary = (
+        month_df.groupby(["구분", "유형"], as_index=False)
+        .size()
+        .rename(columns={"size": "NEW 건수"})
+        .sort_values(["구분", "유형"])
+    )
+    type_lines = ["##### 구분/유형별 건수"]
+    type_lines.extend(
+        [f"- {row['구분']} / {row['유형']}: **{int(row['NEW 건수']):,}건**" for _, row in type_summary.iterrows()]
+    )
+    st.markdown("\n".join(type_lines))
 
     st.markdown("##### 상세 이벤트")
-    detail_cols = ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "유형", "이벤트"]
-    st.dataframe(
-        month_df[detail_cols].sort_values(["데이터셋", "지역", "지표", "분류", "구분", "유형"]),
-        use_container_width=True,
-        hide_index=True,
-    )
+    detail_df = month_df[
+        ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "유형", "이벤트"]
+    ].sort_values(["데이터셋", "지역", "지표", "분류", "구분", "유형"])
+    max_detail_rows = 300
+    detail_lines = []
+    for _, row in detail_df.head(max_detail_rows).iterrows():
+        category_text = str(row["분류"]).strip() if str(row["분류"]).strip() else "전체"
+        detail_lines.append(
+            f"- **[{row['기준월']}]** {row['데이터셋']} | {row['지역']} | {row['지표']} | {category_text} | {row['구분']} {row['유형']}"
+        )
+    if len(detail_df) > max_detail_rows:
+        detail_lines.append(f"- ... 총 {len(detail_df):,}건 중 상위 {max_detail_rows:,}건만 표시")
+    st.markdown("\n".join(detail_lines))
 
 
 st.title("경제활동인구 월별 모니터링")
