@@ -658,6 +658,105 @@ def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
     return out.drop(columns=["기준월_ts"], errors="ignore")
 
 
+def _trailing_new_streak(months: pd.Series, end_month: pd.Timestamp) -> int:
+    if months.empty or pd.isna(end_month):
+        return 0
+    month_set = {pd.Timestamp(x).to_period("M") for x in months.dropna().tolist()}
+    current = pd.Timestamp(end_month).to_period("M")
+    streak = 0
+    while current in month_set:
+        streak += 1
+        current = current - 1
+    return streak
+
+
+def _render_new_history_insights(events: pd.DataFrame) -> None:
+    view = events.copy()
+    view["기준월_dt"] = pd.to_datetime(view["기준월"] + "-01", errors="coerce")
+    view = view.dropna(subset=["기준월_dt"])
+    if view.empty:
+        return
+
+    st.markdown("#### NEW 발생 히트맵")
+    f1, f2, f3, f4 = st.columns([1, 1, 1, 1])
+    with f1:
+        dataset_opt = ["전체"] + sorted(view["데이터셋"].dropna().unique().tolist())
+        dataset_sel = st.selectbox("데이터셋", dataset_opt, key="history_dataset")
+    filt = view if dataset_sel == "전체" else view[view["데이터셋"] == dataset_sel]
+
+    with f2:
+        indicator_opt = ["전체"] + sorted(filt["지표"].dropna().unique().tolist())
+        indicator_sel = st.selectbox("지표", indicator_opt, key="history_indicator")
+    filt = filt if indicator_sel == "전체" else filt[filt["지표"] == indicator_sel]
+
+    with f3:
+        category_opt = ["전체"] + sorted(filt["분류"].dropna().astype(str).unique().tolist())
+        category_sel = st.selectbox("분류", category_opt, key="history_category")
+    filt = filt if category_sel == "전체" else filt[filt["분류"] == category_sel]
+
+    with f4:
+        event_opt = ["전체", "최고 NEW", "최저 NEW"]
+        event_sel = st.selectbox("이벤트", event_opt, key="history_event")
+    if event_sel == "최고 NEW":
+        filt = filt[filt["이벤트"].astype(str).str.contains("최고", na=False)]
+    elif event_sel == "최저 NEW":
+        filt = filt[filt["이벤트"].astype(str).str.contains("최저", na=False)]
+
+    if filt.empty:
+        st.info("선택한 조건의 NEW 이력이 없습니다.")
+        return
+
+    month_events = (
+        filt.groupby(["지역", "기준월_dt"], as_index=False)
+        .size()
+        .rename(columns={"size": "new_count"})
+    )
+    regions = sorted(month_events["지역"].dropna().unique().tolist())
+    month_from = month_events["기준월_dt"].min()
+    month_to = month_events["기준월_dt"].max()
+    all_months = pd.date_range(month_from, month_to, freq="MS")
+    grid = pd.MultiIndex.from_product([regions, all_months], names=["지역", "기준월_dt"]).to_frame(index=False)
+    heat_df = grid.merge(month_events, on=["지역", "기준월_dt"], how="left").fillna({"new_count": 0})
+
+    region_order = (
+        month_events.groupby("지역")["기준월_dt"]
+        .nunique()
+        .sort_values(ascending=False)
+        .index.tolist()
+    )
+    heat_chart = (
+        alt.Chart(heat_df)
+        .mark_rect()
+        .encode(
+            x=alt.X("yearmonth(기준월_dt):O", title="기준월"),
+            y=alt.Y("지역:N", sort=region_order, title="지역"),
+            color=alt.Color("new_count:Q", title="NEW 건수", scale=alt.Scale(scheme="oranges")),
+            tooltip=[
+                alt.Tooltip("지역:N", title="지역"),
+                alt.Tooltip("yearmonth(기준월_dt):O", title="기준월"),
+                alt.Tooltip("new_count:Q", title="NEW 건수"),
+            ],
+        )
+        .properties(height=max(260, len(region_order) * 22))
+    )
+    st.altair_chart(heat_chart, use_container_width=True)
+
+    st.markdown("#### 지역별 NEW 지속 요약")
+    region_month = filt[["지역", "기준월_dt"]].drop_duplicates()
+    latest_month = region_month["기준월_dt"].max()
+    summary = region_month.groupby("지역", as_index=False).agg(총_NEW_개월수=("기준월_dt", "count"))
+    summary["최근_연속_NEW_개월수"] = summary["지역"].map(
+        lambda r: _trailing_new_streak(
+            region_month.loc[region_month["지역"] == r, "기준월_dt"],
+            latest_month,
+        )
+    )
+    summary = summary.sort_values(["총_NEW_개월수", "최근_연속_NEW_개월수"], ascending=[False, False])
+    summary.columns = ["지역", "총 NEW 개월수", "최근 연속 NEW 개월수"]
+    st.dataframe(summary, use_container_width=True, hide_index=True)
+    st.caption(f"최근 연속 NEW 개월수 기준월: {_fmt_period(latest_month)}")
+
+
 st.title("경제활동인구 월별 모니터링")
 
 with st.sidebar:
@@ -744,6 +843,7 @@ with tab6:
             "<p style='color:#b91c1c;font-weight:700'>NEW 이벤트는 해당 월 시점 기준으로 전체기간 최고/최저를 새로 갱신한 이력을 표시합니다.</p>",
             unsafe_allow_html=True,
         )
+        _render_new_history_insights(events)
 
 st.markdown(
     "<hr style='margin-top:2rem; margin-bottom:0.5rem;'>"
