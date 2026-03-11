@@ -628,42 +628,50 @@ def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
             metric_df = series[["period", metric_col]].dropna(subset=[metric_col]).copy()
             if metric_df.empty:
                 continue
+            metric_df = metric_df.sort_values("period").reset_index(drop=True)
 
             prev_max = metric_df[metric_col].cummax().shift(1)
             prev_min = metric_df[metric_col].cummin().shift(1)
-            is_new_max = metric_df[metric_col] > prev_max
-            is_new_min = metric_df[metric_col] < prev_min
+            prev_5y_max = metric_df[metric_col].shift(1).rolling(window=60, min_periods=1).max()
+            prev_5y_min = metric_df[metric_col].shift(1).rolling(window=60, min_periods=1).min()
 
-            for _, row in metric_df[is_new_max].iterrows():
-                rows.append(
-                    {
-                        **meta,
-                        "기준월": _fmt_period(row["period"]),
-                        "기준월_ts": pd.Timestamp(row["period"]),
-                        "구분": metric_label,
-                        "유형": "최고",
-                        "이벤트": f"{metric_label} 전체기간 최고 NEW",
-                    }
-                )
-            for _, row in metric_df[is_new_min].iterrows():
-                rows.append(
-                    {
-                        **meta,
-                        "기준월": _fmt_period(row["period"]),
-                        "기준월_ts": pd.Timestamp(row["period"]),
-                        "구분": metric_label,
-                        "유형": "최저",
-                        "이벤트": f"{metric_label} 전체기간 최저 NEW",
-                    }
-                )
+            for scope_label, scope_series in [("전체기간", prev_max), ("최근5년", prev_5y_max)]:
+                is_new_max = metric_df[metric_col] > scope_series
+                for _, row in metric_df[is_new_max.fillna(False)].iterrows():
+                    rows.append(
+                        {
+                            **meta,
+                            "기준월": _fmt_period(row["period"]),
+                            "기준월_ts": pd.Timestamp(row["period"]),
+                            "구분": metric_label,
+                            "범위": scope_label,
+                            "유형": "최고",
+                            "이벤트": f"{metric_label} {scope_label} 최고 NEW",
+                        }
+                    )
+
+            for scope_label, scope_series in [("전체기간", prev_min), ("최근5년", prev_5y_min)]:
+                is_new_min = metric_df[metric_col] < scope_series
+                for _, row in metric_df[is_new_min.fillna(False)].iterrows():
+                    rows.append(
+                        {
+                            **meta,
+                            "기준월": _fmt_period(row["period"]),
+                            "기준월_ts": pd.Timestamp(row["period"]),
+                            "구분": metric_label,
+                            "범위": scope_label,
+                            "유형": "최저",
+                            "이벤트": f"{metric_label} {scope_label} 최저 NEW",
+                        }
+                    )
     if not rows:
-        return pd.DataFrame(columns=["데이터셋", "지역", "지표", "분류", "기준월", "구분", "유형", "이벤트"])
+        return pd.DataFrame(columns=["데이터셋", "지역", "지표", "분류", "기준월", "구분", "범위", "유형", "이벤트"])
     out = pd.DataFrame(rows).sort_values(
-        ["기준월_ts", "데이터셋", "지역", "지표", "분류", "구분", "유형"],
-        ascending=[False, True, True, True, True, True, True],
+        ["기준월_ts", "데이터셋", "지역", "지표", "분류", "구분", "범위", "유형"],
+        ascending=[False, True, True, True, True, True, True, True],
     )
     out = out.drop(columns=["기준월_ts"], errors="ignore")
-    return out[["데이터셋", "지역", "지표", "분류", "기준월", "구분", "유형", "이벤트"]]
+    return out[["데이터셋", "지역", "지표", "분류", "기준월", "구분", "범위", "유형", "이벤트"]]
 
 
 def _render_new_event_charts(events_view: pd.DataFrame) -> None:
@@ -899,27 +907,30 @@ def _render_new_monthly_report(events: pd.DataFrame) -> None:
     st.markdown("\n".join(ds_lines))
 
     type_summary = (
-        month_df.groupby(["구분", "유형"], as_index=False)
+        month_df.groupby(["구분", "범위", "유형"], as_index=False)
         .size()
         .rename(columns={"size": "NEW 건수"})
-        .sort_values(["구분", "유형"])
+        .sort_values(["구분", "범위", "유형"])
     )
-    type_lines = ["##### 구분/유형별 건수"]
+    type_lines = ["##### 구분/범위/유형별 건수"]
     type_lines.extend(
-        [f"- {row['구분']} / {row['유형']}: **{int(row['NEW 건수']):,}건**" for _, row in type_summary.iterrows()]
+        [
+            f"- {row['구분']} / {row['범위']} / {row['유형']}: **{int(row['NEW 건수']):,}건**"
+            for _, row in type_summary.iterrows()
+        ]
     )
     st.markdown("\n".join(type_lines))
 
     st.markdown("##### 상세 이벤트")
     detail_df = month_df[
-        ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "유형", "이벤트"]
-    ].sort_values(["데이터셋", "지역", "지표", "분류", "구분", "유형"])
+        ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "범위", "유형", "이벤트"]
+    ].sort_values(["데이터셋", "지역", "지표", "분류", "구분", "범위", "유형"])
     max_detail_rows = 300
     detail_lines = []
     for _, row in detail_df.head(max_detail_rows).iterrows():
         category_text = str(row["분류"]).strip() if str(row["분류"]).strip() else "전체"
         detail_lines.append(
-            f"- **[{row['기준월']}]** {row['데이터셋']} | {row['지역']} | {row['지표']} | {category_text} | {row['구분']} {row['유형']}"
+            f"- **[{row['기준월']}]** {row['데이터셋']} | {row['지역']} | {row['지표']} | {category_text} | {row['구분']} {row['범위']} {row['유형']}"
         )
     if len(detail_df) > max_detail_rows:
         detail_lines.append(f"- ... 총 {len(detail_df):,}건 중 상위 {max_detail_rows:,}건만 표시")
@@ -1025,21 +1036,24 @@ with tab6:
 
         st.markdown("##### 상세 이벤트")
         detail_df = view[
-            ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "유형", "이벤트"]
-        ].sort_values(["기준월", "데이터셋", "지역", "지표", "분류", "구분", "유형"], ascending=[False, True, True, True, True, True, True])
+            ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "범위", "유형", "이벤트"]
+        ].sort_values(
+            ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "범위", "유형"],
+            ascending=[False, True, True, True, True, True, True, True],
+        )
         max_history_rows = 500
         detail_lines = []
         for _, row in detail_df.head(max_history_rows).iterrows():
             category_text = str(row["분류"]).strip() if str(row["분류"]).strip() else "전체"
             detail_lines.append(
-                f"- **[{row['기준월']}]** {row['데이터셋']} | {row['지역']} | {row['지표']} | {category_text} | {row['구분']} {row['유형']}"
+                f"- **[{row['기준월']}]** {row['데이터셋']} | {row['지역']} | {row['지표']} | {category_text} | {row['구분']} {row['범위']} {row['유형']}"
             )
         if len(detail_df) > max_history_rows:
             detail_lines.append(f"- ... 총 {len(detail_df):,}건 중 상위 {max_history_rows:,}건만 표시")
         st.markdown("\n".join(detail_lines) if detail_lines else "- 표시할 이벤트가 없습니다.")
         _render_new_event_charts(view)
         st.markdown(
-            "<p style='color:#b91c1c;font-weight:700'>NEW 이벤트는 해당 월 시점 기준으로 전체기간 최고/최저를 새로 갱신한 이력을 표시합니다.</p>",
+            "<p style='color:#b91c1c;font-weight:700'>NEW 이벤트는 해당 월 시점 기준으로 전체기간/최근5년 최고·최저를 새로 갱신한 이력을 표시합니다.</p>",
             unsafe_allow_html=True,
         )
 with tab7:
