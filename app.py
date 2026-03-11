@@ -883,7 +883,6 @@ def _render_new_monthly_report(events: pd.DataFrame) -> None:
     total_count = len(month_df)
     max_count = int((month_df["유형"] == "최고").sum())
     min_count = int((month_df["유형"] == "최저").sum())
-    region_count = int(month_df["지역"].nunique())
     st.markdown(
         "\n".join(
             [
@@ -891,7 +890,6 @@ def _render_new_monthly_report(events: pd.DataFrame) -> None:
                 f"- 총 NEW 이벤트: **{total_count:,}건**",
                 f"- 최고 NEW: **{max_count:,}건**",
                 f"- 최저 NEW: **{min_count:,}건**",
-                f"- 발생 지역 수: **{region_count:,}개**",
             ]
         )
     )
@@ -900,8 +898,16 @@ def _render_new_monthly_report(events: pd.DataFrame) -> None:
         month_df.groupby("데이터셋", as_index=False)
         .size()
         .rename(columns={"size": "NEW 건수"})
-        .sort_values("NEW 건수", ascending=False)
     )
+    dataset_tab_order = [cfg.title for cfg in DATASETS]
+    ds_summary["정렬순서"] = ds_summary["데이터셋"].map(
+        {name: idx for idx, name in enumerate(dataset_tab_order)}
+    )
+    ds_summary = ds_summary.sort_values(
+        by=["정렬순서", "데이터셋"],
+        ascending=[True, True],
+        na_position="last",
+    ).drop(columns=["정렬순서"])
     ds_lines = ["##### 데이터셋별 건수"]
     ds_lines.extend([f"- {row['데이터셋']}: **{int(row['NEW 건수']):,}건**" for _, row in ds_summary.iterrows()])
     st.markdown("\n".join(ds_lines))
@@ -910,8 +916,16 @@ def _render_new_monthly_report(events: pd.DataFrame) -> None:
         month_df.groupby(["구분", "범위", "유형"], as_index=False)
         .size()
         .rename(columns={"size": "NEW 건수"})
-        .sort_values(["구분", "범위", "유형"])
     )
+    metric_order = {"원자료": 0, "YoY(절대)": 1, "YoY(증감률)": 2}
+    scope_order = {"전체기간": 0, "최근5년": 1}
+    event_type_order = {"최고": 0, "최저": 1}
+    type_summary["정렬_구분"] = type_summary["구분"].map(metric_order).fillna(999)
+    type_summary["정렬_범위"] = type_summary["범위"].map(scope_order).fillna(999)
+    type_summary["정렬_유형"] = type_summary["유형"].map(event_type_order).fillna(999)
+    type_summary = type_summary.sort_values(
+        ["정렬_구분", "정렬_범위", "정렬_유형", "구분", "범위", "유형"]
+    ).drop(columns=["정렬_구분", "정렬_범위", "정렬_유형"])
     type_lines = ["##### 구분/범위/유형별 건수"]
     type_lines.extend(
         [
