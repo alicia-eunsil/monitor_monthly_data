@@ -117,6 +117,44 @@ OCCUPATION_CATEGORY_ORDER = [
     "기타",
 ]
 
+SIGUNGU_INDUSTRY_ORDER = [
+    "계",
+    "농업",
+    "광제조업",
+    "전기운수통신",
+    "건설업",
+    "도소매",
+    "사업개인공공서비스",
+]
+
+SIGUNGU_OCCUPATION_ORDER = [
+    "계",
+    "관리자",
+    "사무종사자",
+    "서비스판매종사자",
+    "농립어업종사자",
+    "기능기계조작",
+    "단순노무종사자",
+]
+
+SIGUNGU_STATUS_ORDER = [
+    "계",
+    "임금근로자",
+    "-상용근로자",
+    "-임시일용근로자",
+    "비임금근로자",
+]
+
+SIGUNGU_AGE_ORDER = [
+    "계",
+    "15~29세",
+    "30~49세",
+    "50~64세",
+    "65세이상",
+    "15~64세",
+    "55세이상",
+]
+
 STATUS_CATEGORY_ORDER = [
     "비임금근로자",
     "*자영업자",
@@ -180,6 +218,35 @@ def _order_occupation_categories(categories: List[str]) -> List[str]:
     )
 
 
+def _norm_sigungu_industry(text: str) -> str:
+    s = str(text).strip()
+    s = re.sub(r"\s+", "", s)
+    s = re.sub(r"[·ㆍ,/()\-]", "", s)
+    return s
+
+
+def _order_sigungu_industry_categories(categories: List[str]) -> List[str]:
+    def _rank(cat: str) -> int:
+        n = _norm_sigungu_industry(cat)
+        if n in {"계", "합계", "전체"}:
+            return 0
+        if "농업" in n or "농림어업" in n:
+            return 1
+        if ("광" in n and "제조" in n) or "광업제조업" in n:
+            return 2
+        if "전기" in n and "운수" in n and "통신" in n:
+            return 3
+        if "건설" in n:
+            return 4
+        if "도소매" in n:
+            return 5
+        if "사업" in n and "개인" in n and ("공공" in n or "서비스" in n):
+            return 6
+        return 999
+
+    return sorted(categories, key=lambda x: (_rank(x), x))
+
+
 def _norm_age_category(text: str) -> str:
     s = str(text).strip()
     s = re.sub(r"\s+", "", s)
@@ -195,6 +262,28 @@ def _order_age_categories(categories: List[str]) -> List[str]:
         categories,
         key=lambda x: (order_map.get(_norm_age_category(x), 999), x),
     )
+
+
+def _order_sigungu_age_categories(categories: List[str]) -> List[str]:
+    def _rank(cat: str) -> int:
+        n = _norm_age_category(cat)
+        if n in {"계", "합계", "전체"}:
+            return 0
+        if "15~29" in n:
+            return 1
+        if "30~49" in n:
+            return 2
+        if "50~64" in n:
+            return 3
+        if "65이상" in n:
+            return 4
+        if "15~64" in n:
+            return 5
+        if "55이상" in n:
+            return 6
+        return 999
+
+    return sorted(categories, key=lambda x: (_rank(x), x))
 
 
 def _norm_status_category(text: str) -> str:
@@ -215,6 +304,46 @@ def _order_status_categories(categories: List[str]) -> List[str]:
             x,
         ),
     )
+
+
+def _order_sigungu_status_categories(categories: List[str]) -> List[str]:
+    def _rank(cat: str) -> int:
+        n = _norm_status_category(cat)
+        if n in {"계", "합계", "전체"}:
+            return 0
+        if n == "임금근로자":
+            return 1
+        if "상용근로자" in n:
+            return 2
+        if "임시일용근로자" in n or ("임시" in n and "일용" in n):
+            return 3
+        if "비임금근로자" in n:
+            return 4
+        return 999
+
+    return sorted(categories, key=lambda x: (_rank(x), x))
+
+
+def _order_sigungu_occupation_categories(categories: List[str]) -> List[str]:
+    def _rank(cat: str) -> int:
+        n = _norm_occupation_category(cat)
+        if n in {"계", "합계", "전체"}:
+            return 0
+        if "관리자" in n:
+            return 1
+        if "사무종사자" in n:
+            return 2
+        if ("서비스" in n and "판매" in n) or "서비스판매종사자" in n:
+            return 3
+        if "농림어업종사자" in n or "농립어업종사자" in n or "농림어업" in n or "농립어업" in n:
+            return 4
+        if "기능" in n and "기계" in n and ("조작" in n or "조립" in n):
+            return 5
+        if "단순노무" in n:
+            return 6
+        return 999
+
+    return sorted(categories, key=lambda x: (_rank(x), x))
 
 
 def _seeded_api_key() -> str:
@@ -511,6 +640,7 @@ def _render_dataset(
     region_pool: List[str],
     default_region: str,
     datasets: List[DatasetConfig],
+    is_gyeonggi31_mode: bool,
 ) -> None:
     cfg = next(x for x in datasets if x.key == dataset_key)
     subset = df[df["dataset_key"] == dataset_key].copy()
@@ -569,12 +699,22 @@ def _render_dataset(
             cleaned = [c for c in categories if str(c).strip() not in drop_labels]
             if cleaned:
                 categories = cleaned
-        if dataset_key == "age":
-            categories = _order_age_categories(categories)
-        if dataset_key == "status":
-            categories = _order_status_categories(categories)
-        if dataset_key == "occupation":
-            categories = _order_occupation_categories(categories)
+        if is_gyeonggi31_mode:
+            if dataset_key == "industry":
+                categories = _order_sigungu_industry_categories(categories)
+            if dataset_key == "age":
+                categories = _order_sigungu_age_categories(categories)
+            if dataset_key == "status":
+                categories = _order_sigungu_status_categories(categories)
+            if dataset_key == "occupation":
+                categories = _order_sigungu_occupation_categories(categories)
+        else:
+            if dataset_key == "age":
+                categories = _order_age_categories(categories)
+            if dataset_key == "status":
+                categories = _order_status_categories(categories)
+            if dataset_key == "occupation":
+                categories = _order_occupation_categories(categories)
         with category_container:
             if dataset_key in {"industry", "occupation", "age", "status"}:
                 category = st.radio(
@@ -1224,15 +1364,15 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     ]
 )
 with tab1:
-    _render_dataset(visible_data, "activity", region_pool, default_region, active_datasets)
+    _render_dataset(visible_data, "activity", region_pool, default_region, active_datasets, is_gyeonggi31_mode)
 with tab2:
-    _render_dataset(visible_data, "age", region_pool, default_region, active_datasets)
+    _render_dataset(visible_data, "age", region_pool, default_region, active_datasets, is_gyeonggi31_mode)
 with tab3:
-    _render_dataset(visible_data, "status", region_pool, default_region, active_datasets)
+    _render_dataset(visible_data, "status", region_pool, default_region, active_datasets, is_gyeonggi31_mode)
 with tab4:
-    _render_dataset(visible_data, "industry", region_pool, default_region, active_datasets)
+    _render_dataset(visible_data, "industry", region_pool, default_region, active_datasets, is_gyeonggi31_mode)
 with tab5:
-    _render_dataset(visible_data, "occupation", region_pool, default_region, active_datasets)
+    _render_dataset(visible_data, "occupation", region_pool, default_region, active_datasets, is_gyeonggi31_mode)
 with tab6:
     st.subheader("NEW HISTORY")
     if events.empty:
