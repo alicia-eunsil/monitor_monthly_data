@@ -25,11 +25,11 @@ KOSIS Open API를 사용해 취업/고용 관련 지표를 모니터링하는 St
   - 이벤트 분석 차트
 - `REPORT`
   - 월별 주요 NEW 이벤트를 마크다운 리포트로 요약
-- `AI INSIGHTS` (전국+17개 시도 모드에서만 표시)
-  - 전국 대비 경기도 기여 분석
-  - 영향요인분해(분류별 증감/기여도)
-  - Robust Z-score 기반 이상탐지
-  - 수치 근거 중심 AI 해설 문장 출력
+  - 하단에 `AI INSIGHTS` 표시(전국+17개 시도 모드에서만 표시)
+    - 영향요인분해(전국 내 경기도 비중)
+    - 영향요인분해(지역별)
+    - Robust Z-score 기반 이상탐지
+    - 수치 근거 중심 AI 해설 문장 출력
 
 ## 데이터 소스 (KOSIS)
 
@@ -74,6 +74,26 @@ $env:api_key="YOUR_KOSIS_API_KEY"
 Streamlit Cloud 예시:
 - App settings > Secrets에 `API_KEY` 또는 `api_key` 등록
 
+## 접속코드 설정
+
+앱은 접속코드가 설정되어 있어야 실행된다.
+
+아래 4개 중 하나로 설정하면 된다.
+
+1. 환경변수 `access_code`
+2. 환경변수 `ACCESS_CODE`
+3. Streamlit secrets `access_code`
+4. Streamlit secrets `ACCESS_CODE`
+
+로컬 예시:
+
+```powershell
+$env:ACCESS_CODE="YOUR_ACCESS_CODE"
+```
+
+Streamlit Cloud 예시:
+- App settings > Secrets에 `ACCESS_CODE` 또는 `access_code` 등록
+
 ## 실행
 
 ```powershell
@@ -83,6 +103,8 @@ streamlit run app.py
 ## 동작 메모
 
 - 조회 시 로딩바/상태 문구를 표시한다.
+- 초기 로딩 안내 문구: `데이터 불러오는 중... (약 10분 소요예정)`
 - `데이터 새로고침` 버튼으로 세션 캐시를 초기화할 수 있다.
 - 월별 데이터의 종료시점은 실행 시점 기준 현재월을 사용한다.
 - 반기 데이터(경기 31시군)는 현재 `202502`를 최신 반기값으로 고정 조회한다.
+- 이상탐지 표는 `이상점수 50점 이상`만 표시하며, `분류 > 기준시점(최신순) > 이상점수`로 정렬한다.

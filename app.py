@@ -355,6 +355,36 @@ def _seeded_api_key() -> str:
     return str(secret_value or os.getenv("api_key", "") or os.getenv("API_KEY", ""))
 
 
+def _seeded_access_code() -> str:
+    try:
+        secret_value = st.secrets.get("access_code", "") or st.secrets.get("ACCESS_CODE", "")
+    except Exception:  # noqa: BLE001
+        secret_value = ""
+    return str(secret_value or os.getenv("access_code", "") or os.getenv("ACCESS_CODE", ""))
+
+
+def _require_access_gate() -> None:
+    expected = _seeded_access_code().strip()
+    if not expected:
+        st.error("접속코드가 설정되지 않았습니다. Streamlit secrets에 ACCESS_CODE(또는 access_code)를 설정하세요.")
+        st.stop()
+
+    if st.session_state.get("_access_granted_code", "") == expected:
+        return
+
+    st.title("접속 코드")
+    st.caption("앱 사용을 위해 접속 코드를 입력하세요.")
+    with st.form("access_code_form", clear_on_submit=True):
+        entered = st.text_input("접속 코드", type="password", key="_access_code_input")
+        submitted = st.form_submit_button("접속")
+    if submitted:
+        if str(entered).strip() == expected:
+            st.session_state["_access_granted_code"] = expected
+            st.rerun()
+        st.error("접속 코드가 올바르지 않습니다.")
+    st.stop()
+
+
 def _fmt_period(value: object, prd_se: str = "M") -> str:
     ts = pd.Timestamp(value)
     if pd.isna(ts):
@@ -1999,7 +2029,12 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
                 "30점 미만=보통 변동 범위"
             )
 
+_require_access_gate()
+
 st.title("경제활동인구 모니터링")
+if st.button("접속 해제", key="logout_main"):
+    st.session_state.pop("_access_granted_code", None)
+    st.rerun()
 
 with st.sidebar:
     st.subheader("데이터 제어")
