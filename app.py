@@ -1993,8 +1993,8 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
             st.dataframe(display_df, use_container_width=True, hide_index=True)
             st.caption(
                 "참고: 75점 이상=우선 점검(강한 이상), "
-                "50~74점=주의 관찰(중간 이상), "
-                "30~49점=참고 수준(약한 이상), "
+                "50-74점=주의 관찰(중간 이상), "
+                "30-49점=참고 수준(약한 이상), "
                 "30점 미만=보통 변동 범위"
             )
 
