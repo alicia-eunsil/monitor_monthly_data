@@ -1145,6 +1145,7 @@ def _render_new_monthly_report(
     events: pd.DataFrame,
     report_scope: str,
     datasets: List[DatasetConfig],
+    source_df: pd.DataFrame,
 ) -> None:
     if events.empty:
         st.info("리포트로 표시할 NEW 이벤트가 없습니다.")
@@ -1201,6 +1202,85 @@ def _render_new_monthly_report(
         return " (→0)"
 
     st.markdown(f"#### {selected_month} NEW 리포트 ({scope_title})")
+
+    # Add activity (9 indicators) month snapshot above NEW-event summary.
+    activity_lines: List[str] = []
+    activity_df = source_df[source_df["dataset_key"] == "activity"].copy()
+    activity_df["period"] = pd.to_datetime(activity_df["period"], errors="coerce")
+    activity_df = activity_df.dropna(subset=["period"])
+    if not activity_df.empty:
+        region_candidates = activity_df["region_name"].dropna().astype(str).str.strip().unique().tolist()
+        summary_region = "경기도" if "경기도" in region_candidates else ""
+        if not summary_region and report_scope == "31개 시군":
+            sigungu_candidates = sorted([r for r in GYEONGGI_SIGUNGU if r in region_candidates])
+            summary_region = sigungu_candidates[0] if sigungu_candidates else ""
+        if summary_region:
+            region_df = activity_df[activity_df["region_name"] == summary_region].copy()
+            if not region_df.empty:
+                prd_se = (
+                    str(region_df["prd_se"].dropna().iloc[0]).upper()
+                    if "prd_se" in region_df.columns and not region_df["prd_se"].dropna().empty
+                    else "M"
+                )
+                region_df["period_label"] = region_df["period"].apply(lambda x: _fmt_period(x, prd_se))
+                latest_rows = region_df[region_df["period_label"] == selected_month].copy()
+                if not latest_rows.empty:
+                    latest_period = pd.Timestamp(latest_rows["period"].max())
+                    all_periods = sorted(region_df["period"].dropna().unique().tolist())
+                    lag = 2 if prd_se == "H" else 12
+                    prev_period = _find_prev_period(all_periods, latest_period, lag)
+                    prev_rows = (
+                        region_df[region_df["period"] == prev_period].copy()
+                        if prev_period is not None
+                        else pd.DataFrame(columns=region_df.columns)
+                    )
+
+                    latest_map = (
+                        latest_rows.groupby("indicator_name", as_index=False)
+                        .agg({"value": "mean", "unit": "first"})
+                        .rename(columns={"value": "latest_value", "unit": "latest_unit"})
+                    )
+                    prev_map = (
+                        prev_rows.groupby("indicator_name", as_index=False)
+                        .agg({"value": "mean", "unit": "first"})
+                        .rename(columns={"value": "prev_value", "unit": "prev_unit"})
+                    )
+                    merged = latest_map.merge(prev_map, on="indicator_name", how="left")
+                    merged["unit"] = merged["latest_unit"].fillna(merged["prev_unit"]).fillna("")
+                    merged["delta_value"] = pd.to_numeric(merged["latest_value"], errors="coerce") - pd.to_numeric(
+                        merged["prev_value"], errors="coerce"
+                    )
+                    activity_order_map = {
+                        _norm_indicator_name(name): idx for idx, name in enumerate(ACTIVITY_INDICATOR_ORDER)
+                    }
+                    merged["norm_indicator"] = merged["indicator_name"].apply(_norm_indicator_name)
+                    merged = merged[merged["norm_indicator"].isin(activity_order_map.keys())].copy()
+                    merged["sort_key"] = merged["norm_indicator"].map(activity_order_map).fillna(999)
+                    merged = merged.sort_values(["sort_key", "indicator_name"]).drop(columns=["sort_key"])
+
+                    def _fmt_delta_signed(v: object, u: str) -> str:
+                        if v is None or pd.isna(v):
+                            return "-"
+                        vv = float(v)
+                        if vv > 0:
+                            return f"▲{_fmt_num(vv, u)}"
+                        if vv < 0:
+                            return f"▼{_fmt_num(abs(vv), u)}"
+                        return f"→{_fmt_num(0, u)}"
+
+                    yoy_label = _time_labels(datasets)["yoy"]
+                    activity_lines.append(f"##### 경제활동인구현황 9개 지표 요약 ({summary_region})")
+                    for _, r in merged.iterrows():
+                        activity_lines.append(
+                            f"- {str(r['indicator_name'])}: "
+                            f"이번{labels['point']} **{_fmt_num(r['latest_value'], str(r['unit']))}**, "
+                            f"전년{yoy_label} **{_fmt_num(r['prev_value'], str(r['unit']))}**, "
+                            f"증감 **{_fmt_delta_signed(r['delta_value'], str(r['unit']))}**"
+                        )
+
+    if activity_lines:
+        st.markdown("\n".join(activity_lines))
+
     total_count = len(month_df)
     max_count = int((month_df["유형"] == "최고").sum())
     min_count = int((month_df["유형"] == "최저").sum())
@@ -2191,7 +2271,12 @@ with tab7:
         horizontal=True,
         key="report_scope",
     )
-    _render_new_monthly_report(events, report_scope=report_scope, datasets=active_datasets)
+    _render_new_monthly_report(
+        events,
+        report_scope=report_scope,
+        datasets=active_datasets,
+        source_df=data,
+    )
     if region_scope == "province":
         st.markdown("---")
         _render_ai_insights(visible_data, region_pool, _time_labels(active_datasets))
