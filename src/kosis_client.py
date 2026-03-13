@@ -138,14 +138,18 @@ class KosisClient:
     def _try_split_by_period(
         self, config: DatasetConfig, params: Dict[str, str]
     ) -> Optional[List[Dict[str, Any]]]:
-        if params.get("prdSe") != "M":
+        prd_se = str(params.get("prdSe", "")).upper()
+        if prd_se not in {"M", "H"}:
             return None
         start = params.get("startPrdDe", "")
         end = params.get("endPrdDe", "")
         if not (start and end and start < end):
             return None
 
-        left_end, right_start = self._split_month_range(start, end)
+        if prd_se == "H":
+            left_end, right_start = self._split_halfyear_range(start, end)
+        else:
+            left_end, right_start = self._split_month_range(start, end)
         self._log(f"period split {start}-{end} -> {start}-{left_end} | {right_start}-{end}")
         left_params = dict(params)
         right_params = dict(params)
@@ -248,6 +252,17 @@ class KosisClient:
         return left_end, right_start
 
     @staticmethod
+    def _split_halfyear_range(start_yyyyhh: str, end_yyyyhh: str) -> tuple[str, str]:
+        start_idx = KosisClient._half_index(start_yyyyhh)
+        end_idx = KosisClient._half_index(end_yyyyhh)
+        if start_idx >= end_idx:
+            return start_yyyyhh, end_yyyyhh
+        mid_idx = (start_idx + end_idx) // 2
+        left_end = KosisClient._index_to_yyyyhh(mid_idx)
+        right_start = KosisClient._index_to_yyyyhh(mid_idx + 1)
+        return left_end, right_start
+
+    @staticmethod
     def _month_index(yyyymm: str) -> int:
         dt = datetime.strptime(yyyymm, "%Y%m")
         return dt.year * 12 + (dt.month - 1)
@@ -257,6 +272,27 @@ class KosisClient:
         year = index // 12
         month = (index % 12) + 1
         return f"{year:04d}{month:02d}"
+
+    @staticmethod
+    def _half_index(yyyyhh: str) -> int:
+        text = str(yyyyhh).strip()
+        if len(text) == 6:
+            year = int(text[:4])
+            half = text[4:6]
+            if half == "01":
+                return year * 2
+            if half == "02":
+                return year * 2 + 1
+        if len(text) == 5 and text[-1] in {"1", "2"}:
+            year = int(text[:4])
+            return year * 2 + (int(text[-1]) - 1)
+        raise ValueError(f"Unsupported half-year format: {yyyyhh}")
+
+    @staticmethod
+    def _index_to_yyyyhh(index: int) -> str:
+        year = index // 2
+        half = "01" if (index % 2) == 0 else "02"
+        return f"{year:04d}{half}"
 
     def _log(self, message: str) -> None:
         if len(self._debug_logs) < self._MAX_DEBUG_LOGS:

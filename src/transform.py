@@ -6,7 +6,12 @@ from typing import Dict, Iterable, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from .config import DatasetConfig, TARGET_REGIONS
+from .config import (
+    DatasetConfig,
+    GYEONGGI_DISTRICT_TO_CITY,
+    GYEONGGI_SIGUNGU,
+    TARGET_REGIONS,
+)
 
 
 REGION_PATTERNS = {
@@ -39,12 +44,33 @@ def _pick_first(columns: Iterable[str], candidates: Iterable[str]) -> Optional[s
     return None
 
 
-def _to_timestamp(value: str) -> pd.Timestamp:
+def _compact_text(value: object) -> str:
+    return re.sub(r"\s+", "", str(value or "").strip())
+
+
+def _to_timestamp(value: str, prd_se: str = "M") -> pd.Timestamp:
     text = str(value).strip()
     if not text or text in {"None", "nan", "NaN", "null"}:
         return pd.NaT
 
-    # Common monthly formats from KOSIS: YYYYMM, YYYY.MM, YYYY-MM, YYYYMmm
+    # Half-year formats from KOSIS: YYYY1/2, YYYY.1/2, YYYY01/02
+    if str(prd_se).upper() == "H":
+        if len(text) == 5 and text.isdigit() and text[-1] in {"1", "2"}:
+            year = int(text[:4])
+            month = 6 if text[-1] == "1" else 12
+            return pd.to_datetime(f"{year:04d}{month:02d}01", format="%Y%m%d", errors="coerce")
+        m_h = re.search(r"^(\d{4})\D*([12])$", text)
+        if m_h:
+            year = int(m_h.group(1))
+            month = 6 if m_h.group(2) == "1" else 12
+            return pd.to_datetime(f"{year:04d}{month:02d}01", format="%Y%m%d", errors="coerce")
+        digits_h = re.sub(r"\D", "", text)
+        if len(digits_h) == 6 and digits_h[4:6] in {"01", "02"}:
+            year = int(digits_h[:4])
+            month = 6 if digits_h[4:6] == "01" else 12
+            return pd.to_datetime(f"{year:04d}{month:02d}01", format="%Y%m%d", errors="coerce")
+
+    # Common monthly formats from KOSIS: YYYYMM, YYYY.MM, YYYY-MM, YYYYMmm.
     if len(text) == 6 and text.isdigit():
         return pd.to_datetime(text + "01", format="%Y%m%d", errors="coerce")
     if len(text) == 4 and text.isdigit():
@@ -88,9 +114,30 @@ def canonical_region(raw_name: object) -> str:
     compact = re.sub(r"\s+", "", text)
     for canonical, patterns in REGION_PATTERNS.items():
         for p in patterns:
-            if p in compact:
+            if compact == re.sub(r"\s+", "", p):
                 return canonical
     return text
+
+
+def _to_gyeonggi_city(raw_name: object) -> str:
+    text = _compact_text(raw_name)
+    if not text or text in {"계", "합계", "전국", "경기도"}:
+        return ""
+    if text.startswith("경기도"):
+        text = text[len("경기도") :]
+    if text in GYEONGGI_DISTRICT_TO_CITY:
+        return GYEONGGI_DISTRICT_TO_CITY[text]
+    for city in GYEONGGI_SIGUNGU:
+        if city in text:
+            return city
+    return ""
+
+
+def _is_district_row(raw_name: object) -> bool:
+    text = _compact_text(raw_name)
+    if text.startswith("경기도"):
+        text = text[len("경기도") :]
+    return text in GYEONGGI_DISTRICT_TO_CITY
 
 
 def _dimension_columns(df: pd.DataFrame) -> Tuple[list[str], list[str]]:
@@ -127,13 +174,25 @@ def _matching_code_col(name_col: str, code_cols: list[str]) -> Optional[str]:
     return None
 
 
-def _select_region_column(df: pd.DataFrame, name_cols: list[str]) -> Optional[str]:
+def _select_region_column(
+    df: pd.DataFrame,
+    name_cols: list[str],
+    region_candidates: Optional[list[str]] = None,
+) -> Optional[str]:
     if not name_cols:
         return None
+    candidates = region_candidates or TARGET_REGIONS
+    candidate_tokens = [_compact_text(x) for x in candidates if str(x).strip()]
     best_col = name_cols[0]
     best_score = -1
     for col in name_cols:
-        score = df[col].map(canonical_region).isin(TARGET_REGIONS).sum()
+        score = (
+            df[col]
+            .astype(str)
+            .map(_compact_text)
+            .map(lambda x: any(token and token in x for token in candidate_tokens))
+            .sum()
+        )
         if score > best_score:
             best_score = int(score)
             best_col = col
@@ -164,7 +223,11 @@ def _select_category_column(
     return sorted(ranked, key=lambda c: _uniq_count(c), reverse=True)[0]
 
 
-def normalize_records(config: DatasetConfig, records: list[Dict]) -> pd.DataFrame:
+def normalize_records(
+    config: DatasetConfig,
+    records: list[Dict],
+    region_scope: str = "province",
+) -> pd.DataFrame:
     if not records:
         return pd.DataFrame()
 
@@ -176,7 +239,10 @@ def normalize_records(config: DatasetConfig, records: list[Dict]) -> pd.DataFram
     unit_col = _pick_first(df.columns, ["UNIT_NM", "UNITNM"])
     name_dims, code_dims = _dimension_columns(df)
 
-    region_name_col = _select_region_column(df, name_dims)
+    region_candidates = TARGET_REGIONS
+    if region_scope == "gyeonggi31":
+        region_candidates = GYEONGGI_SIGUNGU + list(GYEONGGI_DISTRICT_TO_CITY.keys()) + ["경기도"]
+    region_name_col = _select_region_column(df, name_dims, region_candidates=region_candidates)
     region_code_col = _matching_code_col(region_name_col, code_dims) if region_name_col else None
     category_name_col = None
     category_code_col = None
@@ -189,7 +255,8 @@ def normalize_records(config: DatasetConfig, records: list[Dict]) -> pd.DataFram
         {
             "dataset_key": config.key,
             "dataset_title": config.title,
-            "period": df[period_col].astype(str).map(_to_timestamp) if period_col else pd.NaT,
+            "prd_se": config.prd_se,
+            "period": df[period_col].astype(str).map(lambda x: _to_timestamp(x, config.prd_se)) if period_col else pd.NaT,
             "value": df[value_col].map(_to_float) if value_col else np.nan,
             "unit": df[unit_col].astype(str).str.strip() if unit_col else "",
             "region_code": df[region_code_col].astype(str).str.strip() if region_code_col else "",
@@ -205,12 +272,73 @@ def normalize_records(config: DatasetConfig, records: list[Dict]) -> pd.DataFram
         }
     )
     # KOSIS national total can appear as "계" or region code "00".
+    out["raw_region_name"] = out["region_name"].astype(str)
     out["region_name"] = out["region_name"].replace({"계": "전국", "합계": "전국"})
     out.loc[out["region_code"].astype(str).str.strip() == "00", "region_name"] = "전국"
     out["region_name"] = out["region_name"].map(canonical_region)
     out["indicator_name"] = out["indicator_name"].replace("", pd.NA).fillna(out["indicator_code"])
     out["indicator_name"] = out["indicator_name"].replace("", "값")
-    out = out[out["region_name"].isin(TARGET_REGIONS)].copy()
+    if region_scope == "province":
+        out = out[out["region_name"].isin(TARGET_REGIONS)].copy()
+    else:
+        out["region_name"] = out["raw_region_name"].map(_to_gyeonggi_city)
+        out["_from_district"] = out["raw_region_name"].map(_is_district_row)
+        out = out[out["region_name"].isin(GYEONGGI_SIGUNGU)].copy()
+        key_cols = [
+            "dataset_key",
+            "dataset_title",
+            "prd_se",
+            "region_name",
+            "indicator_name",
+            "category_name",
+            "period",
+        ]
+        direct_city = out[~out["_from_district"]].copy()
+        district_rows = out[out["_from_district"]].copy()
+        if not direct_city.empty and not district_rows.empty:
+            direct_keys = direct_city[key_cols].drop_duplicates()
+            district_rows = district_rows.merge(
+                direct_keys.assign(_has_city=1),
+                on=key_cols,
+                how="left",
+            )
+            district_rows = district_rows[district_rows["_has_city"].isna()].drop(columns=["_has_city"])
+        if not district_rows.empty:
+            district_agg = (
+                district_rows.groupby(key_cols, as_index=False, dropna=False)
+                .agg(
+                    {
+                        "value": "sum",
+                        "unit": "first",
+                        "region_code": "first",
+                        "indicator_code": "first",
+                        "category_code": "first",
+                        "raw_region_name": "first",
+                    }
+                )
+            )
+        else:
+            district_agg = pd.DataFrame(columns=direct_city.columns)
+        out = pd.concat([direct_city, district_agg], ignore_index=True, sort=False)
+        out = out.drop(columns=["_from_district"], errors="ignore")
+
+        # Add Gyeonggi total series for report use.
+        g_cols = ["dataset_key", "dataset_title", "prd_se", "indicator_name", "category_name", "period"]
+        gyeonggi_total = (
+            out.groupby(g_cols, as_index=False, dropna=False)
+            .agg(
+                {
+                    "value": "sum",
+                    "unit": "first",
+                    "indicator_code": "first",
+                    "category_code": "first",
+                }
+            )
+        )
+        if not gyeonggi_total.empty:
+            gyeonggi_total["region_name"] = "경기도"
+            gyeonggi_total["region_code"] = "31"
+            out = pd.concat([out, gyeonggi_total], ignore_index=True, sort=False)
     out = out.dropna(subset=["period", "value"])
     out = out.sort_values(["region_name", "indicator_name", "category_name", "period"])
     out = out.drop_duplicates(
@@ -224,6 +352,7 @@ def normalize_records(config: DatasetConfig, records: list[Dict]) -> pd.DataFram
         keep="last",
     )
     out["period_yyyymm"] = out["period"].dt.strftime("%Y%m")
+    out = out.drop(columns=["raw_region_name"], errors="ignore")
     return out
 
 
@@ -232,9 +361,16 @@ def add_yoy(df: pd.DataFrame) -> pd.DataFrame:
         return df
     group_cols = ["dataset_key", "region_name", "indicator_name", "category_name"]
     out = df.sort_values(group_cols + ["period"]).copy()
-    out["yoy_abs"] = out.groupby(group_cols, dropna=False)["value"].transform(lambda s: s - s.shift(12))
-    prev = out.groupby(group_cols, dropna=False)["value"].shift(12)
-    out["yoy_pct"] = np.where(prev == 0, np.nan, (out["value"] / prev - 1.0) * 100.0)
+
+    def _calc_group(g: pd.DataFrame) -> pd.DataFrame:
+        lag = 2 if str(g["prd_se"].iloc[0]).upper() == "H" else 12
+        g = g.copy()
+        g["yoy_abs"] = g["value"] - g["value"].shift(lag)
+        prev = g["value"].shift(lag)
+        g["yoy_pct"] = np.where(prev == 0, np.nan, (g["value"] / prev - 1.0) * 100.0)
+        return g
+
+    out = out.groupby(group_cols, dropna=False, group_keys=False).apply(_calc_group)
     return out
 
 

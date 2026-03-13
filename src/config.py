@@ -58,7 +58,14 @@ def default_end_period() -> str:
     return date.today().strftime("%Y%m")
 
 
-DATASETS = [
+def default_end_period_by_prd_se(prd_se: str) -> str:
+    if str(prd_se).upper() == "H":
+        # Regional employment survey fixed latest half-year point.
+        return "202502"
+    return default_end_period()
+
+
+DATASETS_MONTHLY = [
     DatasetConfig(
         key="activity",
         title="경제활동인구현황",
@@ -120,6 +127,78 @@ DATASETS = [
 ]
 
 
+DATASETS_GYEONGGI_HALFYEAR = [
+    DatasetConfig(
+        key="activity",
+        title="경제활동인구현황",
+        org_id="101",
+        tbl_id="DT_1ES3A01S",
+        itm_id="T1+T2+T3+T4+T9+T5+T6+T7+T11+T8+T10+",
+        prd_se="H",
+        start_prd_de="201301",
+        has_category=False,
+    ),
+    DatasetConfig(
+        key="age",
+        title="연령별 취업자",
+        org_id="101",
+        tbl_id="DT_1ES3A03_A01S",
+        itm_id="T00+T11+T12+T21+",
+        obj_l1="ALL",
+        obj_l2="ALL",
+        prd_se="H",
+        start_prd_de="201301",
+        has_category=True,
+        category_label="연령(구분)",
+    ),
+    DatasetConfig(
+        key="status",
+        title="종사상지위별 취업자",
+        org_id="101",
+        tbl_id="DT_1ES3A07S",
+        itm_id="T3+",
+        obj_l1="ALL",
+        obj_l2="ALL",
+        prd_se="H",
+        start_prd_de="201301",
+        has_category=True,
+        category_label="종사상지위(구분)",
+    ),
+    DatasetConfig(
+        key="industry",
+        title="산업별 취업자수",
+        org_id="101",
+        tbl_id="DT_1ES3A30S",
+        itm_id="T1+T2+",
+        obj_l1="ALL",
+        obj_l2="ALL",
+        prd_se="H",
+        start_prd_de="201301",
+        has_category=True,
+        category_label="산업(대분류)",
+    ),
+    DatasetConfig(
+        key="occupation",
+        title="직종별 취업자수",
+        org_id="101",
+        tbl_id="DT_1ES3A31S",
+        itm_id="T1+T2+",
+        obj_l1="ALL",
+        obj_l2="ALL",
+        prd_se="H",
+        start_prd_de="201301",
+        has_category=True,
+        category_label="직종(대분류)",
+    ),
+]
+
+
+def datasets_for_scope(region_scope: str) -> list[DatasetConfig]:
+    if region_scope == "gyeonggi31":
+        return DATASETS_GYEONGGI_HALFYEAR
+    return DATASETS_MONTHLY
+
+
 TARGET_REGIONS = [
     "전국",
     "서울특별시",
@@ -140,3 +219,63 @@ TARGET_REGIONS = [
     "경상남도",
     "제주특별자치도",
 ]
+
+
+GYEONGGI_SIGUNGU = [
+    "가평군",
+    "고양시",
+    "과천시",
+    "광명시",
+    "광주시",
+    "구리시",
+    "군포시",
+    "김포시",
+    "남양주시",
+    "동두천시",
+    "부천시",
+    "성남시",
+    "수원시",
+    "시흥시",
+    "안산시",
+    "안성시",
+    "안양시",
+    "양주시",
+    "양평군",
+    "여주시",
+    "연천군",
+    "오산시",
+    "용인시",
+    "의왕시",
+    "의정부시",
+    "이천시",
+    "파주시",
+    "평택시",
+    "포천시",
+    "하남시",
+    "화성시",
+]
+
+
+GYEONGGI_DISTRICT_TO_CITY = {
+    "성남시수정구": "성남시",
+    "성남시중원구": "성남시",
+    "성남시분당구": "성남시",
+    "고양시덕양구": "고양시",
+    "고양시일산동구": "고양시",
+    "고양시일산서구": "고양시",
+    "고양시일산구": "고양시",
+    "수원시장안구": "수원시",
+    "수원시권선구": "수원시",
+    "수원시팔달구": "수원시",
+    "수원시영통구": "수원시",
+    "안양시만안구": "안양시",
+    "안양시동안구": "안양시",
+    "안산시상록구": "안산시",
+    "안산시단원구": "안산시",
+    "용인시처인구": "용인시",
+    "용인시기흥구": "용인시",
+    "용인시수지구": "용인시",
+    "부천시원미구": "부천시",
+    "부천시소사구": "부천시",
+    "부천시오정구": "부천시",
+}

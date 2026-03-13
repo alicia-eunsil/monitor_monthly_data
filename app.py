@@ -8,7 +8,13 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from src.config import DATASETS, TARGET_REGIONS, default_end_period
+from src.config import (
+    GYEONGGI_SIGUNGU,
+    TARGET_REGIONS,
+    DatasetConfig,
+    datasets_for_scope,
+    default_end_period_by_prd_se,
+)
 from src.kosis_client import KosisClient
 from src.transform import add_yoy, build_stats, normalize_records, series_filter
 
@@ -113,7 +119,7 @@ AGE_CATEGORY_ORDER = [
     "계",
 ]
 
-DATA_MODEL_VERSION = "2026-03-05-add-age-status-datasets-v3"
+DATA_MODEL_VERSION = "2026-03-13-halfyear-gyeonggi31-v1"
 
 
 def _norm_indicator_name(text: str) -> str:
@@ -195,11 +201,23 @@ def _seeded_api_key() -> str:
     return str(secret_value or os.getenv("api_key", "") or os.getenv("API_KEY", ""))
 
 
-def _fmt_period(value: object) -> str:
+def _fmt_period(value: object, prd_se: str = "M") -> str:
     ts = pd.Timestamp(value)
     if pd.isna(ts):
         return "-"
+    if str(prd_se).upper() == "H":
+        month = int(ts.month)
+        if month <= 6:
+            return f"{ts.year}-상반기"
+        return f"{ts.year}-하반기"
     return ts.strftime("%Y-%m")
+
+
+def _time_labels(datasets: List[DatasetConfig]) -> Dict[str, str]:
+    is_halfyear = bool(datasets) and all(str(cfg.prd_se).upper() == "H" for cfg in datasets)
+    if is_halfyear:
+        return {"point": "반기", "trend": "반기별", "yoy": "전년동기"}
+    return {"point": "월", "trend": "월별", "yoy": "전년동월"}
 
 
 def _fmt_num(value: object, unit: str = "", digits: int = 1) -> str:
@@ -284,14 +302,14 @@ def _auto_y_domain(values: pd.Series, pad_ratio: float = 0.08) -> List[float] | 
     return [vmin - pad, vmax + pad]
 
 
-@st.cache_data(ttl=60 * 30, show_spinner=False)
-def fetch_records_cached(
+def fetch_records_live(
     api_key: str,
     dataset_key: str,
     end_period: str,
     config_signature: str,
+    datasets: List[DatasetConfig],
 ) -> Dict[str, Any]:
-    cfg = next((x for x in DATASETS if x.key == dataset_key), None)
+    cfg = next((x for x in datasets if x.key == dataset_key), None)
     if cfg is None:
         raise RuntimeError(f"Unknown dataset key: {dataset_key}")
     client = KosisClient(api_key=api_key)
@@ -303,9 +321,10 @@ def load_data_with_progress(
     api_key: str,
     status_box: Any,
     progress_box: Any,
+    region_scope: str,
+    datasets: List[DatasetConfig],
 ) -> tuple[pd.DataFrame, List[str], List[str]]:
-    end_period = default_end_period()
-    total_steps = len(DATASETS) * 2 + 1
+    total_steps = len(datasets) * 2 + 1
     step = 0
     frames: List[pd.DataFrame] = []
     errors: List[str] = []
@@ -314,17 +333,28 @@ def load_data_with_progress(
     progress = progress_box.progress(0)
     status = status_box
 
-    for cfg in DATASETS:
+    for cfg in datasets:
         status.info(f"데이터 불러오는 중: {cfg.title}")
         try:
+            end_period = default_end_period_by_prd_se(cfg.prd_se)
             config_signature = "|".join(
-                [cfg.tbl_id, cfg.itm_id, cfg.obj_l1, cfg.obj_l2, cfg.output_fields, cfg.start_prd_de]
+                [
+                    cfg.tbl_id,
+                    cfg.itm_id,
+                    cfg.obj_l1,
+                    cfg.obj_l2,
+                    cfg.output_fields,
+                    cfg.start_prd_de,
+                    cfg.prd_se,
+                    end_period,
+                ]
             )
-            result = fetch_records_cached(
+            result = fetch_records_live(
                 api_key=api_key,
                 dataset_key=cfg.key,
                 end_period=end_period,
                 config_signature=config_signature,
+                datasets=datasets,
             )
             records = result.get("records", [])
             for line in result.get("debug_logs", []):
@@ -345,7 +375,7 @@ def load_data_with_progress(
         progress.progress(min(100, int(step * 100 / total_steps)))
 
         status.info(f"파싱 중: {cfg.title}")
-        parsed = normalize_records(cfg, records)
+        parsed = normalize_records(cfg, records, region_scope=region_scope)
         debug_logs.append(f"[{cfg.key}] parsed_rows={len(parsed)} raw_rows={len(records)}")
         if not parsed.empty:
             frames.append(parsed)
@@ -367,11 +397,12 @@ def load_data_with_progress(
     return combined, errors, debug_logs
 
 
-def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str) -> pd.DataFrame:
+def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str, prd_se: str) -> pd.DataFrame:
+    yoy_label = "전년동기" if str(prd_se).upper() == "H" else "전년동월"
     labels = {
         "level": "원자료",
-        "yoy_abs": "전년동월대비 증감(절대)",
-        "yoy_pct": "전년동월대비 증감률",
+        "yoy_abs": f"{yoy_label}대비 증감(절대)",
+        "yoy_pct": f"{yoy_label}대비 증감률",
     }
     label = labels[prefix]
     if prefix == "level":
@@ -385,9 +416,9 @@ def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str) -> pd.DataFr
             "지표": label,
             "구간": "전체기간",
             "최고": _fmt_num(stats.get(f"{prefix}_max_all_value"), display_unit),
-            "최고 시점": _fmt_period(stats.get(f"{prefix}_max_all_period")),
+            "최고 시점": _fmt_period(stats.get(f"{prefix}_max_all_period"), prd_se),
             "최저": _fmt_num(stats.get(f"{prefix}_min_all_value"), display_unit),
-            "최저 시점": _fmt_period(stats.get(f"{prefix}_min_all_period")),
+            "최저 시점": _fmt_period(stats.get(f"{prefix}_min_all_period"), prd_se),
             "비고": _remark_new(
                 bool(stats.get(f"{prefix}_is_new_max_all")),
                 bool(stats.get(f"{prefix}_is_new_min_all")),
@@ -397,9 +428,9 @@ def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str) -> pd.DataFr
             "지표": label,
             "구간": "최근 5년",
             "최고": _fmt_num(stats.get(f"{prefix}_max_5y_value"), display_unit),
-            "최고 시점": _fmt_period(stats.get(f"{prefix}_max_5y_period")),
+            "최고 시점": _fmt_period(stats.get(f"{prefix}_max_5y_period"), prd_se),
             "최저": _fmt_num(stats.get(f"{prefix}_min_5y_value"), display_unit),
-            "최저 시점": _fmt_period(stats.get(f"{prefix}_min_5y_period")),
+            "최저 시점": _fmt_period(stats.get(f"{prefix}_min_5y_period"), prd_se),
             "비고": _remark_new(
                 bool(stats.get(f"{prefix}_is_new_max_5y")),
                 bool(stats.get(f"{prefix}_is_new_min_5y")),
@@ -410,18 +441,24 @@ def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str) -> pd.DataFr
     return pd.DataFrame(rows)[cols]
 
 
-def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
-    cfg = next(x for x in DATASETS if x.key == dataset_key)
+def _render_dataset(
+    df: pd.DataFrame,
+    dataset_key: str,
+    region_pool: List[str],
+    default_region: str,
+    datasets: List[DatasetConfig],
+) -> None:
+    cfg = next(x for x in datasets if x.key == dataset_key)
     subset = df[df["dataset_key"] == dataset_key].copy()
     st.subheader(cfg.title)
     if subset.empty:
         st.warning("해당 데이터가 없습니다.")
         return
 
-    region_options = [r for r in TARGET_REGIONS if r in subset["region_name"].unique()]
+    region_options = [r for r in region_pool if r in subset["region_name"].unique()]
     if not region_options:
         region_options = sorted(subset["region_name"].dropna().unique().tolist())
-    default_region_index = region_options.index("경기도") if "경기도" in region_options else 0
+    default_region_index = region_options.index(default_region) if default_region in region_options else 0
 
     if dataset_key in {"industry", "occupation", "age", "status"}:
         col1, col2 = st.columns([1, 2])
@@ -501,10 +538,12 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         return
 
     stats = build_stats(series_df)
-    latest_period = _fmt_period(stats.get("latest_period"))
+    prd_se = str(series_df["prd_se"].iloc[-1]).upper() if "prd_se" in series_df.columns else "M"
+    labels = _time_labels(datasets)
+    latest_period = _fmt_period(stats.get("latest_period"), prd_se)
     unit = str(series_df["unit"].dropna().iloc[-1]) if not series_df["unit"].dropna().empty else ""
 
-    st.caption(f"최신 기준월: {latest_period}")
+    st.caption(f"최신 기준{labels['point']}: {latest_period}")
     cols = st.columns(5)
     with cols[0]:
         _card(
@@ -517,7 +556,7 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         _card(
             "전체기간 최고",
             _fmt_num(stats.get("level_max_all_value"), unit),
-            _fmt_period(stats.get("level_max_all_period")),
+            _fmt_period(stats.get("level_max_all_period"), prd_se),
             bool(stats.get("level_is_new_max_all")),
             "value-max",
         )
@@ -525,7 +564,7 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         _card(
             "전체기간 최저",
             _fmt_num(stats.get("level_min_all_value"), unit),
-            _fmt_period(stats.get("level_min_all_period")),
+            _fmt_period(stats.get("level_min_all_period"), prd_se),
             bool(stats.get("level_is_new_min_all")),
             "value-min",
         )
@@ -533,7 +572,7 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         _card(
             "최근 5년 중 최고",
             _fmt_num(stats.get("level_max_5y_value"), unit),
-            _fmt_period(stats.get("level_max_5y_period")),
+            _fmt_period(stats.get("level_max_5y_period"), prd_se),
             bool(stats.get("level_is_new_max_5y")),
             "value-max",
         )
@@ -541,15 +580,15 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         _card(
             "최근 5년 중 최저",
             _fmt_num(stats.get("level_min_5y_value"), unit),
-            _fmt_period(stats.get("level_min_5y_period")),
+            _fmt_period(stats.get("level_min_5y_period"), prd_se),
             bool(stats.get("level_is_new_min_5y")),
             "value-min",
         )
 
-    st.markdown("#### 월별 추이")
+    st.markdown(f"#### {labels['trend']} 추이")
     level_df = series_df[["period", "value"]].dropna(subset=["value"]).copy()
     if level_df.empty:
-        st.info("월별 추이 데이터가 없습니다.")
+        st.info(f"{labels['trend']} 추이 데이터가 없습니다.")
     else:
         level_title = "원자료" if not unit else f"원자료 ({unit})"
         level_domain = _auto_y_domain(level_df["value"])
@@ -557,10 +596,10 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
             alt.Chart(level_df)
             .mark_line(color="#4C78A8")
             .encode(
-                x=alt.X("period:T", title="월"),
+                x=alt.X("period:T", title=labels["point"]),
                 y=alt.Y("value:Q", title=level_title, scale=alt.Scale(domain=level_domain)),
                 tooltip=[
-                    alt.Tooltip("yearmonth(period):T", title="월"),
+                    alt.Tooltip("yearmonth(period):T", title=labels["point"]),
                     alt.Tooltip("value:Q", title=level_title, format=",.2f"),
                 ],
             )
@@ -568,7 +607,7 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         )
         st.altair_chart(level_chart, use_container_width=True)
 
-    st.markdown("#### 전년동월대비 증감(막대) / 증감률(선)")
+    st.markdown(f"#### {labels['yoy']}대비 증감(막대) / 증감률(선)")
     yoy_df = series_df[["period", "yoy_abs", "yoy_pct"]].dropna(
         subset=["yoy_abs", "yoy_pct"],
         how="all",
@@ -577,18 +616,18 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
         st.info("YoY 데이터가 없습니다.")
     else:
         base = alt.Chart(yoy_df).encode(
-            x=alt.X("period:T", title="월"),
+            x=alt.X("period:T", title=labels["point"]),
             tooltip=[
-                alt.Tooltip("yearmonth(period):T", title="월"),
-                alt.Tooltip("yoy_abs:Q", title="전년동월대비 증감", format=",.2f"),
-                alt.Tooltip("yoy_pct:Q", title="전년동월대비 증감률(%)", format=".2f"),
+                alt.Tooltip("yearmonth(period):T", title=labels["point"]),
+                alt.Tooltip("yoy_abs:Q", title=f"{labels['yoy']}대비 증감", format=",.2f"),
+                alt.Tooltip("yoy_pct:Q", title=f"{labels['yoy']}대비 증감률(%)", format=".2f"),
             ],
         )
         bars = base.mark_bar(color="#4C78A8", opacity=0.55).encode(
-            y=alt.Y("yoy_abs:Q", title="전년동월대비 증감")
+            y=alt.Y("yoy_abs:Q", title=f"{labels['yoy']}대비 증감")
         )
         line = base.mark_line(color="#E45756", point=True).encode(
-            y=alt.Y("yoy_pct:Q", title="전년동월대비 증감률(%)")
+            y=alt.Y("yoy_pct:Q", title=f"{labels['yoy']}대비 증감률(%)")
         )
         zero = alt.Chart(pd.DataFrame({"zero": [0]})).mark_rule(
             color="#9CA3AF",
@@ -600,9 +639,9 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
     st.markdown("#### 리포트 요약")
     summary_df = pd.concat(
         [
-            _extreme_rows(stats, "level", unit),
-            _extreme_rows(stats, "yoy_abs", unit),
-            _extreme_rows(stats, "yoy_pct", unit),
+            _extreme_rows(stats, "level", unit, prd_se),
+            _extreme_rows(stats, "yoy_abs", unit, prd_se),
+            _extreme_rows(stats, "yoy_pct", unit, prd_se),
         ],
         ignore_index=True,
     )
@@ -610,9 +649,11 @@ def _render_dataset(df: pd.DataFrame, dataset_key: str) -> None:
 
 def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
     rows: List[Dict[str, str]] = []
-    key_cols = ["dataset_key", "dataset_title", "region_name", "indicator_name", "category_name"]
+    key_cols = ["dataset_key", "dataset_title", "region_name", "indicator_name", "category_name", "prd_se"]
     for _, series in df.groupby(key_cols, dropna=False):
         series = series.sort_values("period")
+        prd_se = str(series["prd_se"].iloc[0]).upper() if "prd_se" in series.columns else "M"
+        recent_window = 10 if prd_se == "H" else 60
         meta = {
             "데이터셋": str(series["dataset_title"].iloc[0]),
             "지역": str(series["region_name"].iloc[0]),
@@ -632,8 +673,8 @@ def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
 
             prev_max = metric_df[metric_col].cummax().shift(1)
             prev_min = metric_df[metric_col].cummin().shift(1)
-            prev_5y_max = metric_df[metric_col].shift(1).rolling(window=60, min_periods=1).max()
-            prev_5y_min = metric_df[metric_col].shift(1).rolling(window=60, min_periods=1).min()
+            prev_5y_max = metric_df[metric_col].shift(1).rolling(window=recent_window, min_periods=1).max()
+            prev_5y_min = metric_df[metric_col].shift(1).rolling(window=recent_window, min_periods=1).min()
 
             for scope_label, scope_series in [("전체기간", prev_max), ("최근5년", prev_5y_max)]:
                 is_new_max = metric_df[metric_col] > scope_series
@@ -641,7 +682,7 @@ def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
                     rows.append(
                         {
                             **meta,
-                            "기준월": _fmt_period(row["period"]),
+                            "기준월": _fmt_period(row["period"], prd_se),
                             "기준월_ts": pd.Timestamp(row["period"]),
                             "구분": metric_label,
                             "범위": scope_label,
@@ -656,7 +697,7 @@ def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
                     rows.append(
                         {
                             **meta,
-                            "기준월": _fmt_period(row["period"]),
+                            "기준월": _fmt_period(row["period"], prd_se),
                             "기준월_ts": pd.Timestamp(row["period"]),
                             "구분": metric_label,
                             "범위": scope_label,
@@ -665,30 +706,33 @@ def _collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
                         }
                     )
     if not rows:
-        return pd.DataFrame(columns=["데이터셋", "지역", "지표", "분류", "기준월", "구분", "범위", "유형", "이벤트"])
+        return pd.DataFrame(columns=["데이터셋", "지역", "지표", "분류", "기준월", "기준월_ts", "구분", "범위", "유형", "이벤트"])
     out = pd.DataFrame(rows).sort_values(
         ["기준월_ts", "데이터셋", "지역", "지표", "분류", "구분", "범위", "유형"],
         ascending=[False, True, True, True, True, True, True, True],
     )
-    out = out.drop(columns=["기준월_ts"], errors="ignore")
-    return out[["데이터셋", "지역", "지표", "분류", "기준월", "구분", "범위", "유형", "이벤트"]]
+    return out[["데이터셋", "지역", "지표", "분류", "기준월", "기준월_ts", "구분", "범위", "유형", "이벤트"]]
 
 
-def _render_new_event_charts(events_view: pd.DataFrame) -> None:
+def _render_new_event_charts(events_view: pd.DataFrame, datasets: List[DatasetConfig]) -> None:
     if events_view.empty:
         st.info("그래프로 표시할 NEW 이벤트가 없습니다.")
         return
 
     view = events_view.copy()
-    view["기준월_dt"] = pd.to_datetime(view["기준월"] + "-01", errors="coerce")
+    if "기준월_ts" in view.columns:
+        view["기준월_dt"] = pd.to_datetime(view["기준월_ts"], errors="coerce")
+    else:
+        view["기준월_dt"] = pd.to_datetime(view["기준월"], errors="coerce")
     view = view.dropna(subset=["기준월_dt"])
     if view.empty:
         st.info("그래프로 표시할 NEW 이벤트가 없습니다.")
         return
 
     st.markdown("##### NEW 이벤트 분석 그래프")
-    dataset_tab_order = [cfg.title for cfg in DATASETS]
+    dataset_tab_order = [cfg.title for cfg in datasets]
     dataset_order_map = {name: idx for idx, name in enumerate(dataset_tab_order)}
+    labels = _time_labels(datasets)
 
     def _render_six_charts(base_df: pd.DataFrame, section_title: str) -> None:
         st.markdown(f"###### {section_title}")
@@ -708,14 +752,14 @@ def _render_new_event_charts(events_view: pd.DataFrame) -> None:
                 alt.Chart(month_summary)
                 .mark_line(point=True, color="#2563eb")
                 .encode(
-                    x=alt.X("기준월_dt:T", title="기준월"),
+                    x=alt.X("기준월_dt:T", title=f"기준{labels['point']}"),
                     y=alt.Y("NEW 건수:Q", title="NEW 건수"),
                     tooltip=[
-                        alt.Tooltip("기준월:N", title="기준월"),
+                        alt.Tooltip("기준월:N", title=f"기준{labels['point']}"),
                         alt.Tooltip("NEW 건수:Q", title="NEW 건수"),
                     ],
                 )
-                .properties(height=300, title="월별 NEW 건수 추이")
+                .properties(height=300, title=f"{labels['trend']} NEW 건수 추이")
             )
             st.altair_chart(month_chart, use_container_width=True)
 
@@ -836,7 +880,11 @@ def _render_new_event_charts(events_view: pd.DataFrame) -> None:
             st.altair_chart(type_count_chart, use_container_width=True)
 
     nation_df = view[view["지역"] == "전국"].copy()
-    _render_six_charts(nation_df, "전국 요약 (기본)")
+    if nation_df.empty:
+        nation_df = view.copy()
+        _render_six_charts(nation_df, "전체 요약 (기본)")
+    else:
+        _render_six_charts(nation_df, "전국 요약 (기본)")
 
     region_options = sorted([r for r in view["지역"].dropna().unique().tolist() if r and r != "전국"])
     if not region_options:
@@ -855,20 +903,32 @@ def _render_new_event_charts(events_view: pd.DataFrame) -> None:
     _render_six_charts(region_df, f"{selected_region} 요약")
 
 
-def _render_new_monthly_report(events: pd.DataFrame) -> None:
+def _render_new_monthly_report(
+    events: pd.DataFrame,
+    report_scope: str,
+    datasets: List[DatasetConfig],
+) -> None:
     if events.empty:
         st.info("리포트로 표시할 NEW 이벤트가 없습니다.")
         return
 
-    view = events[events["지역"] == "경기도"].copy()
+    if report_scope == "경기도 전체":
+        view = events[events["지역"] == "경기도"].copy()
+        scope_title = "경기도 전체"
+    else:
+        view = events[events["지역"].isin(GYEONGGI_SIGUNGU)].copy()
+        scope_title = "경기 31개 시군"
     if view.empty:
-        st.info("경기도 기준 NEW 이벤트가 없습니다.")
+        st.info(f"{scope_title} 기준 NEW 이벤트가 없습니다.")
         return
 
-    view["기준월_dt"] = pd.to_datetime(view["기준월"] + "-01", errors="coerce")
+    if "기준월_ts" in view.columns:
+        view["기준월_dt"] = pd.to_datetime(view["기준월_ts"], errors="coerce")
+    else:
+        view["기준월_dt"] = pd.to_datetime(view["기준월"], errors="coerce")
     view = view.dropna(subset=["기준월_dt"])
     if view.empty:
-        st.info("경기도 기준 NEW 이벤트가 없습니다.")
+        st.info(f"{scope_title} 기준 NEW 이벤트가 없습니다.")
         return
 
     month_table = (
@@ -878,10 +938,11 @@ def _render_new_monthly_report(events: pd.DataFrame) -> None:
         .reset_index(drop=True)
     )
     month_list = month_table["기준월"].tolist()
-    selected_month = st.selectbox("리포트 기준월", month_list, key="report_month")
+    labels = _time_labels(datasets)
+    selected_month = st.selectbox(f"리포트 기준{labels['point']}", month_list, key="report_month")
     month_df = view[view["기준월"] == selected_month].copy()
     if month_df.empty:
-        st.info("선택한 기준월의 NEW 이벤트가 없습니다.")
+        st.info(f"선택한 기준{labels['point']}의 NEW 이벤트가 없습니다.")
         return
     selected_idx_list = month_table.index[month_table["기준월"] == selected_month].tolist()
     prev_month = (
@@ -901,7 +962,7 @@ def _render_new_monthly_report(events: pd.DataFrame) -> None:
             return f" (▼{abs(diff):,})"
         return " (→0)"
 
-    st.markdown(f"#### {selected_month} 월간 NEW 리포트 (경기도)")
+    st.markdown(f"#### {selected_month} NEW 리포트 ({scope_title})")
     total_count = len(month_df)
     max_count = int((month_df["유형"] == "최고").sum())
     min_count = int((month_df["유형"] == "최저").sum())
@@ -911,7 +972,7 @@ def _render_new_monthly_report(events: pd.DataFrame) -> None:
     st.markdown(
         "\n".join(
             [
-                "##### 월간 요약",
+                f"##### {labels['point']} 요약",
                 f"- 총 NEW 이벤트: **{total_count:,}건**{_fmt_delta(total_count, prev_total_count)}",
                 f"- 최고 NEW: **{max_count:,}건**{_fmt_delta(max_count, prev_max_count)}",
                 f"- 최저 NEW: **{min_count:,}건**{_fmt_delta(min_count, prev_min_count)}",
@@ -924,7 +985,7 @@ def _render_new_monthly_report(events: pd.DataFrame) -> None:
         .size()
         .rename(columns={"size": "NEW 건수"})
     )
-    dataset_tab_order = [cfg.title for cfg in DATASETS]
+    dataset_tab_order = [cfg.title for cfg in datasets]
     ds_summary["정렬순서"] = ds_summary["데이터셋"].map(
         {name: idx for idx, name in enumerate(dataset_tab_order)}
     )
@@ -999,17 +1060,19 @@ def _render_new_monthly_report(events: pd.DataFrame) -> None:
     st.markdown("\n".join(detail_lines))
 
 
-st.title("경제활동인구 월별 모니터링")
+st.title("경제활동인구 모니터링")
 
 with st.sidebar:
+    scope_label = st.radio(
+        "조회 범위",
+        ["전국·17개 시도", "경기 31개 시군"],
+        index=0,
+        key="scope_label",
+    )
+    region_scope = "province" if scope_label == "전국·17개 시도" else "gyeonggi31"
+    active_datasets = datasets_for_scope(region_scope)
     st.subheader("데이터 제어")
     if st.button("데이터 새로고침"):
-        fetch_records_cached.clear()
-        st.session_state.pop("_loaded_api_key", None)
-        st.session_state.pop("_loaded_data_version", None)
-        st.session_state.pop("_loaded_data", None)
-        st.session_state.pop("_loaded_errors", None)
-        st.session_state.pop("_loaded_debug_logs", None)
         st.rerun()
     sidebar_status = st.empty()
     sidebar_progress_box = st.empty()
@@ -1020,25 +1083,13 @@ if not api_key:
     st.warning("API key is not set.")
     st.stop()
 
-if (
-    st.session_state.get("_loaded_api_key") == api_key
-    and st.session_state.get("_loaded_data_version") == DATA_MODEL_VERSION
-    and "_loaded_data" in st.session_state
-):
-    data = st.session_state["_loaded_data"]
-    load_errors = st.session_state.get("_loaded_errors", [])
-    debug_logs = st.session_state.get("_loaded_debug_logs", [])
-else:
-    data, load_errors, debug_logs = load_data_with_progress(
-        api_key=api_key,
-        status_box=sidebar_status,
-        progress_box=sidebar_progress_box,
-    )
-    st.session_state["_loaded_api_key"] = api_key
-    st.session_state["_loaded_data_version"] = DATA_MODEL_VERSION
-    st.session_state["_loaded_data"] = data
-    st.session_state["_loaded_errors"] = load_errors
-    st.session_state["_loaded_debug_logs"] = debug_logs
+data, load_errors, debug_logs = load_data_with_progress(
+    api_key=api_key,
+    status_box=sidebar_status,
+    progress_box=sidebar_progress_box,
+    region_scope=region_scope,
+    datasets=active_datasets,
+)
 
 if load_errors:
     st.error("일부 데이터셋 조회 중 오류가 발생했습니다.")
@@ -1054,7 +1105,18 @@ if data.empty:
     st.warning("조회된 데이터가 없습니다. API 파라미터를 확인하세요.")
     st.stop()
 
-events = _collect_new_events(data)
+region_pool = TARGET_REGIONS if region_scope == "province" else GYEONGGI_SIGUNGU
+default_region = "경기도" if region_scope == "province" else (GYEONGGI_SIGUNGU[0] if GYEONGGI_SIGUNGU else "")
+visible_data = data[data["region_name"].isin(region_pool)].copy()
+if visible_data.empty:
+    st.warning("선택한 범위에서 조회된 데이터가 없습니다.")
+    st.stop()
+
+if region_scope == "gyeonggi31":
+    event_source = data[data["region_name"].isin(GYEONGGI_SIGUNGU + ["경기도"])].copy()
+else:
+    event_source = visible_data
+events = _collect_new_events(event_source)
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     [
@@ -1068,15 +1130,15 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     ]
 )
 with tab1:
-    _render_dataset(data, "activity")
+    _render_dataset(visible_data, "activity", region_pool, default_region, active_datasets)
 with tab2:
-    _render_dataset(data, "age")
+    _render_dataset(visible_data, "age", region_pool, default_region, active_datasets)
 with tab3:
-    _render_dataset(data, "status")
+    _render_dataset(visible_data, "status", region_pool, default_region, active_datasets)
 with tab4:
-    _render_dataset(data, "industry")
+    _render_dataset(visible_data, "industry", region_pool, default_region, active_datasets)
 with tab5:
-    _render_dataset(data, "occupation")
+    _render_dataset(visible_data, "occupation", region_pool, default_region, active_datasets)
 with tab6:
     st.subheader("NEW HISTORY")
     if events.empty:
@@ -1113,14 +1175,22 @@ with tab6:
         if len(detail_df) > max_history_rows:
             detail_lines.append(f"- ... 총 {len(detail_df):,}건 중 상위 {max_history_rows:,}건만 표시")
         st.markdown("\n".join(detail_lines) if detail_lines else "- 표시할 이벤트가 없습니다.")
-        _render_new_event_charts(view)
+        _render_new_event_charts(view, active_datasets)
+        labels = _time_labels(active_datasets)
         st.markdown(
-            "<p style='color:#b91c1c;font-weight:700'>NEW 이벤트는 해당 월 시점 기준으로 전체기간/최근5년 최고·최저를 새로 갱신한 이력을 표시합니다.</p>",
+            f"<p style='color:#b91c1c;font-weight:700'>NEW 이벤트는 해당 {labels['point']} 시점 기준으로 전체기간/최근5년 최고·최저를 새로 갱신한 이력을 표시합니다.</p>",
             unsafe_allow_html=True,
         )
 with tab7:
     st.subheader("REPORT")
-    _render_new_monthly_report(events)
+    report_scope = st.radio(
+        "리포트 범위",
+        ["경기도 전체", "31개 시군"],
+        index=0,
+        horizontal=True,
+        key="report_scope",
+    )
+    _render_new_monthly_report(events, report_scope=report_scope, datasets=active_datasets)
 
 st.markdown(
     "<hr style='margin-top:2rem; margin-bottom:0.5rem;'>"
