@@ -2031,9 +2031,6 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
 _require_access_gate()
 
 st.title("경제활동인구 모니터링")
-if st.button("Sign out", key="logout_main"):
-    st.session_state.pop("_access_granted_code", None)
-    st.rerun()
 
 with st.sidebar:
     st.subheader("데이터 제어")
@@ -2092,15 +2089,15 @@ if debug_logs:
         with st.expander("진단 로그 보기", expanded=bool(load_errors)):
             st.code("\n".join(debug_logs[-300:]))
 
-is_gyeonggi31_mode = st.toggle(
-    "경기 31개 시군 모드",
-    value=False,
+is_sido_mode = st.toggle(
+    "시도",
+    value=True,
     key="scope_toggle",
 )
-scope_label = "경기 31개 시군" if is_gyeonggi31_mode else "전국·17개 시도"
-region_scope = "gyeonggi31" if is_gyeonggi31_mode else "province"
+scope_label = "전국 17개 시도" if is_sido_mode else "경기 31개 시군"
+region_scope = "province" if is_sido_mode else "gyeonggi31"
 active_datasets = datasets_for_scope(region_scope)
-st.caption(f"현재 조회 범위: {scope_label}")
+st.caption(f"조회범위: {scope_label}")
 
 data = scope_data.get(region_scope, pd.DataFrame())
 
