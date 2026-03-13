@@ -1560,7 +1560,7 @@ def _build_ai_anomaly_commentary(top_df: pd.DataFrame, point_label: str) -> str:
 
     lines = [
         f"- 최우선 이상 영역은 **{top['기준시점']} / {top['지역']} / {top['지표']} / {top['분류']}**이며, 이상점수는 **{top_score:.1f}점({score_grade})**이고 주된 이유는 `{top_reason}`입니다.",
-        f"- 상위 후보 분포는 75점 이상 **{high_cnt}건**, 50점 이상 75점 미만 **{med_cnt}건**, 30점 이상 50점 미만 **{low_cnt}건**입니다.",
+        f"- 상위 후보 분포는 75점 이상 **{high_cnt}건**, 50-74점 **{med_cnt}건**, 30-49점 **{low_cnt}건**입니다.",
         f"- 반복 패턴 기준으로 **{top.get('지표', '')}/{top.get('분류', '')}** 조합이 상위 목록에 **{same_pair_cnt}건** 포함됩니다.",
         f"- 현재 목록에서 가장 자주 나타나는 지표/분류는 **{dominant_indicator} / {dominant_category}**입니다.",
         f"- 점수는 Robust Z-score 기반이며, 평소 분포 대비 이례성을 의미합니다.",
