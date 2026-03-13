@@ -1398,6 +1398,13 @@ def _find_prev_period(periods: List[pd.Timestamp], latest: pd.Timestamp, lag: in
     return pd.Timestamp(sorted_periods[idx - lag])
 
 
+def _escape_markdown_text(text: object) -> str:
+    s = str(text)
+    for ch in ["\\", "`", "*", "_", "{", "}", "[", "]", "(", ")", "#", "+", "-", "!", "|", "~"]:
+        s = s.replace(ch, f"\\{ch}")
+    return s
+
+
 def _compute_contribution_table(
     df: pd.DataFrame,
     region: str,
@@ -1522,7 +1529,7 @@ def _build_ai_contribution_commentary(table: pd.DataFrame, meta: Dict[str, Any],
     if not top_pos.empty:
         pos_text = ", ".join(
             [
-                f"{r['분류']}({_fmt_num(r['증감'], unit)}, {_fmt_pct_text(r['기여율(%)'])})"
+                f"{_escape_markdown_text(r['분류'])}({_fmt_num(r['증감'], unit)}, {_fmt_pct_text(r['기여율(%)'])})"
                 for _, r in top_pos.iterrows()
             ]
         )
@@ -1530,7 +1537,7 @@ def _build_ai_contribution_commentary(table: pd.DataFrame, meta: Dict[str, Any],
     if not top_neg.empty:
         neg_text = ", ".join(
             [
-                f"{r['분류']}({_fmt_num(r['증감'], unit)}, {_fmt_pct_text(r['기여율(%)'])})"
+                f"{_escape_markdown_text(r['분류'])}({_fmt_num(r['증감'], unit)}, {_fmt_pct_text(r['기여율(%)'])})"
                 for _, r in top_neg.iterrows()
             ]
         )
