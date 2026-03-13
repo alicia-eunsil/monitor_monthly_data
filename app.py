@@ -2121,13 +2121,13 @@ events = _collect_new_events(event_source)
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     [
-        "경제활동인구현황",
-        "연령별 취업자",
-        "종사상지위별 취업자",
-        "산업별 취업자수",
-        "직종별 취업자수",
-        "NEW HISTORY",
-        "REPORT",
+        "① 경제활동인구현황",
+        "② 연령별 취업자",
+        "③ 종사상지위별 취업자",
+        "④ 산업별 취업자수",
+        "⑤ 직종별 취업자수",
+        "⑥ NEW HISTORY",
+        "⑦ REPORT",
     ]
 )
 with tab1:
