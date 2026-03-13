@@ -5,6 +5,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 import altair as alt
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -1264,6 +1265,308 @@ def _render_new_monthly_report(
     st.markdown("\n".join(detail_lines))
 
 
+def _pick_employment_indicator(indicators: List[str]) -> str:
+    if not indicators:
+        return ""
+    for token in ["취업자수", "취업자", "취업"]:
+        for name in indicators:
+            if token in str(name):
+                return str(name)
+    return str(indicators[0])
+
+
+def _find_prev_period(periods: List[pd.Timestamp], latest: pd.Timestamp, lag: int) -> Optional[pd.Timestamp]:
+    sorted_periods = sorted(pd.to_datetime(periods).dropna().tolist())
+    if latest not in sorted_periods:
+        return None
+    idx = sorted_periods.index(latest)
+    if idx < lag:
+        return None
+    return pd.Timestamp(sorted_periods[idx - lag])
+
+
+def _compute_contribution_table(
+    df: pd.DataFrame,
+    region: str,
+    dataset_key: str,
+    lag: int,
+) -> tuple[pd.DataFrame, Dict[str, Any]]:
+    meta: Dict[str, Any] = {
+        "ok": False,
+        "message": "",
+        "dataset_title": "",
+        "indicator": "",
+        "latest_period": pd.NaT,
+        "prev_period": pd.NaT,
+        "total_delta": np.nan,
+        "unit": "",
+    }
+    subset = df[(df["dataset_key"] == dataset_key) & (df["region_name"] == region)].copy()
+    if subset.empty:
+        meta["message"] = "해당 지역 데이터가 없습니다."
+        return pd.DataFrame(), meta
+
+    meta["dataset_title"] = str(subset["dataset_title"].iloc[0])
+    indicators = sorted(subset["indicator_name"].dropna().unique().tolist())
+    indicator = _pick_employment_indicator(indicators)
+    meta["indicator"] = indicator
+    subset = subset[subset["indicator_name"] == indicator].copy()
+    if subset.empty:
+        meta["message"] = "취업자 지표 데이터가 없습니다."
+        return pd.DataFrame(), meta
+
+    categories = [c for c in subset["category_name"].dropna().unique().tolist() if str(c).strip()]
+    if not categories:
+        meta["message"] = "분해 가능한 분류 데이터가 없습니다."
+        return pd.DataFrame(), meta
+
+    periods = sorted(subset["period"].dropna().unique().tolist())
+    if not periods:
+        meta["message"] = "기간 데이터가 없습니다."
+        return pd.DataFrame(), meta
+    latest_period = pd.Timestamp(periods[-1])
+    prev_period = _find_prev_period(periods, latest_period, lag)
+    if prev_period is None:
+        meta["message"] = "비교 가능한 이전 시점 데이터가 부족합니다."
+        return pd.DataFrame(), meta
+
+    latest_df = subset[subset["period"] == latest_period][["category_name", "value", "unit"]].copy()
+    prev_df = subset[subset["period"] == prev_period][["category_name", "value"]].copy()
+    merged = latest_df.merge(prev_df, on="category_name", how="outer", suffixes=("_latest", "_prev"))
+    merged["value_latest"] = pd.to_numeric(merged["value_latest"], errors="coerce")
+    merged["value_prev"] = pd.to_numeric(merged["value_prev"], errors="coerce")
+    merged["delta"] = merged["value_latest"] - merged["value_prev"]
+    merged["category_name"] = merged["category_name"].astype(str).str.strip()
+    merged = merged.dropna(subset=["delta"]).copy()
+    if merged.empty:
+        meta["message"] = "증감 계산 가능한 데이터가 없습니다."
+        return pd.DataFrame(), meta
+
+    total_row = merged[merged["category_name"].isin(["계", "합계", "전체"])]
+    if not total_row.empty:
+        total_delta = float(total_row["delta"].iloc[0])
+    else:
+        total_delta = float(merged["delta"].sum())
+    merged["기여율(%)"] = np.where(total_delta == 0, np.nan, (merged["delta"] / total_delta) * 100.0)
+
+    unit = ""
+    unit_series = latest_df["unit"].dropna()
+    if not unit_series.empty:
+        unit = str(unit_series.iloc[0])
+
+    view_df = merged.copy()
+    view_df = view_df[~view_df["category_name"].isin(["계", "합계", "전체"])].copy()
+    view_df = view_df.sort_values("delta", ascending=False)
+    out_df = pd.DataFrame(
+        {
+            "분류": view_df["category_name"],
+            "최신값": view_df["value_latest"].round(2),
+            "비교값": view_df["value_prev"].round(2),
+            "증감": view_df["delta"].round(2),
+            "기여율(%)": view_df["기여율(%)"].round(2),
+        }
+    )
+
+    meta.update(
+        {
+            "ok": True,
+            "latest_period": latest_period,
+            "prev_period": prev_period,
+            "total_delta": total_delta,
+            "unit": unit,
+        }
+    )
+    return out_df, meta
+
+
+def _build_ai_contribution_commentary(table: pd.DataFrame, meta: Dict[str, Any], point_label: str, yoy_label: str) -> str:
+    if table.empty or not meta.get("ok"):
+        return "AI 해설을 생성할 데이터가 부족합니다."
+    total_delta = float(meta.get("total_delta", np.nan))
+    unit = str(meta.get("unit", ""))
+    direction = "증가" if total_delta > 0 else "감소" if total_delta < 0 else "보합"
+    latest_p = _fmt_period(meta.get("latest_period"), "M" if point_label == "월" else "H")
+    prev_p = _fmt_period(meta.get("prev_period"), "M" if point_label == "월" else "H")
+    top_pos = table[table["증감"] > 0].nlargest(2, "증감")
+    top_neg = table[table["증감"] < 0].nsmallest(2, "증감")
+
+    lines: List[str] = []
+    lines.append(
+        f"- {latest_p} 기준 {meta['dataset_title']}({meta['indicator']})은 {prev_p} 대비 "
+        f"총 **{_fmt_num(total_delta, unit)}** {direction}했습니다."
+    )
+    if not top_pos.empty:
+        pos_text = ", ".join(
+            [
+                f"{r['분류']}({_fmt_num(r['증감'], unit)})"
+                for _, r in top_pos.iterrows()
+            ]
+        )
+        lines.append(f"- 증가 기여 상위는 {pos_text} 입니다.")
+    if not top_neg.empty:
+        neg_text = ", ".join(
+            [
+                f"{r['분류']}({_fmt_num(r['증감'], unit)})"
+                for _, r in top_neg.iterrows()
+            ]
+        )
+        lines.append(f"- 감소(상쇄) 요인은 {neg_text} 입니다.")
+    lines.append(f"- 해석 기준은 `{yoy_label} 대비`이며, 기여율은 총증감 대비 비중입니다.")
+    return "\n".join(lines)
+
+
+def _robust_zscore(series: pd.Series) -> pd.Series:
+    x = pd.to_numeric(series, errors="coerce")
+    med = x.median(skipna=True)
+    mad = (x - med).abs().median(skipna=True)
+    if pd.isna(mad) or mad == 0:
+        return pd.Series(np.nan, index=x.index)
+    return 0.6745 * (x - med) / mad
+
+
+def _compute_anomaly_table(df: pd.DataFrame, region: str, lag: int, lookback_periods: int = 36) -> pd.DataFrame:
+    base = df[df["region_name"] == region].copy()
+    if base.empty:
+        return pd.DataFrame()
+    rows: List[Dict[str, Any]] = []
+    group_cols = ["dataset_key", "dataset_title", "region_name", "indicator_name", "category_name"]
+    for _, g in base.groupby(group_cols, dropna=False):
+        g = g.sort_values("period").copy()
+        if len(g) < max(8, lag + 3):
+            continue
+        rz_value = _robust_zscore(g["value"]).abs()
+        rz_yoy_abs = _robust_zscore(g["yoy_abs"]).abs()
+        rz_yoy_pct = _robust_zscore(g["yoy_pct"]).abs()
+        score_raw = pd.concat([rz_value, rz_yoy_abs, rz_yoy_pct], axis=1).max(axis=1, skipna=True)
+        score = (score_raw / 5.0 * 100.0).clip(upper=100)
+        for i, row in g.iterrows():
+            s = score.loc[i]
+            if pd.isna(s):
+                continue
+            component_scores = {
+                "원자료": rz_value.loc[i],
+                "증감": rz_yoy_abs.loc[i],
+                "증감률": rz_yoy_pct.loc[i],
+            }
+            reason_key = max(component_scores, key=lambda k: -1 if pd.isna(component_scores[k]) else component_scores[k])
+            rows.append(
+                {
+                    "period": pd.Timestamp(row["period"]),
+                    "기준시점": _fmt_period(row["period"], str(row.get("prd_se", "M"))),
+                    "데이터셋": str(row["dataset_title"]),
+                    "지역": str(row["region_name"]),
+                    "지표": str(row["indicator_name"]),
+                    "분류": str(row["category_name"]) if str(row["category_name"]).strip() else "전체",
+                    "이상점수": float(s),
+                    "이유": f"{reason_key} 변동 이례",
+                }
+            )
+    if not rows:
+        return pd.DataFrame()
+    out = pd.DataFrame(rows)
+    latest_p = out["period"].max()
+    unique_p = sorted(out["period"].dropna().unique().tolist())
+    if latest_p in unique_p:
+        idx = unique_p.index(latest_p)
+        start_idx = max(0, idx - lookback_periods + 1)
+        cutoff = pd.Timestamp(unique_p[start_idx])
+        out = out[out["period"] >= cutoff].copy()
+    out = out.sort_values(["이상점수", "period"], ascending=[False, False])
+    out = out.drop(columns=["period"], errors="ignore")
+    return out
+
+
+def _build_ai_anomaly_commentary(top_df: pd.DataFrame, point_label: str) -> str:
+    if top_df.empty:
+        return "이상 이벤트가 탐지되지 않았습니다."
+    top = top_df.iloc[0]
+    high_cnt = int((top_df["이상점수"] >= 75).sum())
+    lines = [
+        f"- 최우선 이상 이벤트는 **{top['기준시점']} / {top['지역']} / {top['지표']} / {top['분류']}** 입니다.",
+        f"- 이상점수는 **{top['이상점수']:.1f}점**이며, 주된 이유는 `{top['이유']}`입니다.",
+        f"- 최근 구간에서 경고 수준(75점 이상) 이벤트는 **{high_cnt}건**입니다.",
+        f"- 점수는 Robust Z-score 기반이며, 평소 분포 대비 이례성을 의미합니다.",
+    ]
+    return "\n".join(lines)
+
+
+def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[str, str]) -> None:
+    st.subheader("AI INSIGHTS")
+    st.caption("영향요인분해 + AI 해설 + AI 이상탐지(Robust Z-score)")
+
+    region_default = "경기도" if "경기도" in region_pool else (region_pool[0] if region_pool else "")
+    region = st.selectbox(
+        "분석 지역",
+        region_pool,
+        index=region_pool.index(region_default) if region_default in region_pool else 0,
+        key="ai_region",
+    )
+    lag = 12 if labels["point"] == "월" else 2
+
+    st.markdown("#### 영향요인분해")
+    ds_options = {
+        "연령별 취업자": "age",
+        "종사상지위별 취업자": "status",
+        "산업별 취업자수": "industry",
+        "직종별 취업자수": "occupation",
+    }
+    ds_label = st.radio(
+        "분해 축",
+        list(ds_options.keys()),
+        horizontal=True,
+        key="ai_decomp_axis",
+    )
+    ds_key = ds_options[ds_label]
+    contrib_df, contrib_meta = _compute_contribution_table(df, region=region, dataset_key=ds_key, lag=lag)
+    if not contrib_meta.get("ok"):
+        st.info(str(contrib_meta.get("message", "분해 데이터를 계산할 수 없습니다.")))
+    else:
+        unit = str(contrib_meta.get("unit", ""))
+        st.markdown(
+            f"- 기준시점: **{_fmt_period(contrib_meta['latest_period'], 'M' if labels['point']=='월' else 'H')}**  \n"
+            f"- 비교시점: **{_fmt_period(contrib_meta['prev_period'], 'M' if labels['point']=='월' else 'H')}**  \n"
+            f"- 총 증감: **{_fmt_num(contrib_meta['total_delta'], unit)}**"
+        )
+        chart_df = contrib_df.copy()
+        chart = (
+            alt.Chart(chart_df)
+            .mark_bar()
+            .encode(
+                x=alt.X("증감:Q", title="증감"),
+                y=alt.Y("분류:N", sort="-x", title="분류"),
+                color=alt.condition("datum.증감 >= 0", alt.value("#2563eb"), alt.value("#dc2626")),
+                tooltip=[
+                    alt.Tooltip("분류:N", title="분류"),
+                    alt.Tooltip("증감:Q", title="증감", format=",.2f"),
+                    alt.Tooltip("기여율(%):Q", title="기여율(%)", format=".2f"),
+                ],
+            )
+            .properties(height=max(280, len(chart_df) * 22))
+        )
+        st.altair_chart(chart, use_container_width=True)
+        st.dataframe(contrib_df, use_container_width=True, hide_index=True)
+        st.markdown("##### AI 해설")
+        st.markdown(_build_ai_contribution_commentary(contrib_df, contrib_meta, labels["point"], labels["yoy"]))
+
+    st.markdown("#### AI 이상탐지 (Robust Z-score)")
+    lookback = st.slider(
+        f"이상탐지 최근 {labels['point']} 수",
+        min_value=12,
+        max_value=60,
+        value=36,
+        step=6,
+        key="ai_anomaly_lookback",
+    )
+    anomaly_df = _compute_anomaly_table(df, region=region, lag=lag, lookback_periods=lookback)
+    if anomaly_df.empty:
+        st.info("이상탐지 결과가 없습니다.")
+    else:
+        top_df = anomaly_df.head(10).copy()
+        st.dataframe(top_df, use_container_width=True, hide_index=True)
+        st.markdown("##### AI 해설")
+        st.markdown(_build_ai_anomaly_commentary(top_df, labels["point"]))
+
+
 st.title("경제활동인구 모니터링")
 
 with st.sidebar:
@@ -1425,6 +1728,10 @@ with tab7:
         key="report_scope",
     )
     _render_new_monthly_report(events, report_scope=report_scope, datasets=active_datasets)
+
+if region_scope == "province":
+    st.markdown("---")
+    _render_ai_insights(visible_data, region_pool, _time_labels(active_datasets))
 
 st.markdown(
     "<hr style='margin-top:2rem; margin-bottom:0.5rem;'>"
