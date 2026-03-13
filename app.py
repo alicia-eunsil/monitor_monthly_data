@@ -366,22 +366,21 @@ def _seeded_access_code() -> str:
 def _require_access_gate() -> None:
     expected = _seeded_access_code().strip()
     if not expected:
-        st.error("접속코드가 설정되지 않았습니다. Streamlit secrets에 ACCESS_CODE(또는 access_code)를 설정하세요.")
+        st.error("Access code is not set. Configure ACCESS_CODE (or access_code) in Streamlit secrets.")
         st.stop()
 
     if st.session_state.get("_access_granted_code", "") == expected:
         return
 
-    st.title("접속 코드")
-    st.caption("앱 사용을 위해 접속 코드를 입력하세요.")
+    st.title("Access Code")
     with st.form("access_code_form", clear_on_submit=True):
-        entered = st.text_input("접속 코드", type="password", key="_access_code_input")
-        submitted = st.form_submit_button("접속")
+        entered = st.text_input("Access code", type="password", key="_access_code_input")
+        submitted = st.form_submit_button("Sign in")
     if submitted:
         if str(entered).strip() == expected:
             st.session_state["_access_granted_code"] = expected
             st.rerun()
-        st.error("접속 코드가 올바르지 않습니다.")
+        st.error("Invalid access code.")
     st.stop()
 
 
@@ -2032,7 +2031,7 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
 _require_access_gate()
 
 st.title("경제활동인구 모니터링")
-if st.button("접속 해제", key="logout_main"):
+if st.button("Sign out", key="logout_main"):
     st.session_state.pop("_access_granted_code", None)
     st.rerun()
 
