@@ -382,6 +382,10 @@ def _fmt_num(value: object, unit: str = "", digits: int = 1) -> str:
     return f"{float(value):,.{digits}f}{unit}"
 
 
+def _fmt_num_bold(value: object, unit: str = "", digits: int = 1) -> str:
+    return f"<strong>{_fmt_num(value, unit, digits)}</strong>"
+
+
 def _new(flag: bool) -> str:
     return "<span class='new-badge'>NEW</span>" if flag else ""
 
@@ -1401,7 +1405,7 @@ def _build_ai_contribution_commentary(table: pd.DataFrame, meta: Dict[str, Any],
     lines: List[str] = []
     lines.append(
         f"- {latest_p} 기준 {meta['dataset_title']}({meta['indicator']})은 {prev_p} 대비 "
-        f"총 **{_fmt_num(total_delta, unit)}** {direction}했습니다."
+        f"총 {_fmt_num_bold(total_delta, unit)} {direction}했습니다."
     )
     if not top_pos.empty:
         pos_text = ", ".join(
@@ -1425,7 +1429,7 @@ def _build_ai_contribution_commentary(table: pd.DataFrame, meta: Dict[str, Any],
     if dominant is not None:
         lines.append(
             f"- 가장 큰 변동은 **{dominant['분류']}**로, {yoy_label} 대비 "
-            f"**{_fmt_num(dominant['증감'], unit)}** 변화했습니다."
+            f"{_fmt_num_bold(dominant['증감'], unit)} 변화했습니다."
         )
         lines.append(f"- 다음 점검 포인트: **{dominant['분류']}**의 변동이 다음 {point_label}에도 이어지는지 확인하세요.")
     lines.append(f"- 해석 기준은 `{yoy_label} 대비`이며, 기여율은 총증감 대비 비중입니다.")
@@ -1789,20 +1793,28 @@ def _build_ai_gyeonggi_contribution_commentary(meta: Dict[str, Any], labels: Dic
     recent_max_period_text = _fmt_period(recent_max_period, prd_se) if pd.notna(recent_max_period) else "-"
     recent_min_period_text = _fmt_period(recent_min_period, prd_se) if pd.notna(recent_min_period) else "-"
     recent_change_text = "-" if pd.isna(recent_change_pp) else f"{float(recent_change_pp):+,.2f}%p"
+    if pd.isna(nat_delta):
+        nat_flow = "증감분"
+    elif float(nat_delta) > 0:
+        nat_flow = "증가분"
+    elif float(nat_delta) < 0:
+        nat_flow = "감소분"
+    else:
+        nat_flow = "변동분"
 
     lines = [
         (
-            f"- **이번 {point} 기준** 경기도 취업자는 **{_fmt_num(latest_gg_value, unit)}**, "
-            f"전국 취업자는 **{_fmt_num(latest_nat_value, unit)}**이며, "
+            f"- **이번 {point} 기준** 경기도 취업자는 {_fmt_num_bold(latest_gg_value, unit)}, "
+            f"전국 취업자는 {_fmt_num_bold(latest_nat_value, unit)}이며, "
             f"경기도 비중은 **{float(share):,.2f}%**입니다."
             if pd.notna(share)
             else f"- {latest} 기준 비중 계산값이 없습니다."
         ),
         (
-            f"- **전년동월 비교**: 경기도 취업자 {prev_period_text} **{_fmt_num(prev_gg_value, unit)}** → "
-            f"{latest} **{_fmt_num(latest_gg_value, unit)}**, "
-            f"전국 취업자 {prev_period_text} **{_fmt_num(prev_nat_value, unit)}** → "
-            f"{latest} **{_fmt_num(latest_nat_value, unit)}**. "
+            f"- **전년동월 비교**: 경기도 취업자 {prev_period_text} {_fmt_num_bold(prev_gg_value, unit)} → "
+            f"{latest} {_fmt_num_bold(latest_gg_value, unit)}, "
+            f"전국 취업자 {prev_period_text} {_fmt_num_bold(prev_nat_value, unit)} → "
+            f"{latest} {_fmt_num_bold(latest_nat_value, unit)}. "
             f"비중은 {prev_period_text} **{float(prev_share):,.2f}%** → "
             f"{latest} 비중 **{float(share):,.2f}%** (**{share_yoy_text}**). "
             f"기여율은 {prev_period_text} **{'-' if pd.isna(prev_contrib) else f'{float(prev_contrib):,.1f}%'}** → "
@@ -1811,9 +1823,9 @@ def _build_ai_gyeonggi_contribution_commentary(meta: Dict[str, Any], labels: Dic
             else f"- 전년동월({yoy}) 기준 비교 데이터가 부족합니다."
         ),
         (
-            f"- {latest}의 {yoy} 대비 증감은 전국 **{_fmt_num(nat_delta, unit)}**, "
-            f"경기도 **{_fmt_num(gg_delta, unit)}**로, "
-            f"전국 증가/감소분 중 경기도 기여율은 **{contrib_text}**입니다."
+            f"- {latest}의 {yoy} 대비 증감은 전국 {_fmt_num_bold(nat_delta, unit)}, "
+            f"경기도 {_fmt_num_bold(gg_delta, unit)}이며, "
+            f"전국 {nat_flow} 중 경기도 기여율은 **{contrib_text}**입니다."
         ),
         (
             f"- **최근 12개월 비중 변화**: {recent_start_text} **{'-' if pd.isna(recent_start_share) else f'{float(recent_start_share):,.2f}%'}** → "
@@ -1835,7 +1847,7 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
         st.info(str(gy_meta.get("message", "전국 대비 경기도 기여도 계산이 불가능합니다.")))
     else:
         st.markdown("##### AI 해설")
-        st.markdown(_build_ai_gyeonggi_contribution_commentary(gy_meta, labels))
+        st.markdown(_build_ai_gyeonggi_contribution_commentary(gy_meta, labels), unsafe_allow_html=True)
         period_prd = "H" if ("prd_se" in df.columns and not df["prd_se"].dropna().empty and str(df["prd_se"].dropna().iloc[0]).upper() == "H") else "M"
         latest_period_text = _fmt_period(gy_meta.get("latest_period"), period_prd)
         c1, c2, c3 = st.columns(3)
@@ -1931,7 +1943,10 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
         st.info(str(contrib_meta.get("message", "분해 데이터를 계산할 수 없습니다.")))
     else:
         st.markdown("##### AI 해설")
-        st.markdown(_build_ai_contribution_commentary(contrib_df, contrib_meta, labels["point"], labels["yoy"]))
+        st.markdown(
+            _build_ai_contribution_commentary(contrib_df, contrib_meta, labels["point"], labels["yoy"]),
+            unsafe_allow_html=True,
+        )
         unit = str(contrib_meta.get("unit", ""))
         st.markdown(
             f"(기준시점: {_fmt_period(contrib_meta['latest_period'], period_prd)} | "
@@ -2000,7 +2015,7 @@ if not api_key:
     st.stop()
 
 loading_notice = st.empty()
-loading_notice.info("데이터 불러오는 중...")
+loading_notice.info("데이터 불러오는 중... (약 10분 소요예정)")
 loading_progress = st.empty()
 try:
     if (
