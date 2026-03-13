@@ -2096,6 +2096,7 @@ is_sido_mode = st.toggle(
 )
 scope_label = "전국 17개 시도" if is_sido_mode else "경기 31개 시군"
 region_scope = "province" if is_sido_mode else "gyeonggi31"
+is_gyeonggi31_mode = region_scope == "gyeonggi31"
 active_datasets = datasets_for_scope(region_scope)
 st.caption(f"조회범위: {scope_label}")
 
