@@ -1973,6 +1973,7 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
         step=6,
         key="ai_anomaly_lookback",
     )
+    focus_df = pd.DataFrame()
     anomaly_df = _compute_anomaly_table(df, region=region, lag=lag, lookback_periods=lookback)
     if anomaly_df.empty:
         st.info("이상탐지 결과가 없습니다.")
