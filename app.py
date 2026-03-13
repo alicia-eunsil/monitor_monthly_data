@@ -1403,6 +1403,9 @@ def _build_ai_contribution_commentary(table: pd.DataFrame, meta: Dict[str, Any],
     top_pos_share = (top_pos_sum / pos_total * 100.0) if pd.notna(pos_total) and pos_total != 0 else np.nan
 
     lines: List[str] = []
+    def _fmt_pct_text(v: object) -> str:
+        return "-" if v is None or pd.isna(v) else f"{float(v):,.1f}%"
+
     lines.append(
         f"- {latest_p} 기준 {meta['dataset_title']}({meta['indicator']})은 {prev_p} 대비 "
         f"총 {_fmt_num_bold(total_delta, unit)} {direction}했습니다."
@@ -1410,7 +1413,7 @@ def _build_ai_contribution_commentary(table: pd.DataFrame, meta: Dict[str, Any],
     if not top_pos.empty:
         pos_text = ", ".join(
             [
-                f"{r['분류']}({_fmt_num(r['증감'], unit)})"
+                f"{r['분류']}({_fmt_num(r['증감'], unit)}, {_fmt_pct_text(r['기여율(%)'])})"
                 for _, r in top_pos.iterrows()
             ]
         )
@@ -1418,14 +1421,11 @@ def _build_ai_contribution_commentary(table: pd.DataFrame, meta: Dict[str, Any],
     if not top_neg.empty:
         neg_text = ", ".join(
             [
-                f"{r['분류']}({_fmt_num(r['증감'], unit)})"
+                f"{r['분류']}({_fmt_num(r['증감'], unit)}, {_fmt_pct_text(r['기여율(%)'])})"
                 for _, r in top_neg.iterrows()
             ]
         )
         lines.append(f"- 감소(상쇄) 요인은 {neg_text} 입니다.")
-    if pd.notna(top_pos_share):
-        lines.append(f"- 증가 기여 상위 3개가 전체 증가분의 **{top_pos_share:.1f}%**를 설명합니다.")
-    lines.append(f"- 분류별 흐름은 증가 {up_cnt}개, 감소 {down_cnt}개, 보합 {flat_cnt}개입니다.")
     if dominant is not None:
         lines.append(
             f"- 가장 큰 변동은 **{dominant['분류']}**로, {yoy_label} 대비 "
@@ -1850,7 +1850,7 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
         st.markdown(_build_ai_gyeonggi_contribution_commentary(gy_meta, labels), unsafe_allow_html=True)
         period_prd = "H" if ("prd_se" in df.columns and not df["prd_se"].dropna().empty and str(df["prd_se"].dropna().iloc[0]).upper() == "H") else "M"
         latest_period_text = _fmt_period(gy_meta.get("latest_period"), period_prd)
-        c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns(2)
         with c1:
             share_sub = (
                 f"경기도 {_fmt_num(gy_meta.get('latest_gg_value'), str(gy_meta.get('unit', '')))} / "
@@ -1870,12 +1870,6 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
                 f"전국 증감 기여율({labels.get('yoy', '전년동월')}대비)",
                 "-" if pd.isna(gy_meta.get("latest_contrib_pct")) else f"{float(gy_meta.get('latest_contrib_pct')):,.1f}%",
                 contrib_sub,
-            )
-        with c3:
-            _card(
-                "경기도 증감",
-                _fmt_num(gy_meta.get("latest_gg_yoy_abs"), str(gy_meta.get("unit", ""))),
-                f"{labels.get('yoy', '전년동월')}대비",
             )
         plot_df = gy_trend[["period", "share_pct", "contrib_pct"]].dropna(subset=["period"], how="any").copy()
         if not plot_df.empty:
@@ -1924,7 +1918,7 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
     if "prd_se" in df.columns and not df["prd_se"].dropna().empty:
         lag = 2 if str(df["prd_se"].dropna().iloc[0]).upper() == "H" else 12
     period_prd = "H" if lag == 2 else "M"
-    st.markdown("#### 영향요인분해(경기도)")
+    st.markdown("#### 영향요인분해(지역별)")
     ds_options = {
         "연령별 취업자": "age",
         "종사상지위별 취업자": "status",
