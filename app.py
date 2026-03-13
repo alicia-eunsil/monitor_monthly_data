@@ -2160,10 +2160,9 @@ with tab7:
         key="report_scope",
     )
     _render_new_monthly_report(events, report_scope=report_scope, datasets=active_datasets)
-
-if region_scope == "province":
-    st.markdown("---")
-    _render_ai_insights(visible_data, region_pool, _time_labels(active_datasets))
+    if region_scope == "province":
+        st.markdown("---")
+        _render_ai_insights(visible_data, region_pool, _time_labels(active_datasets))
 
 st.markdown(
     "<hr style='margin-top:2rem; margin-bottom:0.5rem;'>"
