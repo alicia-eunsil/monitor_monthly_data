@@ -36,6 +36,21 @@ st.set_page_config(
 st.markdown(
     """
 <style>
+.stApp p, .stApp li, .stApp label, .stApp div[data-baseweb="radio"] span {
+  font-size: 1.03rem;
+}
+.stApp h1 {
+  font-size: 2.1rem;
+}
+.stApp h2 {
+  font-size: 1.6rem;
+}
+.stApp h3 {
+  font-size: 1.35rem;
+}
+.stApp div[data-baseweb="tab"] button {
+  font-size: 1.0rem;
+}
 .metric-card {
   border: 1px solid #e5e7eb;
   border-radius: 12px;
@@ -43,11 +58,11 @@ st.markdown(
   background: #ffffff;
 }
 .metric-title {
-  font-size: 0.88rem;
+  font-size: 1.0rem;
   color: #4b5563;
 }
 .metric-value {
-  font-size: 1.3rem;
+  font-size: 1.5rem;
   font-weight: 700;
   margin-top: 4px;
 }
@@ -60,13 +75,13 @@ st.markdown(
 .metric-sub {
   margin-top: 3px;
   color: #6b7280;
-  font-size: 0.82rem;
+  font-size: 0.95rem;
 }
 .new-badge {
   display: inline-block;
   margin-left: 6px;
   color: #f59e0b;
-  font-size: 0.74rem;
+  font-size: 0.85rem;
   font-weight: 800;
 }
 </style>
@@ -347,11 +362,15 @@ def load_all_data_with_progress(
     main_progress = main_progress_box.progress(0) if main_progress_box is not None else None
     status = status_box
     main_status = main_status_box
+    last_progress = -1
 
     def _set_progress(value: int) -> None:
-        progress.progress(value)
+        nonlocal last_progress
+        safe_value = max(int(value), last_progress)
+        last_progress = safe_value
+        progress.progress(safe_value)
         if main_progress is not None:
-            main_progress.progress(value)
+            main_progress.progress(safe_value)
 
     def _set_info(message: str) -> None:
         status.info(message)
@@ -365,11 +384,11 @@ def load_all_data_with_progress(
         status.success(message)
 
     for scope_key, scope_title, datasets in scope_defs:
-        _set_info(f"{scope_title} 데이터셋 준비 중...")
+        _set_info(f"{scope_title} 데이터셋 준비 중... ({step}/{total_steps})")
         step += 1
         _set_progress(min(100, int(step * 100 / total_steps)))
         for cfg in datasets:
-            _set_info(f"[{scope_title}] 데이터 불러오는 중: {cfg.title}")
+            _set_info(f"[{scope_title}] 데이터 불러오는 중: {cfg.title} ({step}/{total_steps})")
             try:
                 end_period = default_end_period_by_prd_se(cfg.prd_se)
                 config_signature = "|".join(
@@ -410,7 +429,7 @@ def load_all_data_with_progress(
             step += 1
             _set_progress(min(100, int(step * 100 / total_steps)))
 
-            _set_info(f"[{scope_title}] 파싱 중: {cfg.title}")
+            _set_info(f"[{scope_title}] 파싱 중: {cfg.title} ({step}/{total_steps})")
             parsed = normalize_records(cfg, records, region_scope=scope_key)
             debug_logs.append(
                 f"[{scope_key}:{cfg.key}] parsed_rows={len(parsed)} raw_rows={len(records)}"
@@ -1106,15 +1125,6 @@ def _render_new_monthly_report(
 
 
 st.title("경제활동인구 모니터링")
-scope_label = st.radio(
-    "조회 범위",
-    ["전국·17개 시도", "경기 31개 시군"],
-    index=0,
-    horizontal=True,
-    key="scope_label",
-)
-region_scope = "province" if scope_label == "전국·17개 시도" else "gyeonggi31"
-active_datasets = datasets_for_scope(region_scope)
 
 with st.sidebar:
     st.subheader("데이터 제어")
@@ -1172,6 +1182,16 @@ if debug_logs:
     with st.sidebar:
         with st.expander("진단 로그 보기", expanded=bool(load_errors)):
             st.code("\n".join(debug_logs[-300:]))
+
+is_gyeonggi31_mode = st.toggle(
+    "경기 31개 시군 모드",
+    value=False,
+    key="scope_toggle",
+)
+scope_label = "경기 31개 시군" if is_gyeonggi31_mode else "전국·17개 시도"
+region_scope = "gyeonggi31" if is_gyeonggi31_mode else "province"
+active_datasets = datasets_for_scope(region_scope)
+st.caption(f"현재 조회 범위: {scope_label}")
 
 data = scope_data.get(region_scope, pd.DataFrame())
 
