@@ -1701,34 +1701,34 @@ def _build_ai_gyeonggi_contribution_commentary(meta: Dict[str, Any], labels: Dic
 
 def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[str, str]) -> None:
     st.subheader("AI INSIGHTS")
-    st.caption("?????? + AI ?? + AI ????(Robust Z-score)")
-    st.markdown("#### ?? ?? ??? ??")
+    st.caption("영향요인분해 + AI 해설 + AI 이상탐지(Robust Z-score)")
+    st.markdown("#### 전국 대비 경기도 기여")
     gy_trend, gy_meta = _compute_gyeonggi_vs_national_contribution(df)
     if not gy_meta.get("ok"):
-        st.info(str(gy_meta.get("message", "?? ?? ??? ??? ??? ??????.")))
+        st.info(str(gy_meta.get("message", "전국 대비 경기도 기여도 계산이 불가능합니다.")))
     else:
-        st.markdown("##### AI ??")
+        st.markdown("##### AI 해설")
         st.markdown(_build_ai_gyeonggi_contribution_commentary(gy_meta, labels))
         period_prd = "H" if ("prd_se" in df.columns and not df["prd_se"].dropna().empty and str(df["prd_se"].dropna().iloc[0]).upper() == "H") else "M"
         latest_period_text = _fmt_period(gy_meta.get("latest_period"), period_prd)
         c1, c2, c3 = st.columns(3)
         with c1:
             _card(
-                "?? ?? ??? ??",
+                "전국 대비 경기도 비중",
                 "-" if pd.isna(gy_meta.get("latest_share_pct")) else f"{float(gy_meta.get('latest_share_pct')):,.2f}%",
                 latest_period_text,
             )
         with c2:
             _card(
-                f"?? ?? ???({labels.get('yoy', '????')}??)",
+                f"전국 증감 기여율({labels.get('yoy', '전년동월')}대비)",
                 "-" if pd.isna(gy_meta.get("latest_contrib_pct")) else f"{float(gy_meta.get('latest_contrib_pct')):,.1f}%",
                 latest_period_text,
             )
         with c3:
             _card(
-                "??? ??",
+                "경기도 증감",
                 _fmt_num(gy_meta.get("latest_gg_yoy_abs"), str(gy_meta.get("unit", ""))),
-                f"{labels.get('yoy', '????')}??",
+                f"{labels.get('yoy', '전년동월')}대비",
             )
         plot_df = gy_trend[["period", "share_pct", "contrib_pct"]].dropna(subset=["period"], how="any").copy()
         if not plot_df.empty:
@@ -1738,11 +1738,11 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
                     alt.Chart(plot_df)
                     .mark_line(color="#2563eb", point=True)
                     .encode(
-                        x=alt.X("period:T", title=labels.get("point", "?")),
-                        y=alt.Y("share_pct:Q", title="?? ?? ??? ??(%)"),
+                        x=alt.X("period:T", title=labels.get("point", "월")),
+                        y=alt.Y("share_pct:Q", title="전국 대비 경기도 비중(%)"),
                         tooltip=[
-                            alt.Tooltip("yearmonth(period):T", title=labels.get("point", "?")),
-                            alt.Tooltip("share_pct:Q", title="??(%)", format=".2f"),
+                            alt.Tooltip("yearmonth(period):T", title=labels.get("point", "월")),
+                            alt.Tooltip("share_pct:Q", title="비중(%)", format=".2f"),
                         ],
                     )
                     .properties(height=280)
@@ -1750,14 +1750,14 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
                 st.altair_chart(share_chart, use_container_width=True)
             with col_r:
                 base = alt.Chart(plot_df).encode(
-                    x=alt.X("period:T", title=labels.get("point", "?")),
+                    x=alt.X("period:T", title=labels.get("point", "월")),
                     tooltip=[
-                        alt.Tooltip("yearmonth(period):T", title=labels.get("point", "?")),
-                        alt.Tooltip("contrib_pct:Q", title="???(%)", format=".1f"),
+                        alt.Tooltip("yearmonth(period):T", title=labels.get("point", "월")),
+                        alt.Tooltip("contrib_pct:Q", title="기여율(%)", format=".1f"),
                     ],
                 )
                 contrib_line = base.mark_line(color="#dc2626", point=True).encode(
-                    y=alt.Y("contrib_pct:Q", title="?? ?? ???(%)")
+                    y=alt.Y("contrib_pct:Q", title="전국 증감 기여율(%)")
                 )
                 zero = alt.Chart(pd.DataFrame({"zero": [0]})).mark_rule(
                     color="#9CA3AF",
@@ -1768,7 +1768,7 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
     gyeonggi_default = TARGET_REGIONS[9] if len(TARGET_REGIONS) >= 10 else (region_pool[0] if region_pool else "")
     region_default = gyeonggi_default if gyeonggi_default in region_pool else (region_pool[0] if region_pool else "")
     region = st.selectbox(
-        "?? ??",
+        "분석 지역",
         region_pool,
         index=region_pool.index(region_default) if region_default in region_pool else 0,
         key="ai_region",
@@ -1777,15 +1777,15 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
     if "prd_se" in df.columns and not df["prd_se"].dropna().empty:
         lag = 2 if str(df["prd_se"].dropna().iloc[0]).upper() == "H" else 12
     period_prd = "H" if lag == 2 else "M"
-    st.markdown("#### ??????")
+    st.markdown("#### 영향요인분해")
     ds_options = {
-        "??? ???": "age",
-        "?????? ???": "status",
-        "??? ????": "industry",
-        "??? ????": "occupation",
+        "연령별 취업자": "age",
+        "종사상지위별 취업자": "status",
+        "산업별 취업자수": "industry",
+        "직종별 취업자수": "occupation",
     }
     ds_label = st.radio(
-        "?? ?",
+        "분해 축",
         list(ds_options.keys()),
         horizontal=True,
         key="ai_decomp_axis",
@@ -1793,37 +1793,37 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
     ds_key = ds_options[ds_label]
     contrib_df, contrib_meta = _compute_contribution_table(df, region=region, dataset_key=ds_key, lag=lag)
     if not contrib_meta.get("ok"):
-        st.info(str(contrib_meta.get("message", "?? ???? ??? ? ????.")))
+        st.info(str(contrib_meta.get("message", "분해 데이터를 계산할 수 없습니다.")))
     else:
-        st.markdown("##### AI ??")
+        st.markdown("##### AI 해설")
         st.markdown(_build_ai_contribution_commentary(contrib_df, contrib_meta, labels["point"], labels["yoy"]))
         unit = str(contrib_meta.get("unit", ""))
         st.markdown(
-            f"- ????: **{_fmt_period(contrib_meta['latest_period'], period_prd)}**  \n"
-            f"- ????: **{_fmt_period(contrib_meta['prev_period'], period_prd)}**  \n"
-            f"- ? ??: **{_fmt_num(contrib_meta['total_delta'], unit)}**"
+            f"- 기준시점: **{_fmt_period(contrib_meta['latest_period'], period_prd)}**  \n"
+            f"- 비교시점: **{_fmt_period(contrib_meta['prev_period'], period_prd)}**  \n"
+            f"- 총 증감: **{_fmt_num(contrib_meta['total_delta'], unit)}**"
         )
         chart_df = contrib_df.copy()
         chart = (
             alt.Chart(chart_df)
             .mark_bar()
             .encode(
-                x=alt.X("???:Q", title="??"),
-                y=alt.Y("???:N", sort="-x", title="??"),
-                color=alt.condition("datum.??? >= 0", alt.value("#2563eb"), alt.value("#dc2626")),
+                x=alt.X("증감:Q", title="증감"),
+                y=alt.Y("분류:N", sort="-x", title="분류"),
+                color=alt.condition("datum.증감 >= 0", alt.value("#2563eb"), alt.value("#dc2626")),
                 tooltip=[
-                    alt.Tooltip("???:N", title="??"),
-                    alt.Tooltip("???:Q", title="??", format=",.2f"),
-                    alt.Tooltip("?????%):Q", title="???(%)", format=".2f"),
+                    alt.Tooltip("분류:N", title="분류"),
+                    alt.Tooltip("증감:Q", title="증감", format=",.2f"),
+                    alt.Tooltip("기여율(%):Q", title="기여율(%)", format=".2f"),
                 ],
             )
             .properties(height=max(280, len(chart_df) * 22))
         )
         st.altair_chart(chart, use_container_width=True)
         st.dataframe(contrib_df, use_container_width=True, hide_index=True)
-    st.markdown("#### AI ???? (Robust Z-score)")
+    st.markdown("#### AI 이상탐지 (Robust Z-score)")
     lookback = st.slider(
-        f"???? ?? ?? ? ({labels.get('point', '?')})",
+        f"이상탐지 최근 구간 수 ({labels.get('point', '월')})",
         min_value=12,
         max_value=60,
         value=36,
@@ -1832,10 +1832,10 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
     )
     anomaly_df = _compute_anomaly_table(df, region=region, lag=lag, lookback_periods=lookback)
     if anomaly_df.empty:
-        st.info("???? ??? ????.")
+        st.info("이상탐지 결과가 없습니다.")
     else:
         top_df = anomaly_df.head(10).copy()
-        st.markdown("##### AI ??")
+        st.markdown("##### AI 해설")
         st.markdown(_build_ai_anomaly_commentary(top_df, labels["point"]))
         st.dataframe(top_df, use_container_width=True, hide_index=True)
 
@@ -2010,5 +2010,6 @@ st.markdown(
     "<p style='text-align:center; color:#6b7280; font-size:0.9rem;'>- created by alicia -</p>",
     unsafe_allow_html=True,
 )
+
 
 
