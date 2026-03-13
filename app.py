@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import altair as alt
 import pandas as pd
@@ -326,84 +326,120 @@ def fetch_records_live(
     return {"records": records, "debug_logs": debug_logs}
 
 
-def load_data_with_progress(
+def load_all_data_with_progress(
     api_key: str,
     status_box: Any,
     progress_box: Any,
-    region_scope: str,
-    datasets: List[DatasetConfig],
-) -> tuple[pd.DataFrame, List[str], List[str]]:
-    total_steps = len(datasets) * 2 + 1
+    main_status_box: Optional[Any] = None,
+    main_progress_box: Optional[Any] = None,
+) -> tuple[Dict[str, pd.DataFrame], List[str], List[str]]:
+    scope_defs = [
+        ("province", "전국·17개 시도", datasets_for_scope("province")),
+        ("gyeonggi31", "경기 31개 시군", datasets_for_scope("gyeonggi31")),
+    ]
+    total_steps = sum(len(ds) * 2 for _, _, ds in scope_defs) + len(scope_defs)
     step = 0
-    frames: List[pd.DataFrame] = []
+    frames_by_scope: Dict[str, List[pd.DataFrame]] = {k: [] for k, _, _ in scope_defs}
     errors: List[str] = []
     debug_logs: List[str] = []
 
     progress = progress_box.progress(0)
+    main_progress = main_progress_box.progress(0) if main_progress_box is not None else None
     status = status_box
+    main_status = main_status_box
 
-    for cfg in datasets:
-        status.info(f"데이터 불러오는 중: {cfg.title}")
-        try:
-            end_period = default_end_period_by_prd_se(cfg.prd_se)
-            config_signature = "|".join(
-                [
-                    cfg.tbl_id,
-                    cfg.itm_id,
-                    cfg.obj_l1,
-                    cfg.obj_l2,
-                    cfg.output_fields,
-                    cfg.start_prd_de,
-                    cfg.prd_se,
-                    end_period,
-                ]
-            )
-            result = fetch_records_live(
-                api_key=api_key,
-                dataset_key=cfg.key,
-                end_period=end_period,
-                config_signature=config_signature,
-                datasets=datasets,
-            )
-            records = result.get("records", [])
-            for line in result.get("debug_logs", []):
-                debug_logs.append(f"[{cfg.key}] {line}")
-            if records:
-                sample = records[0]
-                debug_logs.append(
-                    f"[{cfg.key}] sample_keys={list(sample.keys())[:12]}"
-                )
-                debug_logs.append(
-                    f"[{cfg.key}] sample_PRD_DE={sample.get('PRD_DE')} sample_DT={sample.get('DT')}"
-                )
-        except Exception as exc:  # noqa: BLE001
-            records = []
-            errors.append(f"{cfg.title}: {exc}")
-            debug_logs.append(f"[{cfg.key}] ERROR: {exc}")
+    def _set_progress(value: int) -> None:
+        progress.progress(value)
+        if main_progress is not None:
+            main_progress.progress(value)
+
+    def _set_info(message: str) -> None:
+        status.info(message)
+        if main_status is not None:
+            main_status.info(message)
+
+    def _set_error(message: str) -> None:
+        status.error(message)
+
+    def _set_success(message: str) -> None:
+        status.success(message)
+
+    for scope_key, scope_title, datasets in scope_defs:
+        _set_info(f"{scope_title} 데이터셋 준비 중...")
         step += 1
-        progress.progress(min(100, int(step * 100 / total_steps)))
+        _set_progress(min(100, int(step * 100 / total_steps)))
+        for cfg in datasets:
+            _set_info(f"[{scope_title}] 데이터 불러오는 중: {cfg.title}")
+            try:
+                end_period = default_end_period_by_prd_se(cfg.prd_se)
+                config_signature = "|".join(
+                    [
+                        cfg.tbl_id,
+                        cfg.itm_id,
+                        cfg.obj_l1,
+                        cfg.obj_l2,
+                        cfg.output_fields,
+                        cfg.start_prd_de,
+                        cfg.prd_se,
+                        end_period,
+                        scope_key,
+                    ]
+                )
+                result = fetch_records_live(
+                    api_key=api_key,
+                    dataset_key=cfg.key,
+                    end_period=end_period,
+                    config_signature=config_signature,
+                    datasets=datasets,
+                )
+                records = result.get("records", [])
+                for line in result.get("debug_logs", []):
+                    debug_logs.append(f"[{scope_key}:{cfg.key}] {line}")
+                if records:
+                    sample = records[0]
+                    debug_logs.append(
+                        f"[{scope_key}:{cfg.key}] sample_keys={list(sample.keys())[:12]}"
+                    )
+                    debug_logs.append(
+                        f"[{scope_key}:{cfg.key}] sample_PRD_DE={sample.get('PRD_DE')} sample_DT={sample.get('DT')}"
+                    )
+            except Exception as exc:  # noqa: BLE001
+                records = []
+                errors.append(f"{scope_title} - {cfg.title}: {exc}")
+                debug_logs.append(f"[{scope_key}:{cfg.key}] ERROR: {exc}")
+            step += 1
+            _set_progress(min(100, int(step * 100 / total_steps)))
 
-        status.info(f"파싱 중: {cfg.title}")
-        parsed = normalize_records(cfg, records, region_scope=region_scope)
-        debug_logs.append(f"[{cfg.key}] parsed_rows={len(parsed)} raw_rows={len(records)}")
-        if not parsed.empty:
-            frames.append(parsed)
-        step += 1
-        progress.progress(min(100, int(step * 100 / total_steps)))
+            _set_info(f"[{scope_title}] 파싱 중: {cfg.title}")
+            parsed = normalize_records(cfg, records, region_scope=scope_key)
+            debug_logs.append(
+                f"[{scope_key}:{cfg.key}] parsed_rows={len(parsed)} raw_rows={len(records)}"
+            )
+            if not parsed.empty:
+                frames_by_scope[scope_key].append(parsed)
+            step += 1
+            _set_progress(min(100, int(step * 100 / total_steps)))
 
-    status.info("지표 계산 및 통합 중...")
-    if not frames:
-        progress.progress(100)
-        status.error("데이터 로딩 실패")
-        return pd.DataFrame(), errors, debug_logs
+    _set_info("지표 계산 및 통합 중...")
+    data_by_scope: Dict[str, pd.DataFrame] = {}
+    for scope_key, scope_title, _ in scope_defs:
+        frames = frames_by_scope.get(scope_key, [])
+        if frames:
+            combined = pd.concat(frames, ignore_index=True)
+            combined = add_yoy(combined)
+            data_by_scope[scope_key] = combined
+            debug_logs.append(f"[{scope_key}:all] combined_rows={len(combined)}")
+        else:
+            data_by_scope[scope_key] = pd.DataFrame()
 
-    combined = pd.concat(frames, ignore_index=True)
-    combined = add_yoy(combined)
-    debug_logs.append(f"[all] combined_rows={len(combined)}")
-    step += 1
-    progress.progress(100)
-    status.success("로딩 완료")
-    return combined, errors, debug_logs
+    if all(df.empty for df in data_by_scope.values()):
+        _set_progress(100)
+        _set_error("데이터 로딩 실패")
+        return data_by_scope, errors, debug_logs
+
+    _set_progress(100)
+    _set_success("로딩 완료")
+    return data_by_scope, errors, debug_logs
 
 
 def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str, prd_se: str) -> pd.DataFrame:
@@ -1070,18 +1106,24 @@ def _render_new_monthly_report(
 
 
 st.title("경제활동인구 모니터링")
+scope_label = st.radio(
+    "조회 범위",
+    ["전국·17개 시도", "경기 31개 시군"],
+    index=0,
+    horizontal=True,
+    key="scope_label",
+)
+region_scope = "province" if scope_label == "전국·17개 시도" else "gyeonggi31"
+active_datasets = datasets_for_scope(region_scope)
 
 with st.sidebar:
-    scope_label = st.radio(
-        "조회 범위",
-        ["전국·17개 시도", "경기 31개 시군"],
-        index=0,
-        key="scope_label",
-    )
-    region_scope = "province" if scope_label == "전국·17개 시도" else "gyeonggi31"
-    active_datasets = datasets_for_scope(region_scope)
     st.subheader("데이터 제어")
     if st.button("데이터 새로고침"):
+        st.session_state.pop("_loaded_api_key", None)
+        st.session_state.pop("_loaded_data_version", None)
+        st.session_state.pop("_loaded_scope_data", None)
+        st.session_state.pop("_loaded_errors", None)
+        st.session_state.pop("_loaded_debug_logs", None)
         st.rerun()
     sidebar_status = st.empty()
     sidebar_progress_box = st.empty()
@@ -1094,14 +1136,32 @@ if not api_key:
 
 loading_notice = st.empty()
 loading_notice.info("데이터 불러오는 중...")
-data, load_errors, debug_logs = load_data_with_progress(
-    api_key=api_key,
-    status_box=sidebar_status,
-    progress_box=sidebar_progress_box,
-    region_scope=region_scope,
-    datasets=active_datasets,
-)
-loading_notice.empty()
+loading_progress = st.empty()
+try:
+    if (
+        st.session_state.get("_loaded_api_key") == api_key
+        and st.session_state.get("_loaded_data_version") == DATA_MODEL_VERSION
+        and "_loaded_scope_data" in st.session_state
+    ):
+        scope_data = st.session_state["_loaded_scope_data"]
+        load_errors = st.session_state.get("_loaded_errors", [])
+        debug_logs = st.session_state.get("_loaded_debug_logs", [])
+    else:
+        scope_data, load_errors, debug_logs = load_all_data_with_progress(
+            api_key=api_key,
+            status_box=sidebar_status,
+            progress_box=sidebar_progress_box,
+            main_status_box=loading_notice,
+            main_progress_box=loading_progress,
+        )
+        st.session_state["_loaded_api_key"] = api_key
+        st.session_state["_loaded_data_version"] = DATA_MODEL_VERSION
+        st.session_state["_loaded_scope_data"] = scope_data
+        st.session_state["_loaded_errors"] = load_errors
+        st.session_state["_loaded_debug_logs"] = debug_logs
+finally:
+    loading_notice.empty()
+    loading_progress.empty()
 
 if load_errors:
     st.error("일부 데이터셋 조회 중 오류가 발생했습니다.")
@@ -1112,6 +1172,8 @@ if debug_logs:
     with st.sidebar:
         with st.expander("진단 로그 보기", expanded=bool(load_errors)):
             st.code("\n".join(debug_logs[-300:]))
+
+data = scope_data.get(region_scope, pd.DataFrame())
 
 if data.empty:
     st.warning("조회된 데이터가 없습니다. API 파라미터를 확인하세요.")
