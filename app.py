@@ -1451,9 +1451,12 @@ def _compute_anomaly_table(df: pd.DataFrame, region: str, lag: int, lookback_per
         g = g.sort_values("period").copy()
         if len(g) < max(8, lag + 3):
             continue
-        rz_value = _robust_zscore(g["value"]).abs()
-        rz_yoy_abs = _robust_zscore(g["yoy_abs"]).abs()
-        rz_yoy_pct = _robust_zscore(g["yoy_pct"]).abs()
+        rz_value_signed = _robust_zscore(g["value"])
+        rz_yoy_abs_signed = _robust_zscore(g["yoy_abs"])
+        rz_yoy_pct_signed = _robust_zscore(g["yoy_pct"])
+        rz_value = rz_value_signed.abs()
+        rz_yoy_abs = rz_yoy_abs_signed.abs()
+        rz_yoy_pct = rz_yoy_pct_signed.abs()
         score_raw = pd.concat([rz_value, rz_yoy_abs, rz_yoy_pct], axis=1).max(axis=1, skipna=True)
         score = (score_raw / 5.0 * 100.0).clip(upper=100)
         for i, row in g.iterrows():
@@ -1466,11 +1469,30 @@ def _compute_anomaly_table(df: pd.DataFrame, region: str, lag: int, lookback_per
                 "증감률": rz_yoy_pct.loc[i],
             }
             reason_key = max(component_scores, key=lambda k: -1 if pd.isna(component_scores[k]) else component_scores[k])
-            reason_text_map = {
-                "원자료": "원자료 값이 평소보다 크게 벗어남",
-                "증감": "전년대비 증감폭이 평소보다 크게 벗어남",
-                "증감률": "전년대비 증감률이 평소보다 크게 벗어남",
+            reason_signed_map = {
+                "원자료": rz_value_signed.loc[i],
+                "증감": rz_yoy_abs_signed.loc[i],
+                "증감률": rz_yoy_pct_signed.loc[i],
             }
+            reason_signed = reason_signed_map.get(reason_key, np.nan)
+            if reason_key == "원자료":
+                reason_text = (
+                    "원자료 값이 평소보다 크게 높음"
+                    if pd.notna(reason_signed) and float(reason_signed) >= 0
+                    else "원자료 값이 평소보다 크게 낮음"
+                )
+            elif reason_key == "증감":
+                reason_text = (
+                    "전년대비 증감폭이 평소보다 크게 증가"
+                    if pd.notna(reason_signed) and float(reason_signed) >= 0
+                    else "전년대비 증감폭이 평소보다 크게 감소"
+                )
+            else:
+                reason_text = (
+                    "전년대비 증감률이 평소보다 크게 상승"
+                    if pd.notna(reason_signed) and float(reason_signed) >= 0
+                    else "전년대비 증감률이 평소보다 크게 하락"
+                )
             rows.append(
                 {
                     "period": pd.Timestamp(row["period"]),
@@ -1480,7 +1502,7 @@ def _compute_anomaly_table(df: pd.DataFrame, region: str, lag: int, lookback_per
                     "지표": str(row["indicator_name"]),
                     "분류": str(row["category_name"]) if str(row["category_name"]).strip() else "전체",
                     "이상점수": float(s),
-                    "이유": reason_text_map.get(reason_key, "평소 패턴 대비 변동이 큼"),
+                    "이유": reason_text,
                 }
             )
     if not rows:
@@ -1493,7 +1515,12 @@ def _compute_anomaly_table(df: pd.DataFrame, region: str, lag: int, lookback_per
         start_idx = max(0, idx - lookback_periods + 1)
         cutoff = pd.Timestamp(unique_p[start_idx])
         out = out[out["period"] >= cutoff].copy()
-    out = out.sort_values(["이상점수", "period"], ascending=[False, False])
+
+    # Sort by category, then latest period within each category.
+    out = out.sort_values(
+        ["분류", "period", "이상점수"],
+        ascending=[True, False, False],
+    )
     out = out.drop(columns=["period"], errors="ignore")
     return out
 
@@ -1544,11 +1571,29 @@ def _compute_gyeonggi_vs_national_contribution(df: pd.DataFrame) -> tuple[pd.Dat
         "ok": False,
         "message": "",
         "indicator": "",
+        "prd_se": "M",
         "latest_period": pd.NaT,
+        "latest_nat_value": np.nan,
+        "latest_gg_value": np.nan,
         "latest_share_pct": np.nan,
         "latest_contrib_pct": np.nan,
         "latest_nat_yoy_abs": np.nan,
         "latest_gg_yoy_abs": np.nan,
+        "prev_year_period": pd.NaT,
+        "prev_year_nat_value": np.nan,
+        "prev_year_gg_value": np.nan,
+        "prev_year_share_pct": np.nan,
+        "share_yoy_change_pp": np.nan,
+        "prev_year_contrib_pct": np.nan,
+        "contrib_yoy_change_pp": np.nan,
+        "recent_start_period": pd.NaT,
+        "recent_start_share_pct": np.nan,
+        "recent_end_share_pct": np.nan,
+        "recent_change_pp": np.nan,
+        "recent_max_period": pd.NaT,
+        "recent_max_share_pct": np.nan,
+        "recent_min_period": pd.NaT,
+        "recent_min_share_pct": np.nan,
         "share_hist_percentile": np.nan,
         "contrib_abs_hist_percentile": np.nan,
         "share_change_pp": np.nan,
@@ -1594,6 +1639,11 @@ def _compute_gyeonggi_vs_national_contribution(df: pd.DataFrame) -> tuple[pd.Dat
         meta["message"] = "전국/경기도 공통 시계열 구간이 없습니다."
         return pd.DataFrame(), meta
 
+    prd_se = "M"
+    if "prd_se" in base.columns and not base["prd_se"].dropna().empty:
+        prd_se = str(base["prd_se"].dropna().iloc[0]).upper()
+    lag = 12 if prd_se == "M" else 2
+
     trend["share_pct"] = np.where(
         trend["value_nat"] == 0,
         np.nan,
@@ -1617,6 +1667,16 @@ def _compute_gyeonggi_vs_national_contribution(df: pd.DataFrame) -> tuple[pd.Dat
     unit_series = base["unit"].dropna()
     if not unit_series.empty:
         unit = str(unit_series.iloc[0])
+
+    prev_year_row = None
+    if len(trend) > lag:
+        prev_year_row = trend.iloc[-1 - lag]
+
+    recent_n = 12 if prd_se == "M" else 6
+    recent = trend.tail(recent_n).copy()
+    recent_start_row = recent.iloc[0] if not recent.empty else None
+    recent_max_row = recent.loc[recent["share_pct"].idxmax()] if not recent["share_pct"].dropna().empty else None
+    recent_min_row = recent.loc[recent["share_pct"].idxmin()] if not recent["share_pct"].dropna().empty else None
 
     share_series = trend["share_pct"].dropna()
     share_percentile = np.nan
@@ -1644,11 +1704,41 @@ def _compute_gyeonggi_vs_national_contribution(df: pd.DataFrame) -> tuple[pd.Dat
     meta.update(
         {
             "ok": True,
+            "prd_se": prd_se,
             "latest_period": pd.Timestamp(latest_row["period"]),
+            "latest_nat_value": float(latest_row["value_nat"]) if pd.notna(latest_row["value_nat"]) else np.nan,
+            "latest_gg_value": float(latest_row["value_gg"]) if pd.notna(latest_row["value_gg"]) else np.nan,
             "latest_share_pct": float(latest_row["share_pct"]) if pd.notna(latest_row["share_pct"]) else np.nan,
             "latest_contrib_pct": float(latest_row["contrib_pct"]) if pd.notna(latest_row["contrib_pct"]) else np.nan,
             "latest_nat_yoy_abs": float(latest_row["yoy_abs_nat"]) if pd.notna(latest_row["yoy_abs_nat"]) else np.nan,
             "latest_gg_yoy_abs": float(latest_row["yoy_abs_gg"]) if pd.notna(latest_row["yoy_abs_gg"]) else np.nan,
+            "prev_year_period": pd.Timestamp(prev_year_row["period"]) if prev_year_row is not None else pd.NaT,
+            "prev_year_nat_value": float(prev_year_row["value_nat"]) if prev_year_row is not None and pd.notna(prev_year_row["value_nat"]) else np.nan,
+            "prev_year_gg_value": float(prev_year_row["value_gg"]) if prev_year_row is not None and pd.notna(prev_year_row["value_gg"]) else np.nan,
+            "prev_year_share_pct": float(prev_year_row["share_pct"]) if prev_year_row is not None and pd.notna(prev_year_row["share_pct"]) else np.nan,
+            "share_yoy_change_pp": (
+                float(latest_row["share_pct"] - prev_year_row["share_pct"])
+                if prev_year_row is not None and pd.notna(latest_row["share_pct"]) and pd.notna(prev_year_row["share_pct"])
+                else np.nan
+            ),
+            "prev_year_contrib_pct": float(prev_year_row["contrib_pct"]) if prev_year_row is not None and pd.notna(prev_year_row["contrib_pct"]) else np.nan,
+            "contrib_yoy_change_pp": (
+                float(latest_row["contrib_pct"] - prev_year_row["contrib_pct"])
+                if prev_year_row is not None and pd.notna(latest_row["contrib_pct"]) and pd.notna(prev_year_row["contrib_pct"])
+                else np.nan
+            ),
+            "recent_start_period": pd.Timestamp(recent_start_row["period"]) if recent_start_row is not None else pd.NaT,
+            "recent_start_share_pct": float(recent_start_row["share_pct"]) if recent_start_row is not None and pd.notna(recent_start_row["share_pct"]) else np.nan,
+            "recent_end_share_pct": float(latest_row["share_pct"]) if pd.notna(latest_row["share_pct"]) else np.nan,
+            "recent_change_pp": (
+                float(latest_row["share_pct"] - recent_start_row["share_pct"])
+                if recent_start_row is not None and pd.notna(latest_row["share_pct"]) and pd.notna(recent_start_row["share_pct"])
+                else np.nan
+            ),
+            "recent_max_period": pd.Timestamp(recent_max_row["period"]) if recent_max_row is not None else pd.NaT,
+            "recent_max_share_pct": float(recent_max_row["share_pct"]) if recent_max_row is not None and pd.notna(recent_max_row["share_pct"]) else np.nan,
+            "recent_min_period": pd.Timestamp(recent_min_row["period"]) if recent_min_row is not None else pd.NaT,
+            "recent_min_share_pct": float(recent_min_row["share_pct"]) if recent_min_row is not None and pd.notna(recent_min_row["share_pct"]) else np.nan,
             "share_hist_percentile": share_percentile,
             "contrib_abs_hist_percentile": contrib_abs_percentile,
             "share_change_pp": float(latest_row["share_change_pp"]) if pd.notna(latest_row["share_change_pp"]) else np.nan,
@@ -1666,43 +1756,80 @@ def _build_ai_gyeonggi_contribution_commentary(meta: Dict[str, Any], labels: Dic
 
     point = labels.get("point", "월")
     yoy = labels.get("yoy", "전년동월")
-    prd_se = "M" if point == "월" else "H"
+    prd_se = str(meta.get("prd_se", "M")).upper()
     latest = _fmt_period(meta.get("latest_period"), prd_se)
+    latest_nat_value = meta.get("latest_nat_value")
+    latest_gg_value = meta.get("latest_gg_value")
     share = meta.get("latest_share_pct")
     contrib = meta.get("latest_contrib_pct")
     unit = str(meta.get("unit", ""))
     gg_delta = meta.get("latest_gg_yoy_abs")
     nat_delta = meta.get("latest_nat_yoy_abs")
-    share_hist_pct = meta.get("share_hist_percentile")
-    contrib_abs_hist_pct = meta.get("contrib_abs_hist_percentile")
-    share_change_pp = meta.get("share_change_pp")
-    contrib_change_pp = meta.get("contrib_change_pp")
-    streak = int(meta.get("same_direction_streak", 1) or 1)
+    prev_period = meta.get("prev_year_period")
+    prev_nat_value = meta.get("prev_year_nat_value")
+    prev_gg_value = meta.get("prev_year_gg_value")
+    prev_share = meta.get("prev_year_share_pct")
+    share_yoy_change_pp = meta.get("share_yoy_change_pp")
+    prev_contrib = meta.get("prev_year_contrib_pct")
+    contrib_yoy_change_pp = meta.get("contrib_yoy_change_pp")
+    recent_start_period = meta.get("recent_start_period")
+    recent_start_share = meta.get("recent_start_share_pct")
+    recent_end_share = meta.get("recent_end_share_pct")
+    recent_change_pp = meta.get("recent_change_pp")
+    recent_max_period = meta.get("recent_max_period")
+    recent_max_share = meta.get("recent_max_share_pct")
+    recent_min_period = meta.get("recent_min_period")
+    recent_min_share = meta.get("recent_min_share_pct")
 
     contrib_text = "-" if pd.isna(contrib) else f"{float(contrib):,.1f}%"
-    share_change_text = "-" if pd.isna(share_change_pp) else f"{float(share_change_pp):+,.2f}%p"
-    contrib_change_text = "-" if pd.isna(contrib_change_pp) else f"{float(contrib_change_pp):+,.1f}%p"
-    share_hist_text = "-" if pd.isna(share_hist_pct) else f"상위 {100.0 - float(share_hist_pct):.0f}% 구간"
-    contrib_hist_text = "-" if pd.isna(contrib_abs_hist_pct) else f"절대값 기준 상위 {100.0 - float(contrib_abs_hist_pct):.0f}% 구간"
-    streak_dir = "증가" if pd.notna(gg_delta) and float(gg_delta) > 0 else "감소" if pd.notna(gg_delta) and float(gg_delta) < 0 else "보합"
+    prev_period_text = _fmt_period(prev_period, prd_se) if pd.notna(prev_period) else "-"
+    share_yoy_text = "-" if pd.isna(share_yoy_change_pp) else f"{float(share_yoy_change_pp):+,.2f}%p"
+    contrib_yoy_text = "-" if pd.isna(contrib_yoy_change_pp) else f"{float(contrib_yoy_change_pp):+,.1f}%p"
+    recent_start_text = _fmt_period(recent_start_period, prd_se) if pd.notna(recent_start_period) else "-"
+    recent_max_period_text = _fmt_period(recent_max_period, prd_se) if pd.notna(recent_max_period) else "-"
+    recent_min_period_text = _fmt_period(recent_min_period, prd_se) if pd.notna(recent_min_period) else "-"
+    recent_change_text = "-" if pd.isna(recent_change_pp) else f"{float(recent_change_pp):+,.2f}%p"
 
     lines = [
-        f"- {latest} 기준, 전국 취업자 중 경기도 비중은 **{float(share):,.2f}%**입니다." if pd.notna(share) else f"- {latest} 기준 비중 계산값이 없습니다.",
-        f"- 같은 시점 {yoy} 대비 증감 기준으로, 경기도의 전국 기여율은 **{contrib_text}**입니다.",
-        f"- 경기도 증감은 **{_fmt_num(gg_delta, unit)}**, 전국 증감은 **{_fmt_num(nat_delta, unit)}**입니다.",
-        f"- 직전 {point} 대비 비중 변화는 **{share_change_text}**, 기여율 변화는 **{contrib_change_text}**입니다.",
-        f"- 비중의 역사적 위치는 **{share_hist_text}**, 기여율 크기의 역사적 위치는 **{contrib_hist_text}**입니다.",
-        f"- 최근 흐름은 경기도 증감이 **{streak_dir} 방향으로 {streak}{point} 연속**입니다.",
-        "- 참고: 전국 증감이 0에 가까운 시점은 기여율(%)이 크게 흔들릴 수 있습니다.",
-        f"- 다음 점검 포인트: 다음 {point}에 기여율 부호 전환 여부와 비중 추세 지속 여부를 확인하세요.",
+        (
+            f"- **이번 {point} 기준** 경기도 취업자는 **{_fmt_num(latest_gg_value, unit)}**, "
+            f"전국 취업자는 **{_fmt_num(latest_nat_value, unit)}**이며, "
+            f"경기도 비중은 **{float(share):,.2f}%**입니다."
+            if pd.notna(share)
+            else f"- {latest} 기준 비중 계산값이 없습니다."
+        ),
+        (
+            f"- **전년동월 비교**: 경기도 취업자 {prev_period_text} **{_fmt_num(prev_gg_value, unit)}** → "
+            f"{latest} **{_fmt_num(latest_gg_value, unit)}**, "
+            f"전국 취업자 {prev_period_text} **{_fmt_num(prev_nat_value, unit)}** → "
+            f"{latest} **{_fmt_num(latest_nat_value, unit)}**. "
+            f"비중은 {prev_period_text} **{float(prev_share):,.2f}%** → "
+            f"{latest} 비중 **{float(share):,.2f}%** (**{share_yoy_text}**). "
+            f"기여율은 {prev_period_text} **{'-' if pd.isna(prev_contrib) else f'{float(prev_contrib):,.1f}%'}** → "
+            f"{latest} **{contrib_text}** (**{contrib_yoy_text}**)."
+            if pd.notna(prev_share)
+            else f"- 전년동월({yoy}) 기준 비교 데이터가 부족합니다."
+        ),
+        (
+            f"- {latest}의 {yoy} 대비 증감은 전국 **{_fmt_num(nat_delta, unit)}**, "
+            f"경기도 **{_fmt_num(gg_delta, unit)}**로, "
+            f"전국 증가/감소분 중 경기도 기여율은 **{contrib_text}**입니다."
+        ),
+        (
+            f"- **최근 12개월 비중 변화**: {recent_start_text} **{'-' if pd.isna(recent_start_share) else f'{float(recent_start_share):,.2f}%'}** → "
+            f"{latest} **{'-' if pd.isna(recent_end_share) else f'{float(recent_end_share):,.2f}%'}** "
+            f"(**{recent_change_text}**). "
+            f"같은 기간 최고는 {recent_max_period_text} **{'-' if pd.isna(recent_max_share) else f'{float(recent_max_share):,.2f}%'}**, "
+            f"최저는 {recent_min_period_text} **{'-' if pd.isna(recent_min_share) else f'{float(recent_min_share):,.2f}%'}**입니다."
+        ),
+        f"- 다음 점검 포인트: 다음 {point}에도 비중이 같은 방향으로 움직이는지 확인하세요.",
     ]
     return "\n".join(lines)
 
 
 def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[str, str]) -> None:
     st.subheader("AI INSIGHTS")
-    st.caption("영향요인분해 + AI 해설 + AI 이상탐지(Robust Z-score)")
-    st.markdown("#### 전국 대비 경기도 기여")
+    st.markdown("#### 영향요인분해(전국 내 경기도 비중)")
     gy_trend, gy_meta = _compute_gyeonggi_vs_national_contribution(df)
     if not gy_meta.get("ok"):
         st.info(str(gy_meta.get("message", "전국 대비 경기도 기여도 계산이 불가능합니다.")))
@@ -1713,16 +1840,24 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
         latest_period_text = _fmt_period(gy_meta.get("latest_period"), period_prd)
         c1, c2, c3 = st.columns(3)
         with c1:
+            share_sub = (
+                f"경기도 {_fmt_num(gy_meta.get('latest_gg_value'), str(gy_meta.get('unit', '')))} / "
+                f"전국 {_fmt_num(gy_meta.get('latest_nat_value'), str(gy_meta.get('unit', '')))}"
+            )
             _card(
                 "전국 대비 경기도 비중",
                 "-" if pd.isna(gy_meta.get("latest_share_pct")) else f"{float(gy_meta.get('latest_share_pct')):,.2f}%",
-                latest_period_text,
+                share_sub,
             )
         with c2:
+            contrib_sub = (
+                f"경기 증감 {_fmt_num(gy_meta.get('latest_gg_yoy_abs'), str(gy_meta.get('unit', '')))} / "
+                f"전국 증감 {_fmt_num(gy_meta.get('latest_nat_yoy_abs'), str(gy_meta.get('unit', '')))}"
+            )
             _card(
                 f"전국 증감 기여율({labels.get('yoy', '전년동월')}대비)",
                 "-" if pd.isna(gy_meta.get("latest_contrib_pct")) else f"{float(gy_meta.get('latest_contrib_pct')):,.1f}%",
-                latest_period_text,
+                contrib_sub,
             )
         with c3:
             _card(
@@ -1777,7 +1912,7 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
     if "prd_se" in df.columns and not df["prd_se"].dropna().empty:
         lag = 2 if str(df["prd_se"].dropna().iloc[0]).upper() == "H" else 12
     period_prd = "H" if lag == 2 else "M"
-    st.markdown("#### 영향요인분해")
+    st.markdown("#### 영향요인분해(경기도)")
     ds_options = {
         "연령별 취업자": "age",
         "종사상지위별 취업자": "status",
@@ -1799,9 +1934,9 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
         st.markdown(_build_ai_contribution_commentary(contrib_df, contrib_meta, labels["point"], labels["yoy"]))
         unit = str(contrib_meta.get("unit", ""))
         st.markdown(
-            f"- 기준시점: **{_fmt_period(contrib_meta['latest_period'], period_prd)}**  \n"
-            f"- 비교시점: **{_fmt_period(contrib_meta['prev_period'], period_prd)}**  \n"
-            f"- 총 증감: **{_fmt_num(contrib_meta['total_delta'], unit)}**"
+            f"(기준시점: {_fmt_period(contrib_meta['latest_period'], period_prd)} | "
+            f"비교시점: {_fmt_period(contrib_meta['prev_period'], period_prd)} | "
+            f"총 증감: {_fmt_num(contrib_meta['total_delta'], unit)})"
         )
         chart_df = contrib_df.copy()
         chart = (
@@ -1837,7 +1972,12 @@ def _render_ai_insights(df: pd.DataFrame, region_pool: List[str], labels: Dict[s
         top_df = anomaly_df.head(10).copy()
         st.markdown("##### AI 해설")
         st.markdown(_build_ai_anomaly_commentary(top_df, labels["point"]))
-        st.dataframe(top_df, use_container_width=True, hide_index=True)
+        display_df = top_df.drop(columns=["지표"], errors="ignore")
+        ordered_cols = ["지역", "데이터셋", "분류", "기준시점", "이상점수", "이유"]
+        show_cols = [c for c in ordered_cols if c in display_df.columns]
+        extra_cols = [c for c in display_df.columns if c not in show_cols]
+        display_df = display_df[show_cols + extra_cols]
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 st.title("경제활동인구 모니터링")
 
