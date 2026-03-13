@@ -8,15 +8,24 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from src.config import (
-    GYEONGGI_SIGUNGU,
-    TARGET_REGIONS,
-    DatasetConfig,
-    datasets_for_scope,
-    default_end_period_by_prd_se,
-)
+import src.config as app_config
 from src.kosis_client import KosisClient
 from src.transform import add_yoy, build_stats, normalize_records, series_filter
+
+# Keep runtime resilient even if a deployment temporarily mixes app/config versions.
+GYEONGGI_SIGUNGU = getattr(app_config, "GYEONGGI_SIGUNGU", [])
+TARGET_REGIONS = app_config.TARGET_REGIONS
+DatasetConfig = getattr(app_config, "DatasetConfig", Any)
+datasets_for_scope = getattr(
+    app_config,
+    "datasets_for_scope",
+    lambda _scope: getattr(app_config, "DATASETS", []),
+)
+default_end_period_by_prd_se = getattr(
+    app_config,
+    "default_end_period_by_prd_se",
+    lambda _prd_se: app_config.default_end_period(),
+)
 
 st.set_page_config(
     page_title="Data Monitoring",
@@ -1083,6 +1092,8 @@ if not api_key:
     st.warning("API key is not set.")
     st.stop()
 
+loading_notice = st.empty()
+loading_notice.info("데이터 불러오는 중...")
 data, load_errors, debug_logs = load_data_with_progress(
     api_key=api_key,
     status_box=sidebar_status,
@@ -1090,6 +1101,7 @@ data, load_errors, debug_logs = load_data_with_progress(
     region_scope=region_scope,
     datasets=active_datasets,
 )
+loading_notice.empty()
 
 if load_errors:
     st.error("일부 데이터셋 조회 중 오류가 발생했습니다.")
