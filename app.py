@@ -1269,12 +1269,13 @@ def _render_new_monthly_report(
                         return f"→{_fmt_num(0, u)}"
 
                     yoy_label = _time_labels(datasets)["yoy"]
+                    current_label = "당월" if labels["point"] == "월" else "당반기"
                     activity_lines.append(f"##### 경제활동인구현황 9개 지표 요약 ({summary_region})")
                     for _, r in merged.iterrows():
                         activity_lines.append(
                             f"- {str(r['indicator_name'])}: "
-                            f"이번{labels['point']} **{_fmt_num(r['latest_value'], str(r['unit']))}**, "
-                            f"전년{yoy_label} **{_fmt_num(r['prev_value'], str(r['unit']))}**, "
+                            f"{current_label} **{_fmt_num(r['latest_value'], str(r['unit']))}**, "
+                            f"{yoy_label} **{_fmt_num(r['prev_value'], str(r['unit']))}**, "
                             f"증감 **{_fmt_delta_signed(r['delta_value'], str(r['unit']))}**"
                         )
 
@@ -1683,6 +1684,281 @@ def _build_ai_anomaly_commentary(top_df: pd.DataFrame, point_label: str) -> str:
         f"- 다음 점검 포인트: 다음 {point_label}에도 동일 지표·분류가 연속 상위에 남는지 확인하세요.",
     ]
     return "\n".join(lines)
+
+
+def _infer_lag_from_df(df: pd.DataFrame) -> int:
+    if "prd_se" in df.columns and not df["prd_se"].dropna().empty:
+        return 2 if str(df["prd_se"].dropna().iloc[0]).upper() == "H" else 12
+    return 12
+
+
+def _build_activity_snapshot(df: pd.DataFrame, region: str, lag: int) -> tuple[pd.DataFrame, Dict[str, Any]]:
+    meta: Dict[str, Any] = {
+        "ok": False,
+        "message": "",
+        "prd_se": "M",
+        "latest_period": pd.NaT,
+        "prev_period": pd.NaT,
+    }
+    base = df[(df["dataset_key"] == "activity") & (df["region_name"] == region)].copy()
+    if base.empty:
+        meta["message"] = "경제활동인구현황 데이터가 없습니다."
+        return pd.DataFrame(), meta
+    base["period"] = pd.to_datetime(base["period"], errors="coerce")
+    base = base.dropna(subset=["period"])
+    if base.empty:
+        meta["message"] = "기간 데이터가 없습니다."
+        return pd.DataFrame(), meta
+    if "prd_se" in base.columns and not base["prd_se"].dropna().empty:
+        meta["prd_se"] = str(base["prd_se"].dropna().iloc[0]).upper()
+    periods = sorted(base["period"].dropna().unique().tolist())
+    latest_period = pd.Timestamp(periods[-1])
+    prev_period = _find_prev_period(periods, latest_period, lag)
+    if prev_period is None:
+        meta["message"] = "전년 비교 가능한 시점이 부족합니다."
+        return pd.DataFrame(), meta
+
+    base["norm_indicator"] = base["indicator_name"].apply(_norm_indicator_name)
+    rows: List[Dict[str, Any]] = []
+    for ind in ACTIVITY_INDICATOR_ORDER:
+        norm = _norm_indicator_name(ind)
+        ind_df = base[base["norm_indicator"] == norm].copy()
+        if ind_df.empty:
+            continue
+        latest_rows = ind_df[ind_df["period"] == latest_period]
+        prev_rows = ind_df[ind_df["period"] == prev_period]
+        latest_val = pd.to_numeric(latest_rows["value"], errors="coerce").mean()
+        prev_val = pd.to_numeric(prev_rows["value"], errors="coerce").mean()
+        unit_candidates = pd.concat([latest_rows["unit"], prev_rows["unit"]], ignore_index=True)
+        unit = str(unit_candidates.dropna().iloc[0]) if not unit_candidates.dropna().empty else ""
+        rows.append(
+            {
+                "지표": ind,
+                "norm_indicator": norm,
+                "latest_value": latest_val,
+                "prev_value": prev_val,
+                "delta_value": latest_val - prev_val if pd.notna(latest_val) and pd.notna(prev_val) else np.nan,
+                "unit": unit,
+            }
+        )
+    out = pd.DataFrame(rows)
+    if out.empty:
+        meta["message"] = "표시 가능한 지표 데이터가 없습니다."
+        return out, meta
+    meta.update({"ok": True, "latest_period": latest_period, "prev_period": prev_period})
+    return out, meta
+
+
+def _fmt_contrib_items(table: pd.DataFrame, unit: str, positive: bool, top_n: int = 3) -> str:
+    if table.empty:
+        return "-"
+    if positive:
+        view = table[table["증감"] > 0].nlargest(top_n, "증감")
+    else:
+        view = table[table["증감"] < 0].nsmallest(top_n, "증감")
+    if view.empty:
+        return "-"
+    items = []
+    for _, r in view.iterrows():
+        pct_text = "-" if pd.isna(r.get("기여율(%)")) else f"{float(r['기여율(%)']):,.1f}%"
+        items.append(
+            f"{_escape_markdown_text(r['분류'])}({_fmt_num(r['증감'], unit)}, {pct_text})"
+        )
+    return ", ".join(items)
+
+
+def _render_report_template(
+    df: pd.DataFrame,
+    province_df: pd.DataFrame,
+    region_pool: List[str],
+    datasets: List[DatasetConfig],
+) -> None:
+    labels = _time_labels(datasets)
+    if df.empty:
+        st.info("리포트 생성 대상 데이터가 없습니다.")
+        return
+
+    default_region = "경기도" if "경기도" in region_pool else (region_pool[0] if region_pool else "")
+    if not default_region:
+        st.info("리포트 생성 대상 지역이 없습니다.")
+        return
+    region = st.selectbox(
+        "리포트 지역",
+        region_pool,
+        index=region_pool.index(default_region) if default_region in region_pool else 0,
+        key="report_template_region",
+    )
+
+    lag = _infer_lag_from_df(df)
+    activity_df, activity_meta = _build_activity_snapshot(df, region, lag)
+    if not activity_meta.get("ok"):
+        st.info(str(activity_meta.get("message", "경제활동인구 요약 데이터를 생성할 수 없습니다.")))
+        return
+
+    prd_se = str(activity_meta.get("prd_se", "M"))
+    latest_period = activity_meta.get("latest_period")
+    prev_period = activity_meta.get("prev_period")
+    latest_text = _fmt_period(latest_period, prd_se)
+    prev_text = _fmt_period(prev_period, prd_se)
+    yoy_text = labels.get("yoy", "전년동월")
+
+    def _get_row(norm_name: str) -> Optional[pd.Series]:
+        view = activity_df[activity_df["norm_indicator"] == norm_name]
+        if view.empty:
+            return None
+        return view.iloc[0]
+
+    emp_row = _get_row(_norm_indicator_name("취업자"))
+    emp_rate_row = _get_row(_norm_indicator_name("고용률"))
+    unemp_rate_row = _get_row(_norm_indicator_name("실업률"))
+
+    industry_df, industry_meta = _compute_contribution_table(df, region=region, dataset_key="industry", lag=lag)
+    top_pos_name = "없음"
+    top_neg_name = "없음"
+    if not industry_df.empty:
+        pos = industry_df[industry_df["증감"] > 0].nlargest(1, "증감")
+        neg = industry_df[industry_df["증감"] < 0].nsmallest(1, "증감")
+        if not pos.empty:
+            top_pos_name = str(pos.iloc[0]["분류"])
+        if not neg.empty:
+            top_neg_name = str(neg.iloc[0]["분류"])
+
+    st.markdown("#### [1페이지] 경기도 월간 핵심요약")
+    st.markdown(
+        "\n".join(
+            [
+                f"- {latest_text} {region} 취업자는 **{_fmt_num(emp_row['latest_value'] if emp_row is not None else np.nan, str(emp_row['unit']) if emp_row is not None else '')}**로, "
+                f"{prev_text} 대비 **{_fmt_num(emp_row['delta_value'] if emp_row is not None else np.nan, str(emp_row['unit']) if emp_row is not None else '')}** 변동했습니다.",
+                f"- 고용률은 **{_fmt_num(emp_rate_row['latest_value'] if emp_rate_row is not None else np.nan, str(emp_rate_row['unit']) if emp_rate_row is not None else '%')}**"
+                f"({yoy_text} 대비 **{_fmt_num(emp_rate_row['delta_value'] if emp_rate_row is not None else np.nan, str(emp_rate_row['unit']) if emp_rate_row is not None else '%')}**), "
+                f"실업률은 **{_fmt_num(unemp_rate_row['latest_value'] if unemp_rate_row is not None else np.nan, str(unemp_rate_row['unit']) if unemp_rate_row is not None else '%')}**"
+                f"({yoy_text} 대비 **{_fmt_num(unemp_rate_row['delta_value'] if unemp_rate_row is not None else np.nan, str(unemp_rate_row['unit']) if unemp_rate_row is not None else '%')}**)입니다.",
+                f"- {region} 내부에서는 **{_escape_markdown_text(top_pos_name)}**(증가기여 1위), "
+                f"**{_escape_markdown_text(top_neg_name)}**(감소상쇄 1위)의 영향이 가장 컸습니다.",
+            ]
+        )
+    )
+
+    st.markdown("##### 경제활동인구현황 9개 지표")
+    activity_view = activity_df.copy()
+    activity_view = activity_view[
+        ["지표", "prev_value", "latest_value", "delta_value", "unit"]
+    ].rename(
+        columns={
+            "prev_value": prev_text,
+            "latest_value": latest_text,
+            "delta_value": f"{yoy_text} 대비 증감",
+        }
+    )
+    for col in [prev_text, latest_text, f"{yoy_text} 대비 증감"]:
+        activity_view[col] = activity_view.apply(
+            lambda r: _fmt_num(r[col], str(r["unit"])),
+            axis=1,
+        )
+    activity_view = activity_view.drop(columns=["unit"])
+    st.dataframe(activity_view, use_container_width=True, hide_index=True)
+
+    st.markdown("##### 경기도 내부 구조변화 요약")
+    sections = [
+        ("산업별 취업자수", "industry"),
+        ("직종별 취업자수", "occupation"),
+        ("종사상지위별 취업자", "status"),
+    ]
+    for title, ds_key in sections:
+        tbl, meta = _compute_contribution_table(df, region=region, dataset_key=ds_key, lag=lag)
+        if not meta.get("ok"):
+            st.markdown(f"- **{title}**: 데이터가 부족해 요약을 생성하지 못했습니다.")
+            continue
+        unit = str(meta.get("unit", ""))
+        pos_text = _fmt_contrib_items(tbl, unit, positive=True, top_n=3)
+        neg_text = _fmt_contrib_items(tbl, unit, positive=False, top_n=3)
+        st.markdown(f"- **{title}** 증가 기여 상위: {pos_text}")
+        st.markdown(f"- **{title}** 감소(상쇄) 상위: {neg_text}")
+
+    st.markdown("##### AI 이상탐지 요약")
+    anomaly_df = _compute_anomaly_table(df, region=region, lag=lag, lookback_periods=36)
+    if anomaly_df.empty:
+        st.markdown("- 이상탐지 결과가 없습니다.")
+    else:
+        scores = pd.to_numeric(anomaly_df["이상점수"], errors="coerce")
+        focus = anomaly_df[scores >= 50].copy().sort_values("이상점수", ascending=False)
+        high_cnt = int((scores >= 75).sum())
+        med_cnt = int(((scores >= 50) & (scores < 75)).sum())
+        st.markdown(f"- 우선점검(75점 이상): **{high_cnt}건**")
+        st.markdown(f"- 주의관찰(50-74점): **{med_cnt}건**")
+        if not focus.empty:
+            top3 = focus.head(3)
+            lines = []
+            for _, r in top3.iterrows():
+                lines.append(
+                    f"  - [{r['기준시점']}] {r['데이터셋']} / {_escape_markdown_text(r['분류'])}: "
+                    f"{_escape_markdown_text(r['이유'])} ({float(r['이상점수']):.1f}점)"
+                )
+            st.markdown("- Top 3 이벤트\n" + "\n".join(lines))
+
+    st.markdown("##### 전국 대비 참고")
+    compare_base = province_df if not province_df.empty else df
+    if region == "경기도":
+        _, gy_meta = _compute_gyeonggi_vs_national_contribution(compare_base)
+        if gy_meta.get("ok"):
+            st.markdown(
+                f"- 전국 대비 {region} 비중: **{float(gy_meta.get('latest_share_pct')):,.2f}%** "
+                f"({float(gy_meta.get('share_yoy_change_pp')):+,.2f}%p)"
+            )
+            contrib_text = "-" if pd.isna(gy_meta.get("latest_contrib_pct")) else f"{float(gy_meta.get('latest_contrib_pct')):,.1f}%"
+            contrib_change = "-" if pd.isna(gy_meta.get("contrib_yoy_change_pp")) else f"{float(gy_meta.get('contrib_yoy_change_pp')):+,.1f}%p"
+            st.markdown(f"- 전국 증감 대비 {region} 기여율: **{contrib_text}** ({contrib_change})")
+        else:
+            st.markdown("- 전국 대비 참고 지표를 계산할 수 없습니다.")
+    else:
+        st.markdown("- 전국 대비 지표는 경기도 선택 시에만 제공합니다.")
+
+    st.markdown("---")
+    st.markdown("#### [2페이지] 경기도 상세분석")
+    for title, ds_key in sections:
+        tbl, meta = _compute_contribution_table(df, region=region, dataset_key=ds_key, lag=lag)
+        st.markdown(f"##### {title}")
+        if not meta.get("ok") or tbl.empty:
+            st.markdown("- 데이터가 부족해 상세 분석을 생성하지 못했습니다.")
+            continue
+        unit = str(meta.get("unit", ""))
+        latest = _fmt_period(meta.get("latest_period"), prd_se)
+        prev = _fmt_period(meta.get("prev_period"), prd_se)
+        total_delta = _fmt_num(meta.get("total_delta"), unit)
+        top_pos = tbl[tbl["증감"] > 0].nlargest(1, "증감")
+        top_neg = tbl[tbl["증감"] < 0].nsmallest(1, "증감")
+        pos_line = (
+            f"{_escape_markdown_text(top_pos.iloc[0]['분류'])}({_fmt_num(top_pos.iloc[0]['증감'], unit)})"
+            if not top_pos.empty
+            else "없음"
+        )
+        neg_line = (
+            f"{_escape_markdown_text(top_neg.iloc[0]['분류'])}({_fmt_num(top_neg.iloc[0]['증감'], unit)})"
+            if not top_neg.empty
+            else "없음"
+        )
+        st.markdown(f"- {latest} 기준 총증감: **{total_delta}** ({prev} 대비)")
+        st.markdown(f"- 증가기여 1위: **{pos_line}**, 감소상쇄 1위: **{neg_line}**")
+        detail_view = tbl.copy()
+        detail_view["절대증감"] = pd.to_numeric(detail_view["증감"], errors="coerce").abs()
+        detail_view = detail_view.sort_values("절대증감", ascending=False).head(8).drop(columns=["절대증감"])
+        st.dataframe(detail_view, use_container_width=True, hide_index=True)
+
+    st.markdown("##### 점검 액션")
+    action_lines = []
+    if not industry_df.empty:
+        pos = industry_df[industry_df["증감"] > 0].nlargest(1, "증감")
+        neg = industry_df[industry_df["증감"] < 0].nsmallest(1, "증감")
+        if not pos.empty:
+            action_lines.append(f"- 산업 증가 1위({_escape_markdown_text(pos.iloc[0]['분류'])})의 증가 지속 여부를 다음 {labels['point']}에 점검")
+        if not neg.empty:
+            action_lines.append(f"- 산업 감소 1위({_escape_markdown_text(neg.iloc[0]['분류'])})의 구조적 감소 여부를 원인 점검")
+    if not anomaly_df.empty:
+        high_focus = anomaly_df[pd.to_numeric(anomaly_df["이상점수"], errors="coerce") >= 75]
+        action_lines.append(f"- 이상점수 75점 이상 항목 {len(high_focus):,}건에 대해 우선 확인 코멘트 수집")
+    if not action_lines:
+        action_lines.append("- 이번 시점은 급격한 이상 신호가 제한적이므로 주요 분류 추세 모니터링 유지")
+    st.markdown("\n".join(action_lines))
 
 
 def _compute_gyeonggi_vs_national_contribution(df: pd.DataFrame) -> tuple[pd.DataFrame, Dict[str, Any]]:
@@ -2206,7 +2482,7 @@ else:
     event_source = visible_data
 events = _collect_new_events(event_source)
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
     [
         "① 경제활동인구현황",
         "② 연령별 취업자",
@@ -2214,7 +2490,8 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         "④ 산업별 취업자수",
         "⑤ 직종별 취업자수",
         "⑥ NEW HISTORY",
-        "⑦ REPORT",
+        "⑦ 요약탭",
+        "⑧ 리포트",
     ]
 )
 with tab1:
@@ -2270,7 +2547,7 @@ with tab6:
             unsafe_allow_html=True,
         )
 with tab7:
-    st.subheader("REPORT")
+    st.subheader("요약탭")
     report_scope = st.radio(
         "리포트 범위",
         ["경기도 전체", "31개 시군"],
@@ -2287,6 +2564,14 @@ with tab7:
     if region_scope == "province":
         st.markdown("---")
         _render_ai_insights(visible_data, region_pool, _time_labels(active_datasets))
+with tab8:
+    st.subheader("리포트")
+    _render_report_template(
+        df=visible_data,
+        province_df=scope_data.get("province", pd.DataFrame()),
+        region_pool=region_pool,
+        datasets=active_datasets,
+    )
 
 st.markdown(
     "<hr style='margin-top:2rem; margin-bottom:0.5rem;'>"
