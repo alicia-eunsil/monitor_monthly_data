@@ -2872,26 +2872,50 @@ with tab6:
         if type_sel != "전체":
             view = view[view["유형"] == type_sel]
 
-        latest_ts = pd.to_datetime(view.get("기준월_ts"), errors="coerce").max()
-        if pd.isna(latest_ts):
-            detail_df = view[
-                ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "범위", "유형", "이벤트"]
-            ].sort_values(
-                ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "범위", "유형"],
-                ascending=[False, True, True, True, True, True, True, True],
+        f3, f4 = st.columns([1, 1])
+        with f3:
+            region_options = ["전체"] + sorted(view["지역"].dropna().unique().tolist())
+            default_region_sel = "경기도" if "경기도" in region_options else "전체"
+            region_sel = st.selectbox(
+                "지역",
+                region_options,
+                index=region_options.index(default_region_sel),
+                key="history_region_filter",
             )
-            latest_label = str(detail_df["기준월"].iloc[0]) if not detail_df.empty else "-"
-        else:
-            latest_rows = view[pd.to_datetime(view.get("기준월_ts"), errors="coerce") == latest_ts].copy()
-            detail_df = latest_rows[
-                ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "범위", "유형", "이벤트"]
-            ].sort_values(
-                ["데이터셋", "지역", "지표", "분류", "구분", "범위", "유형"],
-                ascending=[True, True, True, True, True, True, True],
+        with f4:
+            month_table = (
+                view[["기준월", "기준월_ts"]]
+                .drop_duplicates()
+                .assign(기준월_dt=lambda d: pd.to_datetime(d["기준월_ts"], errors="coerce"))
+                .dropna(subset=["기준월_dt"])
+                .sort_values("기준월_dt", ascending=False)
             )
-            latest_label = str(detail_df["기준월"].iloc[0]) if not detail_df.empty else "-"
+            month_options = month_table["기준월"].astype(str).tolist()
+            date_options = ["전체"] + month_options if month_options else ["전체"]
+            date_default_idx = 1 if month_options else 0  # 최신일 기본
+            date_sel = st.selectbox(
+                "일자",
+                date_options,
+                index=date_default_idx,
+                key="history_date_filter",
+            )
 
-        st.markdown(f"##### 상세 이벤트 (최신일: {latest_label})")
+        detail_view = view.copy()
+        if region_sel != "전체":
+            detail_view = detail_view[detail_view["지역"] == region_sel]
+        if date_sel != "전체":
+            detail_view = detail_view[detail_view["기준월"].astype(str) == str(date_sel)]
+
+        detail_df = detail_view[
+            ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "범위", "유형", "이벤트"]
+        ].sort_values(
+            ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "범위", "유형"],
+            ascending=[False, True, True, True, True, True, True, True],
+        )
+
+        date_label = str(date_sel) if date_sel != "전체" else "전체"
+        region_label = str(region_sel) if region_sel != "전체" else "전체"
+        st.markdown(f"##### 상세 이벤트 (일자: {date_label} | 지역: {region_label})")
         detail_lines = []
         for _, row in detail_df.iterrows():
             category_text = str(row["분류"]).strip() if str(row["분류"]).strip() else "전체"
