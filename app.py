@@ -2858,24 +2858,12 @@ with tab6:
     if events.empty:
         st.info("집계된 NEW 이벤트 이력이 없습니다.")
     else:
-        f1, f2 = st.columns([1, 1])
-        with f1:
-            metric_options = ["전체"] + sorted(events["구분"].dropna().unique().tolist())
-            metric_sel = st.selectbox("구분", metric_options, key="history_metric_filter")
-        with f2:
-            type_options = ["전체", "최고", "최저"]
-            type_sel = st.selectbox("유형", type_options, key="history_type_filter")
-
         view = events.copy()
-        if metric_sel != "전체":
-            view = view[view["구분"] == metric_sel]
-        if type_sel != "전체":
-            view = view[view["유형"] == type_sel]
 
         f3, f4 = st.columns([1, 1])
         with f3:
             region_options = ["전체"] + sorted(view["지역"].dropna().unique().tolist())
-            default_region_sel = "경기도" if "경기도" in region_options else "전체"
+            default_region_sel = "전체"
             region_sel = st.selectbox(
                 "지역",
                 region_options,
