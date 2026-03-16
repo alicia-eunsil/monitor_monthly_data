@@ -1811,15 +1811,16 @@ def _build_report_docx_bytes(
 ) -> bytes:
     doc = Document()
     doc.add_heading(_to_docx_text(title), level=0)
+    doc.add_paragraph("(출처:경제활동인구조사, 통계청)")
 
-    doc.add_heading("월간 핵심요약", level=1)
+    doc.add_heading("##월간 핵심요약", level=1)
     for line in summary_lines:
         doc.add_paragraph(_to_docx_text(line), style="List Bullet")
 
-    doc.add_heading("경제활동인구현황요약", level=1)
+    doc.add_heading("##경제활동인구 현황요약", level=1)
     _add_docx_table(doc, activity_table)
 
-    doc.add_heading("취업자수 상세현황", level=1)
+    doc.add_heading("##취업자수 상세현황", level=1)
     for line in structure_lines:
         doc.add_paragraph(_to_docx_text(line), style="List Bullet")
 
@@ -1828,7 +1829,7 @@ def _build_report_docx_bytes(
         doc.add_paragraph(_to_docx_text(line), style="List Bullet")
 
     doc.add_page_break()
-    doc.add_heading("상세분석", level=0)
+    doc.add_heading("[참고] 취업자수 상세내용", level=0)
     for section in detail_sections:
         doc.add_heading(_to_docx_text(section.get("title", "")), level=1)
         for line in section.get("lines", []):
@@ -1947,7 +1948,19 @@ def _render_report_template(
     prev_text = _fmt_period(prev_period, prd_se)
     yoy_text = labels.get("yoy", "전년동월")
     st.caption(f"리포트 기준: {region} / {latest_text}")
-    st.markdown(f"### {latest_text} {region} 경제활동인구 브리프")
+    report_title = f"{latest_text} {region} 경제활동인구 브리프"
+    st.markdown(
+        f"<h2 style='margin-bottom:0.2rem;'><u>{report_title}</u> "
+        f"<span style='font-size:0.55em; font-weight:500;'>(출처:경제활동인구조사, 통계청)</span></h2>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("<hr style='margin-top:0.1rem; margin-bottom:0.8rem;'>", unsafe_allow_html=True)
+
+    def _report_heading(text: str) -> None:
+        st.markdown(
+            f"<p style='color:#2f6fb3; font-weight:800; font-size:1.9rem; margin:0.2rem 0;'>##{text}</p>",
+            unsafe_allow_html=True,
+        )
 
     def _get_row(norm_name: str) -> Optional[pd.Series]:
         view = activity_df[activity_df["norm_indicator"] == norm_name]
@@ -1984,9 +1997,7 @@ def _render_report_template(
     else:
         emp_direction = "보합입니다."
 
-    report_title = f"{latest_text} {region} 경제활동인구 브리프"
-    st.markdown(f"# {report_title}")
-    st.markdown("## 월간 핵심요약")
+    _report_heading("월간 핵심요약")
     summary_lines = [
         f"{latest_text} {region} 취업자는 {_fmt_num(emp_row['latest_value'] if emp_row is not None else np.nan, str(emp_row['unit']) if emp_row is not None else '')}로, "
         f"{prev_text} 대비 {_fmt_num(emp_row['delta_value'] if emp_row is not None else np.nan, str(emp_row['unit']) if emp_row is not None else '')} {emp_direction}",
@@ -1999,7 +2010,7 @@ def _render_report_template(
     ]
     st.markdown("\n".join([f"- {line}" for line in summary_lines]))
 
-    st.markdown("##### 경제활동인구현황요약")
+    _report_heading("경제활동인구 현황요약")
     activity_view = activity_df.copy()
     activity_view = activity_view[
         ["지표", "prev_value", "latest_value", "delta_value", "unit"]
@@ -2036,7 +2047,7 @@ def _render_report_template(
     activity_view = activity_view.drop(columns=["unit"])
     st.dataframe(activity_view, use_container_width=True, hide_index=True)
 
-    st.markdown("##### 취업자수 상세현황")
+    _report_heading("취업자수 상세현황")
     structure_lines: List[str] = []
     report_events = _collect_new_events(report_df)
     if not report_events.empty:
@@ -2115,7 +2126,7 @@ def _render_report_template(
                     )
                 st.markdown("- Top 3 이벤트\n" + "\n".join(lines))
 
-    st.markdown(f"##### [참고] 전국대비 {region} 현황")
+    _report_heading(f"[참고] 전국대비 {region} 현황")
     reference_lines: List[str] = []
     compare_base = province_report_df if not province_report_df.empty else report_df
     if region != "전국":
@@ -2172,7 +2183,7 @@ def _render_report_template(
         st.markdown("- 전국 선택 시에는 전국대비 지표를 표시하지 않습니다.")
 
     st.markdown("---")
-    st.markdown(f"## {region} 상세분석")
+    _report_heading("[참고] 취업자수 상세내용")
     detail_sections: List[Dict[str, Any]] = []
     for title, ds_key in sections:
         tbl, meta = _compute_contribution_table(report_df, region=region, dataset_key=ds_key, lag=lag)
@@ -2214,6 +2225,7 @@ def _render_report_template(
         order_map = {name: idx for idx, name in enumerate(ordered_categories)}
         detail_view["정렬순서"] = detail_view["분류"].map(order_map).fillna(999)
         detail_view = detail_view.sort_values(["정렬순서", "분류"]).drop(columns=["정렬순서"])
+        detail_view = detail_view.rename(columns={"최신값": latest, "비교값": prev})
         detail_view["증감"] = detail_view["증감"].apply(lambda x: _fmt_triangle_delta(x, unit))
         st.dataframe(detail_view, use_container_width=True, hide_index=True)
         detail_sections.append(
