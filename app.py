@@ -1767,6 +1767,17 @@ def _fmt_contrib_items(table: pd.DataFrame, unit: str, positive: bool, top_n: in
     return ", ".join(items)
 
 
+def _fmt_triangle_delta(v: object, unit: str) -> str:
+    if v is None or pd.isna(v):
+        return "-"
+    vv = float(v)
+    if vv > 0:
+        return f"▲{_fmt_num(vv, unit)}"
+    if vv < 0:
+        return f"▼{_fmt_num(abs(vv), unit)}"
+    return f"→{_fmt_num(0, unit)}"
+
+
 def _order_categories_like_ui(categories: List[str], dataset_key: str, is_gyeonggi31_mode: bool) -> List[str]:
     ordered = sorted(c for c in categories if str(c).strip() != "")
     if dataset_key in {"industry", "occupation"}:
@@ -1805,19 +1816,63 @@ def _render_report_template(
         st.info("리포트 생성 대상 데이터가 없습니다.")
         return
 
+    work_df = df.copy()
+    work_df["period"] = pd.to_datetime(work_df["period"], errors="coerce")
+    work_df = work_df.dropna(subset=["period"])
+    if work_df.empty:
+        st.info("리포트 생성 대상 기간 데이터가 없습니다.")
+        return
+
+    province_work_df = province_df.copy()
+    if not province_work_df.empty:
+        province_work_df["period"] = pd.to_datetime(province_work_df["period"], errors="coerce")
+        province_work_df = province_work_df.dropna(subset=["period"])
+
     default_region = "경기도" if "경기도" in region_pool else (region_pool[0] if region_pool else "")
     if not default_region:
         st.info("리포트 생성 대상 지역이 없습니다.")
         return
-    region = st.selectbox(
-        "리포트 지역",
-        region_pool,
-        index=region_pool.index(default_region) if default_region in region_pool else 0,
-        key="report_template_region",
+
+    c_region, c_period = st.columns([1, 1])
+    with c_region:
+        region = st.selectbox(
+            "리포트 지역",
+            region_pool,
+            index=region_pool.index(default_region) if default_region in region_pool else 0,
+            key="report_template_region",
+        )
+
+    activity_base = work_df[(work_df["dataset_key"] == "activity") & (work_df["region_name"] == region)].copy()
+    if activity_base.empty:
+        st.info("선택한 지역의 경제활동인구현황 데이터가 없습니다.")
+        return
+    prd_se_for_period = (
+        str(activity_base["prd_se"].dropna().iloc[0]).upper()
+        if "prd_se" in activity_base.columns and not activity_base["prd_se"].dropna().empty
+        else "M"
+    )
+    period_values = sorted(activity_base["period"].dropna().unique().tolist(), reverse=True)
+    if not period_values:
+        st.info("선택 가능한 기준시점이 없습니다.")
+        return
+    period_labels = [_fmt_period(p, prd_se_for_period) for p in period_values]
+    period_map = {label: pd.Timestamp(value) for label, value in zip(period_labels, period_values)}
+    with c_period:
+        selected_period_label = st.selectbox("기준시점", period_labels, index=0, key="report_template_period")
+    selected_period = period_map[selected_period_label]
+
+    report_df = work_df[work_df["period"] <= selected_period].copy()
+    if report_df.empty:
+        st.info("선택한 기준시점 이전 데이터가 없습니다.")
+        return
+    province_report_df = (
+        province_work_df[province_work_df["period"] <= selected_period].copy()
+        if not province_work_df.empty
+        else pd.DataFrame()
     )
 
-    lag = _infer_lag_from_df(df)
-    activity_df, activity_meta = _build_activity_snapshot(df, region, lag)
+    lag = _infer_lag_from_df(report_df)
+    activity_df, activity_meta = _build_activity_snapshot(report_df, region, lag)
     if not activity_meta.get("ok"):
         st.info(str(activity_meta.get("message", "경제활동인구 요약 데이터를 생성할 수 없습니다.")))
         return
@@ -1828,6 +1883,7 @@ def _render_report_template(
     latest_text = _fmt_period(latest_period, prd_se)
     prev_text = _fmt_period(prev_period, prd_se)
     yoy_text = labels.get("yoy", "전년동월")
+    st.caption(f"리포트 기준: {region} / {latest_text}")
 
     def _get_row(norm_name: str) -> Optional[pd.Series]:
         view = activity_df[activity_df["norm_indicator"] == norm_name]
@@ -1839,7 +1895,7 @@ def _render_report_template(
     emp_rate_row = _get_row(_norm_indicator_name("고용률"))
     unemp_rate_row = _get_row(_norm_indicator_name("실업률"))
 
-    industry_df, industry_meta = _compute_contribution_table(df, region=region, dataset_key="industry", lag=lag)
+    industry_df, industry_meta = _compute_contribution_table(report_df, region=region, dataset_key="industry", lag=lag)
     top_pos_name = "없음"
     top_neg_name = "없음"
     if not industry_df.empty:
@@ -1918,13 +1974,19 @@ def _render_report_template(
     st.dataframe(activity_view, use_container_width=True, hide_index=True)
 
     st.markdown("##### 경기도 내부 구조변화 요약")
+    report_events = _collect_new_events(report_df)
+    if not report_events.empty:
+        report_events = report_events[
+            (report_events["지역"].astype(str) == str(region))
+            & (report_events["기준월"].astype(str) == str(latest_text))
+        ].copy()
     sections = [
         ("산업별 취업자수", "industry"),
         ("직종별 취업자수", "occupation"),
         ("종사상지위별 취업자", "status"),
     ]
     for title, ds_key in sections:
-        tbl, meta = _compute_contribution_table(df, region=region, dataset_key=ds_key, lag=lag)
+        tbl, meta = _compute_contribution_table(report_df, region=region, dataset_key=ds_key, lag=lag)
         if not meta.get("ok"):
             st.markdown(f"- **{title}**: 데이터가 부족해 요약을 생성하지 못했습니다.")
             continue
@@ -1933,9 +1995,33 @@ def _render_report_template(
         neg_text = _fmt_contrib_items(tbl, unit, positive=False, top_n=3)
         st.markdown(f"- **{title}** 증가 기여 상위: {pos_text}")
         st.markdown(f"- **{title}** 감소(상쇄) 상위: {neg_text}")
+        if report_events.empty:
+            st.markdown(f"  - 이번 {labels['point']} NEW 달성: 없음")
+        else:
+            ds_events = report_events[report_events["데이터셋"].astype(str) == str(title)].copy()
+            if ds_events.empty:
+                st.markdown(f"  - 이번 {labels['point']} NEW 달성: 없음")
+            else:
+                ds_events = ds_events.sort_values(
+                    ["구분", "범위", "유형", "분류"],
+                    ascending=[True, True, True, True],
+                )
+                event_tokens: List[str] = []
+                for _, er in ds_events.iterrows():
+                    cat = str(er.get("분류", "")).strip() or "전체"
+                    token = (
+                        f"{_escape_markdown_text(cat)}"
+                        f"({_escape_markdown_text(str(er.get('구분', '')))} "
+                        f"{_escape_markdown_text(str(er.get('범위', '')))} "
+                        f"{_escape_markdown_text(str(er.get('유형', '')))} NEW)"
+                    )
+                    event_tokens.append(token)
+                st.markdown(f"  - 이번 {labels['point']} NEW 달성: " + ", ".join(event_tokens))
 
     st.markdown("##### AI 이상탐지 요약")
-    anomaly_df = _compute_anomaly_table(df, region=region, lag=lag, lookback_periods=36)
+    anomaly_df = _compute_anomaly_table(report_df, region=region, lag=lag, lookback_periods=36)
+    if not anomaly_df.empty:
+        anomaly_df = anomaly_df[anomaly_df["기준시점"] == latest_text].copy()
     if anomaly_df.empty:
         st.markdown("- 이상탐지 결과가 없습니다.")
     else:
@@ -1956,7 +2042,7 @@ def _render_report_template(
             st.markdown("- Top 3 이벤트\n" + "\n".join(lines))
 
     st.markdown("##### 전국 대비 참고")
-    compare_base = province_df if not province_df.empty else df
+    compare_base = province_report_df if not province_report_df.empty else report_df
     if region == "경기도":
         _, gy_meta = _compute_gyeonggi_vs_national_contribution(compare_base)
         if gy_meta.get("ok"):
@@ -2009,7 +2095,7 @@ def _render_report_template(
     st.markdown("---")
     st.markdown("#### [2페이지] 경기도 상세분석")
     for title, ds_key in sections:
-        tbl, meta = _compute_contribution_table(df, region=region, dataset_key=ds_key, lag=lag)
+        tbl, meta = _compute_contribution_table(report_df, region=region, dataset_key=ds_key, lag=lag)
         st.markdown(f"##### {title}")
         if not meta.get("ok") or tbl.empty:
             st.markdown("- 데이터가 부족해 상세 분석을 생성하지 못했습니다.")
@@ -2041,6 +2127,7 @@ def _render_report_template(
         order_map = {name: idx for idx, name in enumerate(ordered_categories)}
         detail_view["정렬순서"] = detail_view["분류"].map(order_map).fillna(999)
         detail_view = detail_view.sort_values(["정렬순서", "분류"]).drop(columns=["정렬순서"])
+        detail_view["증감"] = detail_view["증감"].apply(lambda x: _fmt_triangle_delta(x, unit))
         st.dataframe(detail_view, use_container_width=True, hide_index=True)
 
     st.markdown("##### 점검 액션")
