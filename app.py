@@ -12,8 +12,32 @@ import streamlit as st
 from docx import Document
 
 import src.config as app_config
-from src.kosis_client import KosisClient
-from src.transform import add_yoy, build_stats, normalize_records, series_filter
+from src.core.category_rules import (
+    ACTIVITY_INDICATOR_ORDER,
+    norm_indicator_name as _norm_indicator_name,
+    order_activity_indicators as _order_activity_indicators,
+    order_age_categories as _order_age_categories,
+    order_categories_like_ui as _order_categories_like_ui,
+    order_occupation_categories as _order_occupation_categories,
+    order_sigungu_age_categories as _order_sigungu_age_categories,
+    order_sigungu_industry_categories as _order_sigungu_industry_categories,
+    order_sigungu_occupation_categories as _order_sigungu_occupation_categories,
+    order_sigungu_status_categories as _order_sigungu_status_categories,
+    order_status_categories as _order_status_categories,
+)
+from src.core.formatters import (
+    auto_y_domain as _auto_y_domain,
+    escape_markdown_text as _escape_markdown_text,
+    fmt_num as _fmt_num,
+    fmt_num_bold as _fmt_num_bold,
+    fmt_period as _fmt_period,
+    fmt_triangle_delta as _fmt_triangle_delta,
+    new_badge as _new,
+    remark_new as _remark_new,
+    time_labels,
+)
+from src.services.loader import load_all_data_with_progress
+from src.transform import build_stats, series_filter
 
 # Keep runtime resilient even if a deployment temporarily mixes app/config versions.
 GYEONGGI_SIGUNGU = getattr(app_config, "GYEONGGI_SIGUNGU", [])
@@ -23,11 +47,6 @@ datasets_for_scope = getattr(
     app_config,
     "datasets_for_scope",
     lambda _scope: getattr(app_config, "DATASETS", []),
-)
-default_end_period_by_prd_se = getattr(
-    app_config,
-    "default_end_period_by_prd_se",
-    lambda _prd_se: app_config.default_end_period(),
 )
 
 st.set_page_config(
@@ -92,261 +111,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-ACTIVITY_INDICATOR_ORDER = [
-    "15세이상인구",
-    "경제활동인구",
-    "경제활동참가율",
-    "비경제활동인구",
-    "고용률",
-    "취업자",
-    "15~64세 고용률",
-    "실업률",
-    "실업자",
-]
-
-OCCUPATION_CATEGORY_ORDER = [
-    "관리자전문가",
-    "관리자",
-    "전문가및관련종사자",
-    "사무종사자",
-    "서비스판매종사자",
-    "서비스종사자",
-    "판매종사자",
-    "농림어업숙련종사자",
-    "기능기계조작조립단순노무종사자",
-    "기능원및관련기능종사자",
-    "장치기계조작및조립종사자",
-    "단순노무종사자",
-    "기타",
-]
-
-SIGUNGU_INDUSTRY_ORDER = [
-    "계",
-    "농업",
-    "광제조업",
-    "전기운수통신",
-    "건설업",
-    "도소매",
-    "사업개인공공서비스",
-]
-
-SIGUNGU_OCCUPATION_ORDER = [
-    "계",
-    "관리자",
-    "사무종사자",
-    "서비스판매종사자",
-    "농립어업종사자",
-    "기능기계조작",
-    "단순노무종사자",
-]
-
-SIGUNGU_STATUS_ORDER = [
-    "계",
-    "임금근로자",
-    "-상용근로자",
-    "-임시일용근로자",
-    "비임금근로자",
-]
-
-SIGUNGU_AGE_ORDER = [
-    "계",
-    "15~29세",
-    "30~49세",
-    "50~64세",
-    "65세이상",
-    "15~64세",
-    "55세이상",
-]
-
-STATUS_CATEGORY_ORDER = [
-    "비임금근로자",
-    "*자영업자",
-    "-고용원이 있는 자영업자",
-    "-고용원이 없는 자영업자",
-    "-무급가족종사자",
-    "임금근로자",
-    "-상용근로자",
-    "-임시근로자",
-    "-일용근로자",
-    "계",
-]
-
-AGE_CATEGORY_ORDER = [
-    "15~24",
-    "15~29",
-    "15~64",
-    "15~19",
-    "20~29",
-    "30~39",
-    "40~49",
-    "50~59",
-    "60세 이상",
-    "계",
-]
-
-DATA_MODEL_VERSION = "2026-03-13-halfyear-gyeonggi31-v1"
-
-
-def _norm_indicator_name(text: str) -> str:
-    s = str(text).strip()
-    for token in [" ", "~", "-", "–", "ㅡ"]:
-        s = s.replace(token, "")
-    return s
-
-
-def _order_activity_indicators(indicators: List[str]) -> List[str]:
-    order_map = { _norm_indicator_name(name): idx for idx, name in enumerate(ACTIVITY_INDICATOR_ORDER) }
-    return sorted(
-        indicators,
-        key=lambda x: (order_map.get(_norm_indicator_name(x), 999), x),
-    )
-
-
-def _norm_occupation_category(text: str) -> str:
-    s = str(text).strip()
-    s = re.sub(r"^\*+\s*", "", s)
-    s = re.sub(r"^\d+\s*", "", s)
-    s = re.sub(r"\([^)]*\)", "", s)
-    s = re.sub(r"[^0-9A-Za-z가-힣]", "", s)
-    return s
-
-
-def _order_occupation_categories(categories: List[str]) -> List[str]:
-    order_map = {
-        _norm_occupation_category(name): idx for idx, name in enumerate(OCCUPATION_CATEGORY_ORDER)
-    }
-    return sorted(
-        categories,
-        key=lambda x: (order_map.get(_norm_occupation_category(x), 999), x),
-    )
-
-
-def _norm_sigungu_industry(text: str) -> str:
-    s = str(text).strip()
-    s = re.sub(r"\s+", "", s)
-    s = re.sub(r"[·ㆍ,/()\-]", "", s)
-    return s
-
-
-def _order_sigungu_industry_categories(categories: List[str]) -> List[str]:
-    def _rank(cat: str) -> int:
-        n = _norm_sigungu_industry(cat)
-        if n in {"계", "합계", "전체"}:
-            return 0
-        if "농업" in n or "농림어업" in n:
-            return 1
-        if ("광" in n and "제조" in n) or "광업제조업" in n:
-            return 2
-        if "전기" in n and "운수" in n and "통신" in n:
-            return 3
-        if "건설" in n:
-            return 4
-        if "도소매" in n:
-            return 5
-        if "사업" in n and "개인" in n and ("공공" in n or "서비스" in n):
-            return 6
-        return 999
-
-    return sorted(categories, key=lambda x: (_rank(x), x))
-
-
-def _norm_age_category(text: str) -> str:
-    s = str(text).strip()
-    s = re.sub(r"\s+", "", s)
-    s = s.replace("-", "~")
-    s = s.replace("세이상", "이상")
-    s = s.replace("세", "")
-    return s
-
-
-def _order_age_categories(categories: List[str]) -> List[str]:
-    order_map = {_norm_age_category(name): idx for idx, name in enumerate(AGE_CATEGORY_ORDER)}
-    return sorted(
-        categories,
-        key=lambda x: (order_map.get(_norm_age_category(x), 999), x),
-    )
-
-
-def _order_sigungu_age_categories(categories: List[str]) -> List[str]:
-    def _rank(cat: str) -> int:
-        n = _norm_age_category(cat)
-        if n in {"계", "합계", "전체"}:
-            return 0
-        if "15~29" in n:
-            return 1
-        if "30~49" in n:
-            return 2
-        if "50~64" in n:
-            return 3
-        if "65이상" in n:
-            return 4
-        if "15~64" in n:
-            return 5
-        if "55이상" in n:
-            return 6
-        return 999
-
-    return sorted(categories, key=lambda x: (_rank(x), x))
-
-
-def _norm_status_category(text: str) -> str:
-    s = str(text).strip()
-    s = re.sub(r"^\*+\s*", "", s)
-    s = re.sub(r"^-\s*", "", s)
-    s = re.sub(r"\s+", "", s)
-    return s
-
-
-def _order_status_categories(categories: List[str]) -> List[str]:
-    exact_order_map = {str(name).strip(): idx for idx, name in enumerate(STATUS_CATEGORY_ORDER)}
-    norm_order_map = {_norm_status_category(name): idx for idx, name in enumerate(STATUS_CATEGORY_ORDER)}
-    return sorted(
-        categories,
-        key=lambda x: (
-            exact_order_map.get(str(x).strip(), norm_order_map.get(_norm_status_category(x), 999)),
-            x,
-        ),
-    )
-
-
-def _order_sigungu_status_categories(categories: List[str]) -> List[str]:
-    def _rank(cat: str) -> int:
-        n = _norm_status_category(cat)
-        if n in {"계", "합계", "전체"}:
-            return 0
-        if n == "임금근로자":
-            return 1
-        if "상용근로자" in n:
-            return 2
-        if "임시일용근로자" in n or ("임시" in n and "일용" in n):
-            return 3
-        if "비임금근로자" in n:
-            return 4
-        return 999
-
-    return sorted(categories, key=lambda x: (_rank(x), x))
-
-
-def _order_sigungu_occupation_categories(categories: List[str]) -> List[str]:
-    def _rank(cat: str) -> int:
-        n = _norm_occupation_category(cat)
-        if n in {"계", "합계", "전체"}:
-            return 0
-        if "관리자" in n:
-            return 1
-        if "사무종사자" in n:
-            return 2
-        if ("서비스" in n and "판매" in n) or "서비스판매종사자" in n:
-            return 3
-        if "농림어업종사자" in n or "농립어업종사자" in n or "농림어업" in n or "농립어업" in n:
-            return 4
-        if "기능" in n and "기계" in n and ("조작" in n or "조립" in n):
-            return 5
-        if "단순노무" in n:
-            return 6
-        return 999
-
-    return sorted(categories, key=lambda x: (_rank(x), x))
+DATA_MODEL_VERSION = "2026-03-17-industry-alpha-filter-v1"
 
 
 def _seeded_api_key() -> str:
@@ -386,49 +151,8 @@ def _require_access_gate() -> None:
     st.stop()
 
 
-def _fmt_period(value: object, prd_se: str = "M") -> str:
-    ts = pd.Timestamp(value)
-    if pd.isna(ts):
-        return "-"
-    if str(prd_se).upper() == "H":
-        month = int(ts.month)
-        if month <= 6:
-            return f"{ts.year}-상반기"
-        return f"{ts.year}-하반기"
-    return ts.strftime("%Y-%m")
-
-
 def _time_labels(datasets: List[DatasetConfig]) -> Dict[str, str]:
-    is_halfyear = bool(datasets) and all(str(cfg.prd_se).upper() == "H" for cfg in datasets)
-    if is_halfyear:
-        return {"point": "반기", "trend": "반기별", "yoy": "전년동기"}
-    return {"point": "월", "trend": "월별", "yoy": "전년동월"}
-
-
-def _fmt_num(value: object, unit: str = "", digits: int = 1) -> str:
-    if value is None or pd.isna(value):
-        return "-"
-    if unit and "%" in unit:
-        digits = 2
-    return f"{float(value):,.{digits}f}{unit}"
-
-
-def _fmt_num_bold(value: object, unit: str = "", digits: int = 1) -> str:
-    return f"<strong>{_fmt_num(value, unit, digits)}</strong>"
-
-
-def _new(flag: bool) -> str:
-    return "<span class='new-badge'>NEW</span>" if flag else ""
-
-
-def _remark_new(is_new_max: bool, is_new_min: bool) -> str:
-    if is_new_max and is_new_min:
-        return "최고·최저 NEW"
-    if is_new_max:
-        return "최고 NEW"
-    if is_new_min:
-        return "최저 NEW"
-    return ""
+    return time_labels([str(cfg.prd_se) for cfg in datasets])
 
 
 def _card(title: str, value: str, sub: str, is_new: bool = False, value_class: str = "") -> None:
@@ -474,156 +198,6 @@ def _render_extreme_table(df: pd.DataFrame) -> None:
         f"<div style='width:100%; overflow-x:auto;'>{html}</div>",
         unsafe_allow_html=True,
     )
-
-
-def _auto_y_domain(values: pd.Series, pad_ratio: float = 0.08) -> List[float] | None:
-    valid = values.dropna()
-    if valid.empty:
-        return None
-    vmin = float(valid.min())
-    vmax = float(valid.max())
-    if vmin == vmax:
-        base = abs(vmin) if vmin != 0 else 1.0
-        pad = base * pad_ratio
-        return [vmin - pad, vmax + pad]
-    span = vmax - vmin
-    pad = span * pad_ratio
-    return [vmin - pad, vmax + pad]
-
-
-def fetch_records_live(
-    api_key: str,
-    dataset_key: str,
-    end_period: str,
-    config_signature: str,
-    datasets: List[DatasetConfig],
-) -> Dict[str, Any]:
-    cfg = next((x for x in datasets if x.key == dataset_key), None)
-    if cfg is None:
-        raise RuntimeError(f"Unknown dataset key: {dataset_key}")
-    client = KosisClient(api_key=api_key)
-    records, debug_logs = client.fetch_with_debug(cfg, end_prd_de=end_period)
-    return {"records": records, "debug_logs": debug_logs}
-
-
-def load_all_data_with_progress(
-    api_key: str,
-    status_box: Any,
-    progress_box: Any,
-    main_status_box: Optional[Any] = None,
-    main_progress_box: Optional[Any] = None,
-) -> tuple[Dict[str, pd.DataFrame], List[str], List[str]]:
-    scope_defs = [
-        ("province", "전국·17개 시도", datasets_for_scope("province")),
-        ("gyeonggi31", "경기 31개 시군", datasets_for_scope("gyeonggi31")),
-    ]
-    total_steps = sum(len(ds) * 2 for _, _, ds in scope_defs) + len(scope_defs)
-    step = 0
-    frames_by_scope: Dict[str, List[pd.DataFrame]] = {k: [] for k, _, _ in scope_defs}
-    errors: List[str] = []
-    debug_logs: List[str] = []
-
-    progress = progress_box.progress(0)
-    main_progress = main_progress_box.progress(0) if main_progress_box is not None else None
-    status = status_box
-    main_status = main_status_box
-    last_progress = -1
-
-    def _set_progress(value: int) -> None:
-        nonlocal last_progress
-        safe_value = max(int(value), last_progress)
-        last_progress = safe_value
-        progress.progress(safe_value)
-        if main_progress is not None:
-            main_progress.progress(safe_value)
-
-    def _set_info(message: str) -> None:
-        status.info(message)
-        if main_status is not None:
-            main_status.info(message)
-
-    def _set_error(message: str) -> None:
-        status.error(message)
-
-    def _set_success(message: str) -> None:
-        status.success(message)
-
-    for scope_key, scope_title, datasets in scope_defs:
-        _set_info(f"{scope_title} 데이터셋 준비 중... ({step}/{total_steps})")
-        step += 1
-        _set_progress(min(100, int(step * 100 / total_steps)))
-        for cfg in datasets:
-            _set_info(f"[{scope_title}] 데이터 불러오는 중: {cfg.title} ({step}/{total_steps})")
-            try:
-                end_period = default_end_period_by_prd_se(cfg.prd_se)
-                config_signature = "|".join(
-                    [
-                        cfg.tbl_id,
-                        cfg.itm_id,
-                        cfg.obj_l1,
-                        cfg.obj_l2,
-                        cfg.output_fields,
-                        cfg.start_prd_de,
-                        cfg.prd_se,
-                        end_period,
-                        scope_key,
-                    ]
-                )
-                result = fetch_records_live(
-                    api_key=api_key,
-                    dataset_key=cfg.key,
-                    end_period=end_period,
-                    config_signature=config_signature,
-                    datasets=datasets,
-                )
-                records = result.get("records", [])
-                for line in result.get("debug_logs", []):
-                    debug_logs.append(f"[{scope_key}:{cfg.key}] {line}")
-                if records:
-                    sample = records[0]
-                    debug_logs.append(
-                        f"[{scope_key}:{cfg.key}] sample_keys={list(sample.keys())[:12]}"
-                    )
-                    debug_logs.append(
-                        f"[{scope_key}:{cfg.key}] sample_PRD_DE={sample.get('PRD_DE')} sample_DT={sample.get('DT')}"
-                    )
-            except Exception as exc:  # noqa: BLE001
-                records = []
-                errors.append(f"{scope_title} - {cfg.title}: {exc}")
-                debug_logs.append(f"[{scope_key}:{cfg.key}] ERROR: {exc}")
-            step += 1
-            _set_progress(min(100, int(step * 100 / total_steps)))
-
-            _set_info(f"[{scope_title}] 파싱 중: {cfg.title} ({step}/{total_steps})")
-            parsed = normalize_records(cfg, records, region_scope=scope_key)
-            debug_logs.append(
-                f"[{scope_key}:{cfg.key}] parsed_rows={len(parsed)} raw_rows={len(records)}"
-            )
-            if not parsed.empty:
-                frames_by_scope[scope_key].append(parsed)
-            step += 1
-            _set_progress(min(100, int(step * 100 / total_steps)))
-
-    _set_info("지표 계산 및 통합 중...")
-    data_by_scope: Dict[str, pd.DataFrame] = {}
-    for scope_key, scope_title, _ in scope_defs:
-        frames = frames_by_scope.get(scope_key, [])
-        if frames:
-            combined = pd.concat(frames, ignore_index=True)
-            combined = add_yoy(combined)
-            data_by_scope[scope_key] = combined
-            debug_logs.append(f"[{scope_key}:all] combined_rows={len(combined)}")
-        else:
-            data_by_scope[scope_key] = pd.DataFrame()
-
-    if all(df.empty for df in data_by_scope.values()):
-        _set_progress(100)
-        _set_error("데이터 로딩 실패")
-        return data_by_scope, errors, debug_logs
-
-    _set_progress(100)
-    _set_success("로딩 완료")
-    return data_by_scope, errors, debug_logs
 
 
 def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str, prd_se: str) -> pd.DataFrame:
@@ -1401,13 +975,6 @@ def _find_prev_period(periods: List[pd.Timestamp], latest: pd.Timestamp, lag: in
     return pd.Timestamp(sorted_periods[idx - lag])
 
 
-def _escape_markdown_text(text: object) -> str:
-    s = str(text)
-    for ch in ["\\", "`", "*", "_", "{", "}", "[", "]", "(", ")", "#", "+", "-", "!", "|", "~"]:
-        s = s.replace(ch, f"\\{ch}")
-    return s
-
-
 def _compute_contribution_table(
     df: pd.DataFrame,
     region: str,
@@ -1769,17 +1336,6 @@ def _fmt_contrib_items(table: pd.DataFrame, unit: str, positive: bool, top_n: in
     return ", ".join(items)
 
 
-def _fmt_triangle_delta(v: object, unit: str) -> str:
-    if v is None or pd.isna(v):
-        return "-"
-    vv = float(v)
-    if vv > 0:
-        return f"▲{_fmt_num(vv, unit)}"
-    if vv < 0:
-        return f"▼{_fmt_num(abs(vv), unit)}"
-    return f"→{_fmt_num(0, unit)}"
-
-
 def _to_docx_text(text: object) -> str:
     return str(text).replace("\\", "")
 
@@ -1839,32 +1395,6 @@ def _build_report_docx_bytes(
     buf = BytesIO()
     doc.save(buf)
     return buf.getvalue()
-
-
-def _order_categories_like_ui(categories: List[str], dataset_key: str, is_gyeonggi31_mode: bool) -> List[str]:
-    ordered = sorted(c for c in categories if str(c).strip() != "")
-    if dataset_key in {"industry", "occupation"}:
-        drop_labels = {"시도별", "산업별", "직업별", "직종별"}
-        cleaned = [c for c in ordered if str(c).strip() not in drop_labels]
-        if cleaned:
-            ordered = cleaned
-    if is_gyeonggi31_mode:
-        if dataset_key == "industry":
-            return _order_sigungu_industry_categories(ordered)
-        if dataset_key == "age":
-            return _order_sigungu_age_categories(ordered)
-        if dataset_key == "status":
-            return _order_sigungu_status_categories(ordered)
-        if dataset_key == "occupation":
-            return _order_sigungu_occupation_categories(ordered)
-    else:
-        if dataset_key == "age":
-            return _order_age_categories(ordered)
-        if dataset_key == "status":
-            return _order_status_categories(ordered)
-        if dataset_key == "occupation":
-            return _order_occupation_categories(ordered)
-    return ordered
 
 
 def _render_report_template(
