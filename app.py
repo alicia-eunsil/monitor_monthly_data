@@ -2872,22 +2872,32 @@ with tab6:
         if type_sel != "전체":
             view = view[view["유형"] == type_sel]
 
-        st.markdown("##### 상세 이벤트")
-        detail_df = view[
-            ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "범위", "유형", "이벤트"]
-        ].sort_values(
-            ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "범위", "유형"],
-            ascending=[False, True, True, True, True, True, True, True],
-        )
-        max_history_rows = 500
+        latest_ts = pd.to_datetime(view.get("기준월_ts"), errors="coerce").max()
+        if pd.isna(latest_ts):
+            detail_df = view[
+                ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "범위", "유형", "이벤트"]
+            ].sort_values(
+                ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "범위", "유형"],
+                ascending=[False, True, True, True, True, True, True, True],
+            )
+            latest_label = str(detail_df["기준월"].iloc[0]) if not detail_df.empty else "-"
+        else:
+            latest_rows = view[pd.to_datetime(view.get("기준월_ts"), errors="coerce") == latest_ts].copy()
+            detail_df = latest_rows[
+                ["기준월", "데이터셋", "지역", "지표", "분류", "구분", "범위", "유형", "이벤트"]
+            ].sort_values(
+                ["데이터셋", "지역", "지표", "분류", "구분", "범위", "유형"],
+                ascending=[True, True, True, True, True, True, True],
+            )
+            latest_label = str(detail_df["기준월"].iloc[0]) if not detail_df.empty else "-"
+
+        st.markdown(f"##### 상세 이벤트 (최신일: {latest_label})")
         detail_lines = []
-        for _, row in detail_df.head(max_history_rows).iterrows():
+        for _, row in detail_df.iterrows():
             category_text = str(row["분류"]).strip() if str(row["분류"]).strip() else "전체"
             detail_lines.append(
                 f"- **[{row['기준월']}]** {row['데이터셋']} | {row['지역']} | {row['지표']} | {category_text} | {row['구분']} {row['범위']} {row['유형']}"
             )
-        if len(detail_df) > max_history_rows:
-            detail_lines.append(f"- ... 총 {len(detail_df):,}건 중 상위 {max_history_rows:,}건만 표시")
         st.markdown("\n".join(detail_lines) if detail_lines else "- 표시할 이벤트가 없습니다.")
         _render_new_event_charts(view, active_datasets)
         labels = _time_labels(active_datasets)
