@@ -2911,12 +2911,6 @@ with tab6:
                 f"- **[{row['기준월']}]** {row['데이터셋']} | {row['지역']} | {row['지표']} | {category_text} | {row['구분']} {row['범위']} {row['유형']}"
             )
         st.markdown("\n".join(detail_lines) if detail_lines else "- 표시할 이벤트가 없습니다.")
-        _render_new_event_charts(view, active_datasets)
-        labels = _time_labels(active_datasets)
-        st.markdown(
-            f"<p style='color:#b91c1c;font-weight:700'>NEW 이벤트는 해당 {labels['point']} 시점 기준으로 전체기간/최근5년 최고·최저를 새로 갱신한 이력을 표시합니다.</p>",
-            unsafe_allow_html=True,
-        )
 with tab7:
     st.subheader("요약")
     report_scope = st.radio(
