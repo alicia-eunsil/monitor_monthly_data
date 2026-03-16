@@ -1767,11 +1767,38 @@ def _fmt_contrib_items(table: pd.DataFrame, unit: str, positive: bool, top_n: in
     return ", ".join(items)
 
 
+def _order_categories_like_ui(categories: List[str], dataset_key: str, is_gyeonggi31_mode: bool) -> List[str]:
+    ordered = sorted(c for c in categories if str(c).strip() != "")
+    if dataset_key in {"industry", "occupation"}:
+        drop_labels = {"시도별", "산업별", "직업별", "직종별"}
+        cleaned = [c for c in ordered if str(c).strip() not in drop_labels]
+        if cleaned:
+            ordered = cleaned
+    if is_gyeonggi31_mode:
+        if dataset_key == "industry":
+            return _order_sigungu_industry_categories(ordered)
+        if dataset_key == "age":
+            return _order_sigungu_age_categories(ordered)
+        if dataset_key == "status":
+            return _order_sigungu_status_categories(ordered)
+        if dataset_key == "occupation":
+            return _order_sigungu_occupation_categories(ordered)
+    else:
+        if dataset_key == "age":
+            return _order_age_categories(ordered)
+        if dataset_key == "status":
+            return _order_status_categories(ordered)
+        if dataset_key == "occupation":
+            return _order_occupation_categories(ordered)
+    return ordered
+
+
 def _render_report_template(
     df: pd.DataFrame,
     province_df: pd.DataFrame,
     region_pool: List[str],
     datasets: List[DatasetConfig],
+    is_gyeonggi31_mode: bool,
 ) -> None:
     labels = _time_labels(datasets)
     if df.empty:
@@ -1933,17 +1960,51 @@ def _render_report_template(
     if region == "경기도":
         _, gy_meta = _compute_gyeonggi_vs_national_contribution(compare_base)
         if gy_meta.get("ok"):
+            ref_prd_se = str(gy_meta.get("prd_se", "M"))
+            ref_latest = _fmt_period(gy_meta.get("latest_period"), ref_prd_se)
+            ref_prev = _fmt_period(gy_meta.get("prev_year_period"), ref_prd_se)
+            ref_unit = str(gy_meta.get("unit", ""))
+
+            share_now = gy_meta.get("latest_share_pct")
+            share_prev = gy_meta.get("prev_year_share_pct")
+            share_change = gy_meta.get("share_yoy_change_pp")
+            share_now_text = "-" if pd.isna(share_now) else f"{float(share_now):,.2f}%"
+            share_prev_text = "-" if pd.isna(share_prev) else f"{float(share_prev):,.2f}%"
+            share_change_text = "-" if pd.isna(share_change) else f"{float(share_change):+,.2f}%p"
+
+            contrib_now = gy_meta.get("latest_contrib_pct")
+            contrib_prev = gy_meta.get("prev_year_contrib_pct")
+            contrib_change = gy_meta.get("contrib_yoy_change_pp")
+            contrib_now_text = "-" if pd.isna(contrib_now) else f"{float(contrib_now):,.1f}%"
+            contrib_prev_text = "-" if pd.isna(contrib_prev) else f"{float(contrib_prev):,.1f}%"
+            contrib_change_text = "-" if pd.isna(contrib_change) else f"{float(contrib_change):+,.1f}%p"
+
+            nat_yoy = gy_meta.get("latest_nat_yoy_abs")
+            gg_yoy = gy_meta.get("latest_gg_yoy_abs")
+            nat_flow = "증가분" if pd.notna(nat_yoy) and float(nat_yoy) > 0 else ("감소분" if pd.notna(nat_yoy) and float(nat_yoy) < 0 else "변동분")
+
+            st.markdown(f"- 기준시점은 **{ref_latest}**, 비교시점은 **{ref_prev}**입니다.")
             st.markdown(
-                f"- 전국 대비 {region} 비중: **{float(gy_meta.get('latest_share_pct')):,.2f}%** "
-                f"({float(gy_meta.get('share_yoy_change_pp')):+,.2f}%p)"
+                f"- {ref_latest} 기준 전국 취업자는 **{_fmt_num(gy_meta.get('latest_nat_value'), ref_unit)}**, "
+                f"경기도 취업자는 **{_fmt_num(gy_meta.get('latest_gg_value'), ref_unit)}**입니다."
             )
-            contrib_text = "-" if pd.isna(gy_meta.get("latest_contrib_pct")) else f"{float(gy_meta.get('latest_contrib_pct')):,.1f}%"
-            contrib_change = "-" if pd.isna(gy_meta.get("contrib_yoy_change_pp")) else f"{float(gy_meta.get('contrib_yoy_change_pp')):+,.1f}%p"
-            st.markdown(f"- 전국 증감 대비 {region} 기여율: **{contrib_text}** ({contrib_change})")
+            st.markdown(
+                f"- 전국 대비 경기도 비중은 {ref_prev} **{share_prev_text}**에서 "
+                f"{ref_latest} **{share_now_text}**로 **{share_change_text}** 변화했습니다."
+            )
+            st.markdown(
+                f"- 전국 취업자 {nat_flow} 대비 경기도 기여율은 {ref_prev} **{contrib_prev_text}**에서 "
+                f"{ref_latest} **{contrib_now_text}**로 **{contrib_change_text}** 변화했습니다."
+            )
+            st.markdown(
+                f"- 같은 시점 전년비 증감은 전국 **{_fmt_num(nat_yoy, ref_unit)}**, "
+                f"경기도 **{_fmt_num(gg_yoy, ref_unit)}**입니다."
+            )
+            st.caption("참고: 전국 증감이 작을수록 기여율(%)은 크게 흔들릴 수 있습니다.")
         else:
             st.markdown("- 전국 대비 참고 지표를 계산할 수 없습니다.")
     else:
-        st.markdown("- 전국 대비 지표는 경기도 선택 시에만 제공합니다.")
+        st.markdown("- 전국 대비 상세 지표는 경기도 선택 시에 제공합니다.")
 
     st.markdown("---")
     st.markdown("#### [2페이지] 경기도 상세분석")
@@ -1972,8 +2033,14 @@ def _render_report_template(
         st.markdown(f"- {latest} 기준 총증감: **{total_delta}** ({prev} 대비)")
         st.markdown(f"- 증가기여 1위: **{pos_line}**, 감소상쇄 1위: **{neg_line}**")
         detail_view = tbl.copy()
-        detail_view["절대증감"] = pd.to_numeric(detail_view["증감"], errors="coerce").abs()
-        detail_view = detail_view.sort_values("절대증감", ascending=False).head(8).drop(columns=["절대증감"])
+        ordered_categories = _order_categories_like_ui(
+            detail_view["분류"].dropna().astype(str).tolist(),
+            ds_key,
+            is_gyeonggi31_mode=is_gyeonggi31_mode,
+        )
+        order_map = {name: idx for idx, name in enumerate(ordered_categories)}
+        detail_view["정렬순서"] = detail_view["분류"].map(order_map).fillna(999)
+        detail_view = detail_view.sort_values(["정렬순서", "분류"]).drop(columns=["정렬순서"])
         st.dataframe(detail_view, use_container_width=True, hide_index=True)
 
     st.markdown("##### 점검 액션")
@@ -2603,6 +2670,7 @@ with tab8:
         province_df=scope_data.get("province", pd.DataFrame()),
         region_pool=region_pool,
         datasets=active_datasets,
+        is_gyeonggi31_mode=is_gyeonggi31_mode,
     )
 
 st.markdown(
