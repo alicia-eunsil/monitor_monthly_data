@@ -1810,6 +1810,7 @@ def _render_report_template(
     region_pool: List[str],
     datasets: List[DatasetConfig],
     is_gyeonggi31_mode: bool,
+    for_pdf: bool = False,
 ) -> None:
     labels = _time_labels(datasets)
     if df.empty:
@@ -1884,6 +1885,7 @@ def _render_report_template(
     prev_text = _fmt_period(prev_period, prd_se)
     yoy_text = labels.get("yoy", "전년동월")
     st.caption(f"리포트 기준: {region} / {latest_text}")
+    st.markdown(f"### {latest_text} {region} 경제활동인구 브리프")
 
     def _get_row(norm_name: str) -> Optional[pd.Series]:
         view = activity_df[activity_df["norm_indicator"] == norm_name]
@@ -1920,7 +1922,7 @@ def _render_report_template(
     else:
         emp_direction = "보합입니다."
 
-    st.markdown("#### [1페이지] 경기도 월간 핵심요약")
+    st.markdown("## 월간 핵심요약")
     st.markdown(
         "\n".join(
             [
@@ -1936,7 +1938,7 @@ def _render_report_template(
         )
     )
 
-    st.markdown("##### 경제활동인구현황 9개 지표")
+    st.markdown("##### 경제활동인구현황요약")
     activity_view = activity_df.copy()
     activity_view = activity_view[
         ["지표", "prev_value", "latest_value", "delta_value", "unit"]
@@ -1973,7 +1975,7 @@ def _render_report_template(
     activity_view = activity_view.drop(columns=["unit"])
     st.dataframe(activity_view, use_container_width=True, hide_index=True)
 
-    st.markdown("##### 경기도 내부 구조변화 요약")
+    st.markdown("##### 취업자수 상세현황")
     report_events = _collect_new_events(report_df)
     if not report_events.empty:
         report_events = report_events[
@@ -2018,33 +2020,34 @@ def _render_report_template(
                     event_tokens.append(token)
                 st.markdown(f"  - 이번 {labels['point']} NEW 달성: " + ", ".join(event_tokens))
 
-    st.markdown("##### AI 이상탐지 요약")
     anomaly_df = _compute_anomaly_table(report_df, region=region, lag=lag, lookback_periods=36)
     if not anomaly_df.empty:
         anomaly_df = anomaly_df[anomaly_df["기준시점"] == latest_text].copy()
-    if anomaly_df.empty:
-        st.markdown("- 이상탐지 결과가 없습니다.")
-    else:
-        scores = pd.to_numeric(anomaly_df["이상점수"], errors="coerce")
-        focus = anomaly_df[scores >= 50].copy().sort_values("이상점수", ascending=False)
-        high_cnt = int((scores >= 75).sum())
-        med_cnt = int(((scores >= 50) & (scores < 75)).sum())
-        st.markdown(f"- 우선점검(75점 이상): **{high_cnt}건**")
-        st.markdown(f"- 주의관찰(50-74점): **{med_cnt}건**")
-        if not focus.empty:
-            top3 = focus.head(3)
-            lines = []
-            for _, r in top3.iterrows():
-                lines.append(
-                    f"  - [{r['기준시점']}] {r['데이터셋']} / {_escape_markdown_text(r['분류'])}: "
-                    f"{_escape_markdown_text(r['이유'])} ({float(r['이상점수']):.1f}점)"
-                )
-            st.markdown("- Top 3 이벤트\n" + "\n".join(lines))
+    if not for_pdf:
+        st.markdown("##### AI 이상탐지 요약")
+        if anomaly_df.empty:
+            st.markdown("- 이상탐지 결과가 없습니다.")
+        else:
+            scores = pd.to_numeric(anomaly_df["이상점수"], errors="coerce")
+            focus = anomaly_df[scores >= 50].copy().sort_values("이상점수", ascending=False)
+            high_cnt = int((scores >= 75).sum())
+            med_cnt = int(((scores >= 50) & (scores < 75)).sum())
+            st.markdown(f"- 우선점검(75점 이상): **{high_cnt}건**")
+            st.markdown(f"- 주의관찰(50-74점): **{med_cnt}건**")
+            if not focus.empty:
+                top3 = focus.head(3)
+                lines = []
+                for _, r in top3.iterrows():
+                    lines.append(
+                        f"  - [{r['기준시점']}] {r['데이터셋']} / {_escape_markdown_text(r['분류'])}: "
+                        f"{_escape_markdown_text(r['이유'])} ({float(r['이상점수']):.1f}점)"
+                    )
+                st.markdown("- Top 3 이벤트\n" + "\n".join(lines))
 
-    st.markdown("##### 전국 대비 참고")
+    st.markdown(f"##### [참고] 전국대비 {region} 현황")
     compare_base = province_report_df if not province_report_df.empty else report_df
-    if region == "경기도":
-        _, gy_meta = _compute_gyeonggi_vs_national_contribution(compare_base)
+    if region != "전국":
+        _, gy_meta = _compute_gyeonggi_vs_national_contribution(compare_base, region_name=region)
         if gy_meta.get("ok"):
             ref_prd_se = str(gy_meta.get("prd_se", "M"))
             ref_latest = _fmt_period(gy_meta.get("latest_period"), ref_prd_se)
@@ -2072,28 +2075,28 @@ def _render_report_template(
             st.markdown(f"- 기준시점은 **{ref_latest}**, 비교시점은 **{ref_prev}**입니다.")
             st.markdown(
                 f"- {ref_latest} 기준 전국 취업자는 **{_fmt_num(gy_meta.get('latest_nat_value'), ref_unit)}**, "
-                f"경기도 취업자는 **{_fmt_num(gy_meta.get('latest_gg_value'), ref_unit)}**입니다."
+                f"{region} 취업자는 **{_fmt_num(gy_meta.get('latest_gg_value'), ref_unit)}**입니다."
             )
             st.markdown(
-                f"- 전국 대비 경기도 비중은 {ref_prev} **{share_prev_text}**에서 "
+                f"- 전국 대비 {region} 비중은 {ref_prev} **{share_prev_text}**에서 "
                 f"{ref_latest} **{share_now_text}**로 **{share_change_text}** 변화했습니다."
             )
             st.markdown(
-                f"- 전국 취업자 {nat_flow} 대비 경기도 기여율은 {ref_prev} **{contrib_prev_text}**에서 "
+                f"- 전국 취업자 {nat_flow} 대비 {region} 기여율은 {ref_prev} **{contrib_prev_text}**에서 "
                 f"{ref_latest} **{contrib_now_text}**로 **{contrib_change_text}** 변화했습니다."
             )
             st.markdown(
                 f"- 같은 시점 전년비 증감은 전국 **{_fmt_num(nat_yoy, ref_unit)}**, "
-                f"경기도 **{_fmt_num(gg_yoy, ref_unit)}**입니다."
+                f"{region} **{_fmt_num(gg_yoy, ref_unit)}**입니다."
             )
             st.caption("참고: 전국 증감이 작을수록 기여율(%)은 크게 흔들릴 수 있습니다.")
         else:
             st.markdown("- 전국 대비 참고 지표를 계산할 수 없습니다.")
     else:
-        st.markdown("- 전국 대비 상세 지표는 경기도 선택 시에 제공합니다.")
+        st.markdown("- 전국 선택 시에는 전국대비 지표를 표시하지 않습니다.")
 
     st.markdown("---")
-    st.markdown("#### [2페이지] 경기도 상세분석")
+    st.markdown(f"## {region} 상세분석")
     for title, ds_key in sections:
         tbl, meta = _compute_contribution_table(report_df, region=region, dataset_key=ds_key, lag=lag)
         st.markdown(f"##### {title}")
@@ -2130,27 +2133,32 @@ def _render_report_template(
         detail_view["증감"] = detail_view["증감"].apply(lambda x: _fmt_triangle_delta(x, unit))
         st.dataframe(detail_view, use_container_width=True, hide_index=True)
 
-    st.markdown("##### 점검 액션")
-    action_lines = []
-    if not industry_df.empty:
-        pos = industry_df[industry_df["증감"] > 0].nlargest(1, "증감")
-        neg = industry_df[industry_df["증감"] < 0].nsmallest(1, "증감")
-        if not pos.empty:
-            action_lines.append(f"- 산업 증가 1위({_escape_markdown_text(pos.iloc[0]['분류'])})의 증가 지속 여부를 다음 {labels['point']}에 점검")
-        if not neg.empty:
-            action_lines.append(f"- 산업 감소 1위({_escape_markdown_text(neg.iloc[0]['분류'])})의 구조적 감소 여부를 원인 점검")
-    if not anomaly_df.empty:
-        high_focus = anomaly_df[pd.to_numeric(anomaly_df["이상점수"], errors="coerce") >= 75]
-        action_lines.append(f"- 이상점수 75점 이상 항목 {len(high_focus):,}건에 대해 우선 확인 코멘트 수집")
-    if not action_lines:
-        action_lines.append("- 이번 시점은 급격한 이상 신호가 제한적이므로 주요 분류 추세 모니터링 유지")
-    st.markdown("\n".join(action_lines))
+    if not for_pdf:
+        st.markdown("##### 점검 액션")
+        action_lines = []
+        if not industry_df.empty:
+            pos = industry_df[industry_df["증감"] > 0].nlargest(1, "증감")
+            neg = industry_df[industry_df["증감"] < 0].nsmallest(1, "증감")
+            if not pos.empty:
+                action_lines.append(f"- 산업 증가 1위({_escape_markdown_text(pos.iloc[0]['분류'])})의 증가 지속 여부를 다음 {labels['point']}에 점검")
+            if not neg.empty:
+                action_lines.append(f"- 산업 감소 1위({_escape_markdown_text(neg.iloc[0]['분류'])})의 구조적 감소 여부를 원인 점검")
+        if not anomaly_df.empty:
+            high_focus = anomaly_df[pd.to_numeric(anomaly_df["이상점수"], errors="coerce") >= 75]
+            action_lines.append(f"- 이상점수 75점 이상 항목 {len(high_focus):,}건에 대해 우선 확인 코멘트 수집")
+        if not action_lines:
+            action_lines.append("- 이번 시점은 급격한 이상 신호가 제한적이므로 주요 분류 추세 모니터링 유지")
+        st.markdown("\n".join(action_lines))
 
 
-def _compute_gyeonggi_vs_national_contribution(df: pd.DataFrame) -> tuple[pd.DataFrame, Dict[str, Any]]:
+def _compute_gyeonggi_vs_national_contribution(
+    df: pd.DataFrame,
+    region_name: str = "경기도",
+) -> tuple[pd.DataFrame, Dict[str, Any]]:
     meta: Dict[str, Any] = {
         "ok": False,
         "message": "",
+        "region_name": str(region_name),
         "indicator": "",
         "prd_se": "M",
         "latest_period": pd.NaT,
@@ -2198,9 +2206,9 @@ def _compute_gyeonggi_vs_national_contribution(df: pd.DataFrame) -> tuple[pd.Dat
 
     region_names = base["region_name"].dropna().astype(str).str.strip().unique().tolist()
     national_candidate = TARGET_REGIONS[0] if len(TARGET_REGIONS) >= 1 else ""
-    gyeonggi_candidate = TARGET_REGIONS[9] if len(TARGET_REGIONS) >= 10 else ""
-    if national_candidate not in region_names or gyeonggi_candidate not in region_names:
-        meta["message"] = "전국 또는 경기도 데이터를 찾지 못했습니다."
+    target_region_candidate = str(region_name).strip()
+    if national_candidate not in region_names or target_region_candidate not in region_names:
+        meta["message"] = f"전국 또는 {target_region_candidate} 데이터를 찾지 못했습니다."
         return pd.DataFrame(), meta
 
     nat = (
@@ -2210,14 +2218,14 @@ def _compute_gyeonggi_vs_national_contribution(df: pd.DataFrame) -> tuple[pd.Dat
         .rename(columns={"value": "value_nat", "yoy_abs": "yoy_abs_nat"})
     )
     gg = (
-        base[base["region_name"] == gyeonggi_candidate]
+        base[base["region_name"] == target_region_candidate]
         .groupby("period", as_index=False)
         .agg({"value": "sum", "yoy_abs": "sum"})
         .rename(columns={"value": "value_gg", "yoy_abs": "yoy_abs_gg"})
     )
     trend = nat.merge(gg, on="period", how="inner").sort_values("period")
     if trend.empty:
-        meta["message"] = "전국/경기도 공통 시계열 구간이 없습니다."
+        meta["message"] = f"전국/{target_region_candidate} 공통 시계열 구간이 없습니다."
         return pd.DataFrame(), meta
 
     prd_se = "M"
