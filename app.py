@@ -1534,7 +1534,7 @@ def _build_ai_contribution_commentary(table: pd.DataFrame, meta: Dict[str, Any],
                 for _, r in top_pos.iterrows()
             ]
         )
-        lines.append(f"- 증가 기여 상위는 {pos_text} 입니다.")
+        lines.append(f"- 증가요인 상위는 {pos_text} 입니다.")
     if not top_neg.empty:
         neg_text = ", ".join(
             [
@@ -1542,7 +1542,7 @@ def _build_ai_contribution_commentary(table: pd.DataFrame, meta: Dict[str, Any],
                 for _, r in top_neg.iterrows()
             ]
         )
-        lines.append(f"- 감소(상쇄) 요인은 {neg_text} 입니다.")
+        lines.append(f"- 감소요인 상위는 {neg_text} 입니다.")
     if dominant is not None:
         lines.append(
             f"- 가장 큰 변동은 **{dominant['분류']}**로, {yoy_label} 대비 "
@@ -1930,8 +1930,8 @@ def _render_report_template(
                 f"({yoy_text} 대비 **{_fmt_num(emp_rate_row['delta_value'] if emp_rate_row is not None else np.nan, str(emp_rate_row['unit']) if emp_rate_row is not None else '%')}**), "
                 f"실업률은 **{_fmt_num(unemp_rate_row['latest_value'] if unemp_rate_row is not None else np.nan, str(unemp_rate_row['unit']) if unemp_rate_row is not None else '%')}**"
                 f"({yoy_text} 대비 **{_fmt_num(unemp_rate_row['delta_value'] if unemp_rate_row is not None else np.nan, str(unemp_rate_row['unit']) if unemp_rate_row is not None else '%')}**)입니다.",
-                f"- {_escape_markdown_text(top_pos_name)}(증가기여 1위), "
-                f"{_escape_markdown_text(top_neg_name)}(감소상쇄 1위)이(가) {region} 취업자수에 가장 큰 영향을 미쳤습니다.",
+                f"- {_escape_markdown_text(top_pos_name)}(증가요인 1위), "
+                f"{_escape_markdown_text(top_neg_name)}(감소요인 1위)이(가) {region} 취업자수에 가장 큰 영향을 미쳤습니다.",
             ]
         )
     )
@@ -1993,8 +1993,8 @@ def _render_report_template(
         unit = str(meta.get("unit", ""))
         pos_text = _fmt_contrib_items(tbl, unit, positive=True, top_n=3)
         neg_text = _fmt_contrib_items(tbl, unit, positive=False, top_n=3)
-        st.markdown(f"- **{title}** 증가 기여 상위: {pos_text}")
-        st.markdown(f"- **{title}** 감소(상쇄) 상위: {neg_text}")
+        st.markdown(f"- **{title}** 증가요인 상위: {pos_text}")
+        st.markdown(f"- **{title}** 감소요인 상위: {neg_text}")
         if report_events.empty:
             st.markdown(f"  - 이번 {labels['point']} NEW 달성: 없음")
         else:
@@ -2117,7 +2117,7 @@ def _render_report_template(
             else "없음"
         )
         st.markdown(f"- {latest} 기준 총증감: **{total_delta}** ({prev} 대비)")
-        st.markdown(f"- 증가기여 1위: **{pos_line}**, 감소상쇄 1위: **{neg_line}**")
+        st.markdown(f"- 증가요인 1위: **{pos_line}**, 감소요인 1위: **{neg_line}**")
         detail_view = tbl.copy()
         ordered_categories = _order_categories_like_ui(
             detail_view["분류"].dropna().astype(str).tolist(),
