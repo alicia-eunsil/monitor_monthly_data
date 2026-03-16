@@ -2,12 +2,14 @@
 
 import os
 import re
+from io import BytesIO
 from typing import Any, Dict, List, Optional
 
 import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
+from docx import Document
 
 import src.config as app_config
 from src.kosis_client import KosisClient
@@ -1778,6 +1780,66 @@ def _fmt_triangle_delta(v: object, unit: str) -> str:
     return f"→{_fmt_num(0, unit)}"
 
 
+def _to_docx_text(text: object) -> str:
+    return str(text).replace("\\", "")
+
+
+def _add_docx_table(doc: Document, df: pd.DataFrame) -> None:
+    if df is None or df.empty:
+        doc.add_paragraph("데이터 없음")
+        return
+    view = df.copy()
+    table = doc.add_table(rows=1, cols=len(view.columns))
+    table.style = "Table Grid"
+    for i, col in enumerate(view.columns):
+        table.rows[0].cells[i].text = _to_docx_text(col)
+    for _, row in view.iterrows():
+        cells = table.add_row().cells
+        for i, col in enumerate(view.columns):
+            v = row[col]
+            cells[i].text = "-" if pd.isna(v) else _to_docx_text(v)
+
+
+def _build_report_docx_bytes(
+    title: str,
+    summary_lines: List[str],
+    activity_table: pd.DataFrame,
+    structure_lines: List[str],
+    reference_title: str,
+    reference_lines: List[str],
+    detail_sections: List[Dict[str, Any]],
+) -> bytes:
+    doc = Document()
+    doc.add_heading(_to_docx_text(title), level=0)
+
+    doc.add_heading("월간 핵심요약", level=1)
+    for line in summary_lines:
+        doc.add_paragraph(_to_docx_text(line), style="List Bullet")
+
+    doc.add_heading("경제활동인구현황요약", level=1)
+    _add_docx_table(doc, activity_table)
+
+    doc.add_heading("취업자수 상세현황", level=1)
+    for line in structure_lines:
+        doc.add_paragraph(_to_docx_text(line), style="List Bullet")
+
+    doc.add_heading(_to_docx_text(reference_title), level=1)
+    for line in reference_lines:
+        doc.add_paragraph(_to_docx_text(line), style="List Bullet")
+
+    doc.add_page_break()
+    doc.add_heading("상세분석", level=0)
+    for section in detail_sections:
+        doc.add_heading(_to_docx_text(section.get("title", "")), level=1)
+        for line in section.get("lines", []):
+            doc.add_paragraph(_to_docx_text(line), style="List Bullet")
+        _add_docx_table(doc, section.get("table", pd.DataFrame()))
+
+    buf = BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
 def _order_categories_like_ui(categories: List[str], dataset_key: str, is_gyeonggi31_mode: bool) -> List[str]:
     ordered = sorted(c for c in categories if str(c).strip() != "")
     if dataset_key in {"industry", "occupation"}:
@@ -1922,21 +1984,20 @@ def _render_report_template(
     else:
         emp_direction = "보합입니다."
 
+    report_title = f"{latest_text} {region} 경제활동인구 브리프"
+    st.markdown(f"# {report_title}")
     st.markdown("## 월간 핵심요약")
-    st.markdown(
-        "\n".join(
-            [
-                f"- {latest_text} {region} 취업자는 **{_fmt_num(emp_row['latest_value'] if emp_row is not None else np.nan, str(emp_row['unit']) if emp_row is not None else '')}**로, "
-                f"{prev_text} 대비 **{_fmt_num(emp_row['delta_value'] if emp_row is not None else np.nan, str(emp_row['unit']) if emp_row is not None else '')}** {emp_direction}",
-                f"- 고용률은 **{_fmt_num(emp_rate_row['latest_value'] if emp_rate_row is not None else np.nan, str(emp_rate_row['unit']) if emp_rate_row is not None else '%')}**"
-                f"({yoy_text} 대비 **{_fmt_num(emp_rate_row['delta_value'] if emp_rate_row is not None else np.nan, str(emp_rate_row['unit']) if emp_rate_row is not None else '%')}**), "
-                f"실업률은 **{_fmt_num(unemp_rate_row['latest_value'] if unemp_rate_row is not None else np.nan, str(unemp_rate_row['unit']) if unemp_rate_row is not None else '%')}**"
-                f"({yoy_text} 대비 **{_fmt_num(unemp_rate_row['delta_value'] if unemp_rate_row is not None else np.nan, str(unemp_rate_row['unit']) if unemp_rate_row is not None else '%')}**)입니다.",
-                f"- {_escape_markdown_text(top_pos_name)}(증가요인 1위), "
-                f"{_escape_markdown_text(top_neg_name)}(감소요인 1위)이(가) {region} 취업자수에 가장 큰 영향을 미쳤습니다.",
-            ]
-        )
-    )
+    summary_lines = [
+        f"{latest_text} {region} 취업자는 {_fmt_num(emp_row['latest_value'] if emp_row is not None else np.nan, str(emp_row['unit']) if emp_row is not None else '')}로, "
+        f"{prev_text} 대비 {_fmt_num(emp_row['delta_value'] if emp_row is not None else np.nan, str(emp_row['unit']) if emp_row is not None else '')} {emp_direction}",
+        f"고용률은 {_fmt_num(emp_rate_row['latest_value'] if emp_rate_row is not None else np.nan, str(emp_rate_row['unit']) if emp_rate_row is not None else '%')}"
+        f"({yoy_text} 대비 {_fmt_num(emp_rate_row['delta_value'] if emp_rate_row is not None else np.nan, str(emp_rate_row['unit']) if emp_rate_row is not None else '%')}), "
+        f"실업률은 {_fmt_num(unemp_rate_row['latest_value'] if unemp_rate_row is not None else np.nan, str(unemp_rate_row['unit']) if unemp_rate_row is not None else '%')}"
+        f"({yoy_text} 대비 {_fmt_num(unemp_rate_row['delta_value'] if unemp_rate_row is not None else np.nan, str(unemp_rate_row['unit']) if unemp_rate_row is not None else '%')})입니다.",
+        f"{_escape_markdown_text(top_pos_name)}(증가요인 1위), "
+        f"{_escape_markdown_text(top_neg_name)}(감소요인 1위)이(가) {region} 취업자수에 가장 큰 영향을 미쳤습니다.",
+    ]
+    st.markdown("\n".join([f"- {line}" for line in summary_lines]))
 
     st.markdown("##### 경제활동인구현황요약")
     activity_view = activity_df.copy()
@@ -1976,6 +2037,7 @@ def _render_report_template(
     st.dataframe(activity_view, use_container_width=True, hide_index=True)
 
     st.markdown("##### 취업자수 상세현황")
+    structure_lines: List[str] = []
     report_events = _collect_new_events(report_df)
     if not report_events.empty:
         report_events = report_events[
@@ -1995,14 +2057,21 @@ def _render_report_template(
         unit = str(meta.get("unit", ""))
         pos_text = _fmt_contrib_items(tbl, unit, positive=True, top_n=3)
         neg_text = _fmt_contrib_items(tbl, unit, positive=False, top_n=3)
-        st.markdown(f"- **{title}** 증가요인 상위: {pos_text}")
-        st.markdown(f"- **{title}** 감소요인 상위: {neg_text}")
+        line_pos = f"{title} 증가요인 상위: {pos_text}"
+        line_neg = f"{title} 감소요인 상위: {neg_text}"
+        structure_lines.extend([line_pos, line_neg])
+        st.markdown(f"- **{line_pos}**")
+        st.markdown(f"- **{line_neg}**")
         if report_events.empty:
-            st.markdown(f"  - 이번 {labels['point']} NEW 달성: 없음")
+            line_new = f"이번 {labels['point']} NEW 달성: 없음"
+            structure_lines.append(f"{title} {line_new}")
+            st.markdown(f"  - {line_new}")
         else:
             ds_events = report_events[report_events["데이터셋"].astype(str) == str(title)].copy()
             if ds_events.empty:
-                st.markdown(f"  - 이번 {labels['point']} NEW 달성: 없음")
+                line_new = f"이번 {labels['point']} NEW 달성: 없음"
+                structure_lines.append(f"{title} {line_new}")
+                st.markdown(f"  - {line_new}")
             else:
                 ds_events = ds_events.sort_values(
                     ["구분", "범위", "유형", "분류"],
@@ -2018,7 +2087,9 @@ def _render_report_template(
                         f"{_escape_markdown_text(str(er.get('유형', '')))} NEW)"
                     )
                     event_tokens.append(token)
-                st.markdown(f"  - 이번 {labels['point']} NEW 달성: " + ", ".join(event_tokens))
+                line_new = f"이번 {labels['point']} NEW 달성: " + ", ".join(event_tokens)
+                structure_lines.append(f"{title} {line_new}")
+                st.markdown(f"  - {line_new}")
 
     anomaly_df = _compute_anomaly_table(report_df, region=region, lag=lag, lookback_periods=36)
     if not anomaly_df.empty:
@@ -2045,6 +2116,7 @@ def _render_report_template(
                 st.markdown("- Top 3 이벤트\n" + "\n".join(lines))
 
     st.markdown(f"##### [참고] 전국대비 {region} 현황")
+    reference_lines: List[str] = []
     compare_base = province_report_df if not province_report_df.empty else report_df
     if region != "전국":
         _, gy_meta = _compute_gyeonggi_vs_national_contribution(compare_base, region_name=region)
@@ -2072,36 +2144,48 @@ def _render_report_template(
             gg_yoy = gy_meta.get("latest_gg_yoy_abs")
             nat_flow = "증가분" if pd.notna(nat_yoy) and float(nat_yoy) > 0 else ("감소분" if pd.notna(nat_yoy) and float(nat_yoy) < 0 else "변동분")
 
-            st.markdown(f"- 기준시점은 **{ref_latest}**, 비교시점은 **{ref_prev}**입니다.")
-            st.markdown(
-                f"- {ref_latest} 기준 전국 취업자는 **{_fmt_num(gy_meta.get('latest_nat_value'), ref_unit)}**, "
-                f"{region} 취업자는 **{_fmt_num(gy_meta.get('latest_gg_value'), ref_unit)}**입니다."
+            reference_lines.append(f"기준시점은 {ref_latest}, 비교시점은 {ref_prev}입니다.")
+            reference_lines.append(
+                f"{ref_latest} 기준 전국 취업자는 {_fmt_num(gy_meta.get('latest_nat_value'), ref_unit)}, "
+                f"{region} 취업자는 {_fmt_num(gy_meta.get('latest_gg_value'), ref_unit)}입니다."
             )
-            st.markdown(
-                f"- 전국 대비 {region} 비중은 {ref_prev} **{share_prev_text}**에서 "
-                f"{ref_latest} **{share_now_text}**로 **{share_change_text}** 변화했습니다."
+            reference_lines.append(
+                f"전국 대비 {region} 비중은 {ref_prev} {share_prev_text}에서 "
+                f"{ref_latest} {share_now_text}로 {share_change_text} 변화했습니다."
             )
-            st.markdown(
-                f"- 전국 취업자 {nat_flow} 대비 {region} 기여율은 {ref_prev} **{contrib_prev_text}**에서 "
-                f"{ref_latest} **{contrib_now_text}**로 **{contrib_change_text}** 변화했습니다."
+            reference_lines.append(
+                f"전국 취업자 {nat_flow} 대비 {region} 기여율은 {ref_prev} {contrib_prev_text}에서 "
+                f"{ref_latest} {contrib_now_text}로 {contrib_change_text} 변화했습니다."
             )
-            st.markdown(
-                f"- 같은 시점 전년비 증감은 전국 **{_fmt_num(nat_yoy, ref_unit)}**, "
-                f"{region} **{_fmt_num(gg_yoy, ref_unit)}**입니다."
+            reference_lines.append(
+                f"같은 시점 전년비 증감은 전국 {_fmt_num(nat_yoy, ref_unit)}, "
+                f"{region} {_fmt_num(gg_yoy, ref_unit)}입니다."
             )
+            for line in reference_lines:
+                st.markdown(f"- {line}")
             st.caption("참고: 전국 증감이 작을수록 기여율(%)은 크게 흔들릴 수 있습니다.")
         else:
+            reference_lines.append("전국 대비 참고 지표를 계산할 수 없습니다.")
             st.markdown("- 전국 대비 참고 지표를 계산할 수 없습니다.")
     else:
+        reference_lines.append("전국 선택 시에는 전국대비 지표를 표시하지 않습니다.")
         st.markdown("- 전국 선택 시에는 전국대비 지표를 표시하지 않습니다.")
 
     st.markdown("---")
     st.markdown(f"## {region} 상세분석")
+    detail_sections: List[Dict[str, Any]] = []
     for title, ds_key in sections:
         tbl, meta = _compute_contribution_table(report_df, region=region, dataset_key=ds_key, lag=lag)
         st.markdown(f"##### {title}")
         if not meta.get("ok") or tbl.empty:
             st.markdown("- 데이터가 부족해 상세 분석을 생성하지 못했습니다.")
+            detail_sections.append(
+                {
+                    "title": title,
+                    "lines": ["데이터가 부족해 상세 분석을 생성하지 못했습니다."],
+                    "table": pd.DataFrame(),
+                }
+            )
             continue
         unit = str(meta.get("unit", ""))
         latest = _fmt_period(meta.get("latest_period"), prd_se)
@@ -2132,6 +2216,16 @@ def _render_report_template(
         detail_view = detail_view.sort_values(["정렬순서", "분류"]).drop(columns=["정렬순서"])
         detail_view["증감"] = detail_view["증감"].apply(lambda x: _fmt_triangle_delta(x, unit))
         st.dataframe(detail_view, use_container_width=True, hide_index=True)
+        detail_sections.append(
+            {
+                "title": title,
+                "lines": [
+                    f"{latest} 기준 총증감: {total_delta} ({prev} 대비)",
+                    f"증가요인 1위: {pos_line}, 감소요인 1위: {neg_line}",
+                ],
+                "table": detail_view,
+            }
+        )
 
     if not for_pdf:
         st.markdown("##### 점검 액션")
@@ -2149,6 +2243,25 @@ def _render_report_template(
         if not action_lines:
             action_lines.append("- 이번 시점은 급격한 이상 신호가 제한적이므로 주요 분류 추세 모니터링 유지")
         st.markdown("\n".join(action_lines))
+
+    doc_file_safe_region = re.sub(r"[^0-9A-Za-z가-힣_\\-]", "_", str(region))
+    doc_file_safe_period = re.sub(r"[^0-9A-Za-z가-힣_\\-]", "_", str(latest_text))
+    doc_bytes = _build_report_docx_bytes(
+        title=report_title,
+        summary_lines=summary_lines,
+        activity_table=activity_view,
+        structure_lines=structure_lines,
+        reference_title=f"[참고] 전국대비 {region} 현황",
+        reference_lines=reference_lines,
+        detail_sections=detail_sections,
+    )
+    st.download_button(
+        "DOCX 다운로드",
+        data=doc_bytes,
+        file_name=f"{doc_file_safe_period}_{doc_file_safe_region}_경제활동인구_브리프.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        key="download_report_docx",
+    )
 
 
 def _compute_gyeonggi_vs_national_contribution(
