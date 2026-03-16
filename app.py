@@ -1823,18 +1823,32 @@ def _render_report_template(
         if not neg.empty:
             top_neg_name = str(neg.iloc[0]["분류"])
 
+    emp_delta = (
+        float(emp_row["delta_value"])
+        if emp_row is not None and pd.notna(emp_row.get("delta_value"))
+        else np.nan
+    )
+    if pd.isna(emp_delta):
+        emp_direction = "방향을 확인할 수 없습니다."
+    elif emp_delta > 0:
+        emp_direction = "증가했습니다."
+    elif emp_delta < 0:
+        emp_direction = "감소했습니다."
+    else:
+        emp_direction = "보합입니다."
+
     st.markdown("#### [1페이지] 경기도 월간 핵심요약")
     st.markdown(
         "\n".join(
             [
                 f"- {latest_text} {region} 취업자는 **{_fmt_num(emp_row['latest_value'] if emp_row is not None else np.nan, str(emp_row['unit']) if emp_row is not None else '')}**로, "
-                f"{prev_text} 대비 **{_fmt_num(emp_row['delta_value'] if emp_row is not None else np.nan, str(emp_row['unit']) if emp_row is not None else '')}** 변동했습니다.",
+                f"{prev_text} 대비 **{_fmt_num(emp_row['delta_value'] if emp_row is not None else np.nan, str(emp_row['unit']) if emp_row is not None else '')}** {emp_direction}",
                 f"- 고용률은 **{_fmt_num(emp_rate_row['latest_value'] if emp_rate_row is not None else np.nan, str(emp_rate_row['unit']) if emp_rate_row is not None else '%')}**"
                 f"({yoy_text} 대비 **{_fmt_num(emp_rate_row['delta_value'] if emp_rate_row is not None else np.nan, str(emp_rate_row['unit']) if emp_rate_row is not None else '%')}**), "
                 f"실업률은 **{_fmt_num(unemp_rate_row['latest_value'] if unemp_rate_row is not None else np.nan, str(unemp_rate_row['unit']) if unemp_rate_row is not None else '%')}**"
                 f"({yoy_text} 대비 **{_fmt_num(unemp_rate_row['delta_value'] if unemp_rate_row is not None else np.nan, str(unemp_rate_row['unit']) if unemp_rate_row is not None else '%')}**)입니다.",
-                f"- {region} 내부에서는 **{_escape_markdown_text(top_pos_name)}**(증가기여 1위), "
-                f"**{_escape_markdown_text(top_neg_name)}**(감소상쇄 1위)의 영향이 가장 컸습니다.",
+                f"- {_escape_markdown_text(top_pos_name)}(증가기여 1위), "
+                f"{_escape_markdown_text(top_neg_name)}(감소상쇄 1위)이(가) {region} 취업자수에 가장 큰 영향을 미쳤습니다.",
             ]
         )
     )
@@ -1850,11 +1864,29 @@ def _render_report_template(
             "delta_value": f"{yoy_text} 대비 증감",
         }
     )
-    for col in [prev_text, latest_text, f"{yoy_text} 대비 증감"]:
-        activity_view[col] = activity_view.apply(
-            lambda r: _fmt_num(r[col], str(r["unit"])),
-            axis=1,
-        )
+    def _fmt_delta_triangle(v: object, u: str) -> str:
+        if v is None or pd.isna(v):
+            return "-"
+        vv = float(v)
+        if vv > 0:
+            return f"▲{_fmt_num(vv, u)}"
+        if vv < 0:
+            return f"▼{_fmt_num(abs(vv), u)}"
+        return f"→{_fmt_num(0, u)}"
+
+    activity_view[prev_text] = activity_view.apply(
+        lambda r: _fmt_num(r[prev_text], str(r["unit"])),
+        axis=1,
+    )
+    activity_view[latest_text] = activity_view.apply(
+        lambda r: _fmt_num(r[latest_text], str(r["unit"])),
+        axis=1,
+    )
+    delta_col = f"{yoy_text} 대비 증감"
+    activity_view[delta_col] = activity_view.apply(
+        lambda r: _fmt_delta_triangle(r[delta_col], str(r["unit"])),
+        axis=1,
+    )
     activity_view = activity_view.drop(columns=["unit"])
     st.dataframe(activity_view, use_container_width=True, hide_index=True)
 
@@ -2490,7 +2522,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
         "④ 산업별 취업자수",
         "⑤ 직종별 취업자수",
         "⑥ NEW HISTORY",
-        "⑦ 요약탭",
+        "⑦ 요약",
         "⑧ 리포트",
     ]
 )
@@ -2547,7 +2579,7 @@ with tab6:
             unsafe_allow_html=True,
         )
 with tab7:
-    st.subheader("요약탭")
+    st.subheader("요약")
     report_scope = st.radio(
         "리포트 범위",
         ["경기도 전체", "31개 시군"],
