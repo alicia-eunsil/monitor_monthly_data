@@ -207,13 +207,14 @@ def order_sigungu_occupation_categories(categories: List[str]) -> List[str]:
     return sorted(categories, key=lambda x: (_rank(x), x))
 
 
-def is_valid_industry_category(text: object) -> bool:
-    s = str(text).strip()
-    if not s:
+def is_valid_industry_category(name: object, code: object = "") -> bool:
+    s_name = str(name).strip()
+    s_code = str(code).strip()
+    if not s_name:
         return False
-    if s.startswith("*"):
+    if s_name.startswith("*"):
         return False
-    return bool(re.search(r"[A-Za-z]", s))
+    return bool(re.search(r"[A-Za-z]", s_name) or re.search(r"[A-Za-z]", s_code))
 
 
 def apply_industry_category_filter(df: pd.DataFrame) -> tuple[pd.DataFrame, Dict[str, int]]:
@@ -226,7 +227,28 @@ def apply_industry_category_filter(df: pd.DataFrame) -> tuple[pd.DataFrame, Dict
     if before_rows == 0:
         return out, {"before_rows": 0, "after_rows": 0, "removed_rows": 0}
 
-    valid_mask = out.loc[industry_mask, "category_name"].apply(is_valid_industry_category)
+    has_code_col = "category_code" in out.columns
+    if has_code_col:
+        valid_mask = out.loc[industry_mask].apply(
+            lambda row: is_valid_industry_category(row.get("category_name", ""), row.get("category_code", "")),
+            axis=1,
+        )
+        # If code has alphabet but name does not, append code for UI readability.
+        name_series = out.loc[industry_mask, "category_name"].astype(str).str.strip()
+        code_series = out.loc[industry_mask, "category_code"].astype(str).str.strip()
+        alpha_in_name = name_series.str.contains(r"[A-Za-z]", regex=True, na=False)
+        alpha_in_code = code_series.str.contains(r"[A-Za-z]", regex=True, na=False)
+        attach_code = valid_mask & (~alpha_in_name) & alpha_in_code
+        if attach_code.any():
+            idx = out.loc[industry_mask].index[attach_code]
+            out.loc[idx, "category_name"] = (
+                out.loc[idx, "category_name"].astype(str).str.strip()
+                + "("
+                + out.loc[idx, "category_code"].astype(str).str.strip()
+                + ")"
+            )
+    else:
+        valid_mask = out.loc[industry_mask, "category_name"].apply(is_valid_industry_category)
     keep_mask = (~industry_mask).copy()
     keep_mask.loc[industry_mask] = valid_mask.values
     out = out[keep_mask].copy()

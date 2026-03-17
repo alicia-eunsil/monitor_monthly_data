@@ -41,7 +41,7 @@ def load_all_data_with_progress(
     progress_box: Any,
     main_status_box: Optional[Any] = None,
     main_progress_box: Optional[Any] = None,
-) -> tuple[Dict[str, pd.DataFrame], List[str], List[str]]:
+) -> tuple[Dict[str, pd.DataFrame], List[str], List[str], Dict[str, pd.DataFrame]]:
     scope_defs = [
         ("province", "전국·17개 시도", datasets_for_scope("province")),
         ("gyeonggi31", "경기 31개 시군", datasets_for_scope("gyeonggi31")),
@@ -49,6 +49,7 @@ def load_all_data_with_progress(
     total_steps = sum(len(ds) * 2 for _, _, ds in scope_defs) + len(scope_defs)
     step = 0
     frames_by_scope: Dict[str, List[pd.DataFrame]] = {k: [] for k, _, _ in scope_defs}
+    industry_catalog_by_scope: Dict[str, pd.DataFrame] = {}
     errors: List[str] = []
     debug_logs: List[str] = []
 
@@ -134,8 +135,23 @@ def load_all_data_with_progress(
     for scope_key, _, _ in scope_defs:
         frames = frames_by_scope.get(scope_key, [])
         if frames:
-            combined = pd.concat(frames, ignore_index=True)
-            combined = add_yoy(combined)
+            combined_raw = pd.concat(frames, ignore_index=True)
+            raw_industry = combined_raw[combined_raw["dataset_key"] == "industry"].copy()
+            if raw_industry.empty:
+                industry_catalog_by_scope[scope_key] = pd.DataFrame(
+                    columns=["region_name", "indicator_name", "category_name", "category_code"]
+                )
+            else:
+                industry_catalog_by_scope[scope_key] = (
+                    raw_industry[["region_name", "indicator_name", "category_name", "category_code"]]
+                    .fillna("")
+                    .astype(str)
+                    .drop_duplicates()
+                    .sort_values(["region_name", "indicator_name", "category_name", "category_code"])
+                    .reset_index(drop=True)
+                )
+
+            combined = add_yoy(combined_raw)
             combined, filter_stats = apply_industry_category_filter(combined)
             debug_logs.append(
                 "[{}:industry_filter] before_rows={} after_rows={} removed_rows={}".format(
@@ -149,12 +165,15 @@ def load_all_data_with_progress(
             debug_logs.append(f"[{scope_key}:all] combined_rows={len(combined)}")
         else:
             data_by_scope[scope_key] = pd.DataFrame()
+            industry_catalog_by_scope[scope_key] = pd.DataFrame(
+                columns=["region_name", "indicator_name", "category_name", "category_code"]
+            )
 
     if all(df.empty for df in data_by_scope.values()):
         _set_progress(100)
         _set_error("데이터 로딩 실패")
-        return data_by_scope, errors, debug_logs
+        return data_by_scope, errors, debug_logs, industry_catalog_by_scope
 
     _set_progress(100)
     _set_success("로딩 완료")
-    return data_by_scope, errors, debug_logs
+    return data_by_scope, errors, debug_logs, industry_catalog_by_scope

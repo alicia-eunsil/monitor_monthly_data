@@ -1,7 +1,7 @@
 ﻿from __future__ import annotations
 
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import altair as alt
 import numpy as np
@@ -109,7 +109,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-DATA_MODEL_VERSION = "2026-03-17-industry-alpha-filter-v1"
+DATA_MODEL_VERSION = "2026-03-17-industry-alpha-filter-v3"
 
 
 def _seeded_api_key() -> str:
@@ -249,6 +249,7 @@ def _render_dataset(
     default_region: str,
     datasets: List[DatasetConfig],
     is_gyeonggi31_mode: bool,
+    raw_industry_catalog: Optional[pd.DataFrame] = None,
 ) -> None:
     cfg = next(x for x in datasets if x.key == dataset_key)
     subset = df[df["dataset_key"] == dataset_key].copy()
@@ -354,6 +355,27 @@ def _render_dataset(
                     cfg.category_label,
                     categories,
                     key=f"category_select_{dataset_key}",
+                )
+
+    if dataset_key == "industry":
+        raw_cat = raw_industry_catalog.copy() if raw_industry_catalog is not None else pd.DataFrame()
+        with st.expander("불러온 산업 원본 분류 전체 보기", expanded=True):
+            if raw_cat.empty:
+                st.caption("원본 산업 분류 데이터가 없습니다.")
+            else:
+                raw_cat = raw_cat.fillna("").astype(str)
+                st.caption(f"원본 분류 건수(중복제거): {len(raw_cat):,}건")
+                st.dataframe(
+                    raw_cat.rename(
+                        columns={
+                            "region_name": "지역",
+                            "indicator_name": "지표",
+                            "category_name": "산업명",
+                            "category_code": "산업코드",
+                        }
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
                 )
 
     series_df = series_filter(
@@ -488,6 +510,7 @@ with st.sidebar:
         st.session_state.pop("_loaded_api_key", None)
         st.session_state.pop("_loaded_data_version", None)
         st.session_state.pop("_loaded_scope_data", None)
+        st.session_state.pop("_loaded_industry_catalog", None)
         st.session_state.pop("_loaded_errors", None)
         st.session_state.pop("_loaded_debug_logs", None)
         st.rerun()
@@ -510,10 +533,11 @@ try:
         and "_loaded_scope_data" in st.session_state
     ):
         scope_data = st.session_state["_loaded_scope_data"]
+        industry_catalog_by_scope = st.session_state.get("_loaded_industry_catalog", {})
         load_errors = st.session_state.get("_loaded_errors", [])
         debug_logs = st.session_state.get("_loaded_debug_logs", [])
     else:
-        scope_data, load_errors, debug_logs = load_all_data_with_progress(
+        scope_data, load_errors, debug_logs, industry_catalog_by_scope = load_all_data_with_progress(
             api_key=api_key,
             status_box=sidebar_status,
             progress_box=sidebar_progress_box,
@@ -523,6 +547,7 @@ try:
         st.session_state["_loaded_api_key"] = api_key
         st.session_state["_loaded_data_version"] = DATA_MODEL_VERSION
         st.session_state["_loaded_scope_data"] = scope_data
+        st.session_state["_loaded_industry_catalog"] = industry_catalog_by_scope
         st.session_state["_loaded_errors"] = load_errors
         st.session_state["_loaded_debug_logs"] = debug_logs
 finally:
@@ -588,7 +613,15 @@ with tab2:
 with tab3:
     _render_dataset(visible_data, "status", region_pool, default_region, active_datasets, is_gyeonggi31_mode)
 with tab4:
-    _render_dataset(visible_data, "industry", region_pool, default_region, active_datasets, is_gyeonggi31_mode)
+    _render_dataset(
+        visible_data,
+        "industry",
+        region_pool,
+        default_region,
+        active_datasets,
+        is_gyeonggi31_mode,
+        raw_industry_catalog=industry_catalog_by_scope.get(region_scope, pd.DataFrame()),
+    )
 with tab5:
     _render_dataset(visible_data, "occupation", region_pool, default_region, active_datasets, is_gyeonggi31_mode)
 with tab6:
