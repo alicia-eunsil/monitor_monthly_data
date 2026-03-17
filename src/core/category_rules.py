@@ -118,26 +118,81 @@ def _industry_code_token(text: str) -> str:
     s = str(text or "").strip().upper()
     if not s:
         return ""
-    if s in {"계", "합계", "전체"}:
+
+    raw_text = str(text or "").strip()
+    if raw_text in {"계", "합계", "전체"} or s == "TOTAL":
         return "TOTAL"
-    # Prefer explicit code in parenthesis: e.g. (BC), (G,I), (D,H,J,K), (EL~U)
+
+    def _normalize_token(raw: str) -> str:
+        token_raw = re.sub(r"[^A-Z~,\-]", "", str(raw or "").upper())
+        if not token_raw or not re.search(r"[A-Z]", token_raw):
+            return ""
+        normalized = token_raw.replace(",", "").replace("-", "~")
+        letters_only = re.sub(r"[^A-Z]", "", normalized)
+        if letters_only == "ELU" or normalized == "EL~U":
+            return "EL~U"
+        if letters_only == "DU" or normalized == "D~U":
+            return "D~U"
+        if letters_only in {"BC", "GI", "DHJK", "A", "C", "F"}:
+            return letters_only
+        return letters_only
+
+    # Prefer explicit code in parenthesis: e.g. (BC), (G,I), (D,H,J,K), (EL~U), (D-U)
     m = re.search(r"\(([^()]*)\)", s)
     if m:
-        token = re.sub(r"[^A-Z~]", "", m.group(1).upper())
+        token = _normalize_token(m.group(1))
         if token:
             return token
+
     # Fallback to leading alphabet class code: e.g. "A 농업...", "C 제조업...", "F 건설업..."
-    m = re.match(r"^\*?\s*([A-Z])", s)
+    # Allow non-alphabet prefixes such as full-width star/bullet.
+    m = re.match(r"^[^A-Z0-9]*([A-Z])", s)
     if m:
         return m.group(1)
     return ""
 
 
 def order_province_industry_categories(categories: List[str]) -> List[str]:
-    # Requested UI order for province industry tab.
+    # Requested fixed UI order:
+    # * 광공업(BC) -> * 도소매·숙박음식점업(GI) -> * 사업·개인·공공서비스 및 기타(EL~U)
+    # -> * 사회간접자본 및 기타서비스업(D~U) -> * 전기·운수·통신·금융(DHJK)
+    # -> A 농업... -> C 제조업... -> F 건설업... -> 계
+    def _name_rank(cat: str) -> int:
+        raw = str(cat or "").strip()
+        n = re.sub(r"\s+", "", raw)
+        if raw in {"계", "합계", "전체"}:
+            return 8
+        if "광공업" in n:
+            return 0
+        if "도소매" in n and "숙박음식" in n:
+            return 1
+        if "사업" in n and "개인" in n and "공공서비스" in n and "기타" in n:
+            return 2
+        if "사회간접자본" in n and "기타서비스" in n:
+            return 3
+        if "전기" in n and "운수" in n and "통신" in n and "금융" in n:
+            return 4
+        if raw.startswith("A ") or ("농업" in n and "어업" in n):
+            return 5
+        if raw.startswith("C ") or "제조업" in n:
+            return 6
+        if raw.startswith("F ") or "건설업" in n:
+            return 7
+        return 999
+
+    # Fallback by code token for edge variants.
     ordered_tokens = ["BC", "GI", "EL~U", "D~U", "DHJK", "A", "C", "F", "TOTAL"]
-    order_map = {tok: idx for idx, tok in enumerate(ordered_tokens)}
-    return sorted(categories, key=lambda x: (order_map.get(_industry_code_token(x), 999), x))
+    token_order_map = {tok: idx for idx, tok in enumerate(ordered_tokens)}
+
+    def _resolved_rank(cat: str) -> int:
+        by_name = _name_rank(cat)
+        by_token = token_order_map.get(_industry_code_token(cat), 999)
+        return by_name if by_name < 999 else by_token
+
+    return sorted(
+        categories,
+        key=lambda x: (_resolved_rank(x), str(x)),
+    )
 
 
 def norm_age_category(text: str) -> str:

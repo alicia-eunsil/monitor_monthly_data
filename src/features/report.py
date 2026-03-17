@@ -27,12 +27,31 @@ def _industry_code_from_label(label: object) -> str:
     s = str(label or "").strip().upper()
     if not s:
         return ""
+
+    raw_text = str(label or "").strip()
+    if raw_text in {"계", "합계", "전체"} or s == "TOTAL":
+        return "TOTAL"
+
+    def _normalize_token(raw: str) -> str:
+        token_raw = re.sub(r"[^A-Z~,\-]", "", str(raw or "").upper())
+        if not token_raw or not re.search(r"[A-Z]", token_raw):
+            return ""
+        normalized = token_raw.replace(",", "").replace("-", "~")
+        letters_only = re.sub(r"[^A-Z]", "", normalized)
+        if letters_only == "ELU" or normalized == "EL~U":
+            return "EL~U"
+        if letters_only == "DU" or normalized == "D~U":
+            return "D~U"
+        if letters_only in {"BC", "GI", "DHJK", "A", "C", "F"}:
+            return letters_only
+        return letters_only
+
     m = re.search(r"\(([^()]*)\)", s)
     if m:
-        token = re.sub(r"[^A-Z~]", "", m.group(1).upper())
+        token = _normalize_token(m.group(1))
         if token:
             return token
-    m = re.match(r"^\*?\s*([A-Z])", s)
+    m = re.match(r"^[^A-Z0-9]*([A-Z])", s)
     if m:
         return m.group(1)
     return ""
@@ -151,15 +170,18 @@ def _build_dataset_streak_summary_line(
         dur_unit = "반기" if ds_prd_se == "H" else "개월"
         return f"연속 증가/감소 요약(3{dur_unit} 이상): 없음 ({yoy_label}대비 증감 기준)"
 
-    all_items = up_items + down_items
-    all_items = sorted(all_items, key=lambda x: (-int(x["len"]), -abs(float(x["latest_yoy"])), str(x["label"])))
+    sort_key = lambda x: (-int(x["len"]), -abs(float(x["latest_yoy"])), str(x["label"]))
+    up_items = sorted(up_items, key=sort_key)
+    down_items = sorted(down_items, key=sort_key)
+    ordered_items = up_items + down_items
+
     tokens: List[str] = []
-    for item in all_items:
+    for item in ordered_items:
         s_txt = escape_markdown_text(fmt_period(item["start"], "H" if item["unit"] == "반기" else "M"))
         e_txt = escape_markdown_text(fmt_period(item["end"], "H" if item["unit"] == "반기" else "M"))
         l_txt = escape_markdown_text(str(item["label"]))
         tokens.append(f"{l_txt} {s_txt}\\~{e_txt} {item['len']}{item['unit']} 연속 {item['dir']}")
-    return f"연속 증가/감소 요약(3{all_items[0]['unit']} 이상): " + ", ".join(tokens) + f" ({yoy_label}대비 증감 기준)"
+    return f"연속 증가/감소 요약(3{ordered_items[0]['unit']} 이상): " + ", ".join(tokens) + f" ({yoy_label}대비 증감 기준)"
 
 
 def _to_docx_text(text: object) -> str:
