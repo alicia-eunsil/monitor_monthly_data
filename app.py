@@ -57,6 +57,10 @@ st.set_page_config(
 st.markdown(
     """
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700;800&display=swap');
+.stApp, .stApp * {
+  font-family: 'Nanum Gothic', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif !important;
+}
 .stApp p, .stApp li, .stApp label, .stApp div[data-baseweb="radio"] span {
   font-size: 1.03rem;
 }

@@ -11,7 +11,7 @@ import streamlit.components.v1 as components
 from docx import Document
 
 from src.core.category_rules import norm_indicator_name, order_categories_like_ui
-from src.core.formatters import escape_markdown_text, fmt_num, fmt_period, fmt_triangle_delta
+from src.core.formatters import fmt_num, fmt_period, fmt_triangle_delta
 from src.features.insights import (
     build_activity_snapshot,
     compute_anomaly_table,
@@ -194,10 +194,10 @@ def _build_dataset_streak_summary_line(
 
     tokens: List[str] = []
     for item in ordered_items:
-        s_txt = escape_markdown_text(fmt_period(item["start"], "H" if item["unit"] == "반기" else "M"))
-        e_txt = escape_markdown_text(fmt_period(item["end"], "H" if item["unit"] == "반기" else "M"))
-        l_txt = escape_markdown_text(str(item["label"]))
-        tokens.append(f"{l_txt} {s_txt}\\~{e_txt} {item['len']}{item['unit']} 연속 {item['dir']}")
+        s_txt = str(fmt_period(item["start"], "H" if item["unit"] == "반기" else "M"))
+        e_txt = str(fmt_period(item["end"], "H" if item["unit"] == "반기" else "M"))
+        l_txt = str(item["label"])
+        tokens.append(f"{l_txt} {s_txt}~{e_txt} {item['len']}{item['unit']} 연속 {item['dir']}")
     return f"연속 증가/감소 요약(3{ordered_items[0]['unit']} 이상): " + ", ".join(tokens) + f" ({yoy_label}대비 증감 기준)"
 
 
@@ -302,6 +302,7 @@ def _build_printable_report_html(
 <head>
   <meta charset="utf-8" />
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Nanum+Gothic:wght@400;700;800&display=swap');
     :root {{
       --navy-900: #0f2742;
       --navy-700: #1e3a5f;
@@ -313,7 +314,7 @@ def _build_printable_report_html(
       --soft: #f4f7fb;
     }}
     body {{
-      font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+      font-family: 'Nanum Gothic', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
       color: var(--text);
       margin: 0;
       padding: 20px;
@@ -601,7 +602,7 @@ def render_report_template(
             return "없음"
         row = view.nlargest(1, "증감").iloc[0] if positive else view.nsmallest(1, "증감").iloc[0]
         pct_text = "-" if pd.isna(row.get("기여율(%)")) else f"{float(row['기여율(%)']):,.1f}%"
-        return f"{escape_markdown_text(row['분류'])}({fmt_num(row['증감'], unit)}, {pct_text})"
+        return f"{row['분류']}({fmt_num(row['증감'], unit)}, {pct_text})"
 
     report_events = collect_new_events(report_df)
     if not report_events.empty:
@@ -789,10 +790,10 @@ def render_report_template(
                 for _, er in ds_events.iterrows():
                     cat = str(er.get("분류", "")).strip() or "전체"
                     token = (
-                        f"{escape_markdown_text(cat)}"
-                        f"({escape_markdown_text(str(er.get('구분', '')))} "
-                        f"{escape_markdown_text(str(er.get('범위', '')))} "
-                        f"{escape_markdown_text(str(er.get('유형', '')))} NEW)"
+                        f"{cat}"
+                        f"({str(er.get('구분', ''))} "
+                        f"{str(er.get('범위', ''))} "
+                        f"{str(er.get('유형', ''))} NEW)"
                     )
                     event_tokens.append(token)
                 line_new = f"이번 {labels['point']} NEW 달성: " + ", ".join(event_tokens)
@@ -818,8 +819,8 @@ def render_report_template(
                 lines = []
                 for _, r in top3.iterrows():
                     lines.append(
-                        f"  - [{r['기준시점']}] {r['데이터셋']} / {escape_markdown_text(r['분류'])}: "
-                        f"{escape_markdown_text(r['이유'])} ({float(r['이상점수']):.1f}점)"
+                        f"  - [{r['기준시점']}] {r['데이터셋']} / {r['분류']}: "
+                        f"{r['이유']} ({float(r['이상점수']):.1f}점)"
                     )
                 st.markdown("- Top 3 이벤트\n" + "\n".join(lines))
 
@@ -895,8 +896,8 @@ def render_report_template(
         factor_tbl = _filter_industry_factor_table(tbl) if ds_key == "industry" else tbl
         top_pos = factor_tbl[factor_tbl["증감"] > 0].nlargest(1, "증감")
         top_neg = factor_tbl[factor_tbl["증감"] < 0].nsmallest(1, "증감")
-        pos_line = f"{escape_markdown_text(top_pos.iloc[0]['분류'])}({fmt_num(top_pos.iloc[0]['증감'], unit)})" if not top_pos.empty else "없음"
-        neg_line = f"{escape_markdown_text(top_neg.iloc[0]['분류'])}({fmt_num(top_neg.iloc[0]['증감'], unit)})" if not top_neg.empty else "없음"
+        pos_line = f"{top_pos.iloc[0]['분류']}({fmt_num(top_pos.iloc[0]['증감'], unit)})" if not top_pos.empty else "없음"
+        neg_line = f"{top_neg.iloc[0]['분류']}({fmt_num(top_neg.iloc[0]['증감'], unit)})" if not top_neg.empty else "없음"
         st.markdown(f"- {latest} 기준 총증감: **{total_delta}** ({prev} 대비)")
         st.markdown(f"- 증가요인 1위: **{pos_line}**, 감소요인 1위: **{neg_line}**")
         detail_view = tbl.copy()
@@ -926,9 +927,9 @@ def render_report_template(
             pos = industry_factor_df[industry_factor_df["증감"] > 0].nlargest(1, "증감")
             neg = industry_factor_df[industry_factor_df["증감"] < 0].nsmallest(1, "증감")
             if not pos.empty:
-                action_lines.append(f"- 산업 증가 1위({escape_markdown_text(pos.iloc[0]['분류'])})의 증가 지속 여부를 다음 {labels['point']}에 점검")
+                action_lines.append(f"- 산업 증가 1위({pos.iloc[0]['분류']})의 증가 지속 여부를 다음 {labels['point']}에 점검")
             if not neg.empty:
-                action_lines.append(f"- 산업 감소 1위({escape_markdown_text(neg.iloc[0]['분류'])})의 구조적 감소 여부를 원인 점검")
+                action_lines.append(f"- 산업 감소 1위({neg.iloc[0]['분류']})의 구조적 감소 여부를 원인 점검")
         if not anomaly_df.empty:
             high_focus = anomaly_df[pd.to_numeric(anomaly_df["이상점수"], errors="coerce") >= 75]
             action_lines.append(f"- 이상점수 75점 이상 항목 {len(high_focus):,}건에 대해 우선 확인 코멘트 수집")
