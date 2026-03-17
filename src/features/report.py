@@ -84,35 +84,41 @@ def _current_streak_length(values: pd.Series, positive: bool) -> int:
     return cnt
 
 
-def _build_dataset_streak_summary_line(
+def _collect_dataset_streak_items(
     source_df: pd.DataFrame,
     region: str,
     dataset_key: str,
     asof_period: pd.Timestamp,
     indicator_name: str = "",
     min_len: int = 3,
-    yoy_label: str = "전년동월",
-) -> str:
+) -> tuple[List[Dict[str, object]], List[Dict[str, object]], str]:
     if source_df.empty or not region or pd.isna(asof_period):
-        return ""
+        return [], [], "개월"
     ds = source_df[
         (source_df["dataset_key"].astype(str) == str(dataset_key))
         & (source_df["region_name"].astype(str) == str(region))
         & (pd.to_datetime(source_df["period"], errors="coerce") <= pd.Timestamp(asof_period))
     ].copy()
     if ds.empty or "yoy_abs" not in ds.columns:
-        return ""
+        return [], [], "개월"
     ds["period"] = pd.to_datetime(ds["period"], errors="coerce")
     ds = ds.dropna(subset=["period"])
     if ds.empty:
-        return ""
+        return [], [], "개월"
     if indicator_name:
         ds = ds[ds["indicator_name"].astype(str) == str(indicator_name)].copy()
     if ds.empty:
-        return ""
+        return [], [], "개월"
 
+    ds_prd_se = (
+        str(ds["prd_se"].dropna().iloc[0]).upper()
+        if "prd_se" in ds.columns and not ds["prd_se"].dropna().empty
+        else "M"
+    )
+    dur_unit = "반기" if ds_prd_se == "H" else "개월"
     up_items: List[Dict[str, object]] = []
     down_items: List[Dict[str, object]] = []
+
     for _, g in ds.groupby(["indicator_name", "category_name"], dropna=False):
         g = g.sort_values("period")
         if g.empty:
@@ -127,12 +133,6 @@ def _build_dataset_streak_summary_line(
         cat = str(g["category_name"].iloc[0]).strip()
         ind = str(g["indicator_name"].iloc[0]).strip()
         label = cat if cat else (ind if ind else "전체")
-        prd_se = (
-            str(g["prd_se"].dropna().iloc[0]).upper()
-            if "prd_se" in g.columns and not g["prd_se"].dropna().empty
-            else "M"
-        )
-        unit_text = "반기" if prd_se == "H" else "개월"
 
         up_len = _current_streak_length(yoy_values, positive=True)
         if up_len >= min_len:
@@ -143,7 +143,7 @@ def _build_dataset_streak_summary_line(
                     "start": pd.Timestamp(g["period"].iloc[len(g) - up_len]),
                     "end": latest_period,
                     "latest_yoy": latest_yoy,
-                    "unit": unit_text,
+                    "unit": dur_unit,
                     "dir": "증가",
                 }
             )
@@ -156,18 +156,32 @@ def _build_dataset_streak_summary_line(
                     "start": pd.Timestamp(g["period"].iloc[len(g) - down_len]),
                     "end": latest_period,
                     "latest_yoy": latest_yoy,
-                    "unit": unit_text,
+                    "unit": dur_unit,
                     "dir": "감소",
                 }
             )
+    return up_items, down_items, dur_unit
+
+
+def _build_dataset_streak_summary_line(
+    source_df: pd.DataFrame,
+    region: str,
+    dataset_key: str,
+    asof_period: pd.Timestamp,
+    indicator_name: str = "",
+    min_len: int = 3,
+    yoy_label: str = "전년동월",
+) -> str:
+    up_items, down_items, dur_unit = _collect_dataset_streak_items(
+        source_df=source_df,
+        region=region,
+        dataset_key=dataset_key,
+        asof_period=asof_period,
+        indicator_name=indicator_name,
+        min_len=min_len,
+    )
 
     if not up_items and not down_items:
-        ds_prd_se = (
-            str(ds["prd_se"].dropna().iloc[0]).upper()
-            if "prd_se" in ds.columns and not ds["prd_se"].dropna().empty
-            else "M"
-        )
-        dur_unit = "반기" if ds_prd_se == "H" else "개월"
         return f"연속 증가/감소 요약(3{dur_unit} 이상): 없음 ({yoy_label}대비 증감 기준)"
 
     sort_key = lambda x: (-int(x["len"]), -abs(float(x["latest_yoy"])), str(x["label"]))
@@ -352,7 +366,7 @@ def render_report_template(
 
     industry_df, industry_meta = compute_contribution_table(report_df, region=region, dataset_key="industry", lag=lag)
     industry_factor_df = _filter_industry_factor_table(industry_df)
-    occupation_df, _ = compute_contribution_table(report_df, region=region, dataset_key="occupation", lag=lag)
+    occupation_df, occupation_meta = compute_contribution_table(report_df, region=region, dataset_key="occupation", lag=lag)
 
     emp_delta = float(emp_row["delta_value"]) if emp_row is not None and pd.notna(emp_row.get("delta_value")) else np.nan
     if pd.isna(emp_delta):
@@ -379,6 +393,89 @@ def render_report_template(
         pct_text = "-" if pd.isna(row.get("기여율(%)")) else f"{float(row['기여율(%)']):,.1f}%"
         return f"{escape_markdown_text(row['분류'])}({fmt_num(row['증감'], unit)}, {pct_text})"
 
+    report_events = collect_new_events(report_df)
+    if not report_events.empty:
+        report_events = report_events[
+            (report_events["지역"].astype(str) == str(region))
+            & (report_events["기준월"].astype(str) == str(latest_text))
+        ].copy()
+
+    def _fmt_streak_item(item: Dict[str, object]) -> str:
+        prd_se_local = "H" if str(item.get("unit", "")) == "반기" else "M"
+        s_txt = fmt_period(item.get("start"), prd_se_local)
+        e_txt = fmt_period(item.get("end"), prd_se_local)
+        return (
+            f"{item.get('dataset', '')} {item.get('label', '전체')} "
+            f"{s_txt}~{e_txt} {int(item.get('len', 0))}{item.get('unit', '')} 연속 {item.get('dir', '')}"
+        )
+
+    def _pick_top_streak_items() -> tuple[Optional[Dict[str, object]], Optional[Dict[str, object]]]:
+        source_defs = [
+            ("경제활동인구현황(취업자)", "activity", str(emp_row["indicator_name"]) if emp_row is not None else "취업자"),
+            ("산업별 취업자수", "industry", str(industry_meta.get("indicator", ""))),
+            ("직종별 취업자수", "occupation", str(occupation_meta.get("indicator", ""))),
+            ("종사상지위별 취업자", "status", ""),
+        ]
+        up_pool: List[Dict[str, object]] = []
+        down_pool: List[Dict[str, object]] = []
+        for ds_title, ds_key, ind_name in source_defs:
+            up_items, down_items, _ = _collect_dataset_streak_items(
+                source_df=report_df,
+                region=region,
+                dataset_key=ds_key,
+                asof_period=pd.Timestamp(selected_period),
+                indicator_name=ind_name,
+                min_len=3,
+            )
+            for item in up_items:
+                tagged = dict(item)
+                tagged["dataset"] = ds_title
+                up_pool.append(tagged)
+            for item in down_items:
+                tagged = dict(item)
+                tagged["dataset"] = ds_title
+                down_pool.append(tagged)
+
+        sort_key = lambda x: (
+            -int(x.get("len", 0)),
+            -abs(float(x.get("latest_yoy", 0.0))),
+            str(x.get("dataset", "")),
+            str(x.get("label", "")),
+        )
+        up_pool = sorted(up_pool, key=sort_key)
+        down_pool = sorted(down_pool, key=sort_key)
+        return (up_pool[0] if up_pool else None, down_pool[0] if down_pool else None)
+
+    def _build_new_focus_line(event_type: str, line_title: str) -> str:
+        if report_events.empty:
+            return f"{line_title}: 없음"
+        view = report_events[report_events["유형"].astype(str) == str(event_type)].copy()
+        if view.empty:
+            return f"{line_title}: 없음"
+
+        ds_order = {
+            "경제활동인구현황": 0,
+            "산업별 취업자수": 1,
+            "직종별 취업자수": 2,
+            "종사상지위별 취업자": 3,
+            "연령별 취업자": 4,
+        }
+        metric_order = {"원자료": 0, "YoY(절대)": 1, "YoY(증감률)": 2}
+        scope_order = {"전체기간": 0, "최근5년": 1}
+        view["_ds"] = view["데이터셋"].map(ds_order).fillna(99)
+        view["_metric"] = view["구분"].map(metric_order).fillna(99)
+        view["_scope"] = view["범위"].map(scope_order).fillna(99)
+        view = view.sort_values(["_ds", "_metric", "_scope", "지표", "분류"])
+
+        items: List[str] = []
+        for _, row in view.head(2).iterrows():
+            cat = str(row.get("분류", "")).strip()
+            cat_text = cat if cat else "전체"
+            items.append(
+                f"{row['데이터셋']} {row['지표']}/{cat_text} ({row['구분']} {row['범위']} {row['유형']})"
+            )
+        return f"{line_title}: " + (", ".join(items) if items else "없음")
+
     _report_heading("월간 핵심요약")
     summary_lines = [
         f"{latest_text} {region} 취업자는 {fmt_num(emp_row['latest_value'] if emp_row is not None else np.nan, str(emp_row['unit']) if emp_row is not None else '')}로, "
@@ -404,6 +501,19 @@ def render_report_template(
         summary_lines.append(
             f"전국 취업자 중 {region} 비중은 {share_text}이며, 증감 기여율은 {contrib_prev_text}에서 {contrib_now_text}로 {contrib_diff_text} 변화했습니다."
         )
+    top_up, top_down = _pick_top_streak_items()
+    if top_up and top_down:
+        summary_lines.append(
+            f"연속흐름: {_fmt_streak_item(top_up)}, {_fmt_streak_item(top_down)} ({yoy_text}대비 증감 기준)"
+        )
+    elif top_up:
+        summary_lines.append(f"연속흐름: {_fmt_streak_item(top_up)} ({yoy_text}대비 증감 기준)")
+    elif top_down:
+        summary_lines.append(f"연속흐름: {_fmt_streak_item(top_down)} ({yoy_text}대비 증감 기준)")
+
+    summary_lines.append(_build_new_focus_line("최고", "이번 달 NEW 핵심"))
+    summary_lines.append(_build_new_focus_line("최저", "이번 달 NEW 리스크"))
+
     st.markdown("\n".join([f"- {line}" for line in summary_lines]))
 
     _report_heading("경제활동인구 현황요약")
@@ -420,12 +530,6 @@ def render_report_template(
 
     _report_heading("취업자수 상세현황")
     structure_lines: List[str] = []
-    report_events = collect_new_events(report_df)
-    if not report_events.empty:
-        report_events = report_events[
-            (report_events["지역"].astype(str) == str(region))
-            & (report_events["기준월"].astype(str) == str(latest_text))
-        ].copy()
     sections = [("산업별 취업자수", "industry"), ("직종별 취업자수", "occupation"), ("종사상지위별 취업자", "status")]
     for title, ds_key in sections:
         tbl, meta = compute_contribution_table(report_df, region=region, dataset_key=ds_key, lag=lag)
