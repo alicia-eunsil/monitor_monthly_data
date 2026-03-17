@@ -264,10 +264,11 @@ def _render_dataset(
     default_region_index = region_options.index(default_region) if default_region in region_options else 0
 
     if dataset_key in {"industry", "occupation", "age", "status"}:
-        col1, col2 = st.columns([1, 2])
+        # Narrow region control and widen classification area.
+        col1, col2 = st.columns([0.6, 3.4])
         col3 = st.container()
     else:
-        col1, col2, col3 = st.columns([1, 1, 1])
+        col1, col2, col3 = st.columns([0.6, 2.2, 2.2])
     with col1:
         region = st.selectbox(
             "지역",
@@ -278,7 +279,7 @@ def _render_dataset(
 
     indicators = sorted(subset["indicator_name"].dropna().unique().tolist())
     indicator = indicators[0] if indicators else ""
-    category_container = col3
+    category_container = col2
     if dataset_key == "activity":
         indicators = _order_activity_indicators(indicators)
         with col2:
@@ -291,7 +292,7 @@ def _render_dataset(
     elif dataset_key == "industry" and indicators:
         # Industry datasets can include multiple item IDs; auto-pick the one
         # with the broadest category coverage for the selected region.
-        drop_labels = {"시도별", "산업별", "직업별", "직종별"}
+        drop_labels = {"시도별", "산업별", "산업명", "직업별", "직종별"}
         region_slice = subset[subset["region_name"] == region]
         if region_slice.empty:
             region_slice = subset
@@ -322,7 +323,7 @@ def _render_dataset(
                 c for c in subset["category_name"].dropna().unique().tolist() if str(c).strip() != ""
             )
         if dataset_key in {"industry", "occupation"}:
-            drop_labels = {"시도별", "산업별", "직업별", "직종별"}
+            drop_labels = {"시도별", "산업별", "산업명", "직업별", "직종별"}
             cleaned = [c for c in categories if str(c).strip() not in drop_labels]
             if cleaned:
                 categories = cleaned

@@ -127,7 +127,7 @@ def _industry_code_token(text: str) -> str:
         if token:
             return token
     # Fallback to leading alphabet class code: e.g. "A 농업...", "C 제조업...", "F 건설업..."
-    m = re.match(r"^\*?\s*([A-Z])\b", s)
+    m = re.match(r"^\*?\s*([A-Z])", s)
     if m:
         return m.group(1)
     return ""
@@ -264,7 +264,7 @@ def apply_industry_category_filter(df: pd.DataFrame) -> tuple[pd.DataFrame, Dict
 def order_categories_like_ui(categories: List[str], dataset_key: str, is_gyeonggi31_mode: bool) -> List[str]:
     ordered = sorted(c for c in categories if str(c).strip() != "")
     if dataset_key in {"industry", "occupation"}:
-        drop_labels = {"시도별", "산업별", "직업별", "직종별"}
+        drop_labels = {"시도별", "산업별", "산업명", "직업별", "직종별"}
         cleaned = [c for c in ordered if str(c).strip() not in drop_labels]
         if cleaned:
             ordered = cleaned
