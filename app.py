@@ -72,6 +72,13 @@ st.markdown(
 .stApp div[data-baseweb="tab"] button {
   font-size: 1.0rem;
 }
+.stApp div[data-baseweb="radio"] > div {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.stApp div[data-baseweb="radio"] label {
+  white-space: nowrap;
+}
 .metric-card {
   border: 1px solid #e5e7eb;
   border-radius: 12px;
@@ -263,7 +270,11 @@ def _render_dataset(
         region_options = sorted(subset["region_name"].dropna().unique().tolist())
     default_region_index = region_options.index(default_region) if default_region in region_options else 0
 
-    if dataset_key in {"industry", "occupation", "age", "status"}:
+    if dataset_key == "activity":
+        # Keep activity indicators on one line by giving wider horizontal space.
+        col1, col2 = st.columns([0.6, 5.4])
+        col3 = st.container()
+    elif dataset_key in {"industry", "occupation", "age", "status"}:
         # Narrow region control and widen classification area.
         col1, col2 = st.columns([0.6, 3.4])
         col3 = st.container()
