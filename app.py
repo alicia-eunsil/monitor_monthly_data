@@ -537,13 +537,20 @@ try:
         load_errors = st.session_state.get("_loaded_errors", [])
         debug_logs = st.session_state.get("_loaded_debug_logs", [])
     else:
-        scope_data, load_errors, debug_logs, industry_catalog_by_scope = load_all_data_with_progress(
+        load_result = load_all_data_with_progress(
             api_key=api_key,
             status_box=sidebar_status,
             progress_box=sidebar_progress_box,
             main_status_box=loading_notice,
             main_progress_box=loading_progress,
         )
+        if isinstance(load_result, tuple) and len(load_result) == 4:
+            scope_data, load_errors, debug_logs, industry_catalog_by_scope = load_result
+        elif isinstance(load_result, tuple) and len(load_result) == 3:
+            scope_data, load_errors, debug_logs = load_result
+            industry_catalog_by_scope = {}
+        else:
+            raise RuntimeError("Unexpected loader result shape.")
         st.session_state["_loaded_api_key"] = api_key
         st.session_state["_loaded_data_version"] = DATA_MODEL_VERSION
         st.session_state["_loaded_scope_data"] = scope_data
