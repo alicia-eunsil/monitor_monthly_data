@@ -120,7 +120,8 @@ def _industry_code_token(text: str) -> str:
         return ""
 
     raw_text = str(text or "").strip()
-    if raw_text in {"계", "합계", "전체"} or s == "TOTAL":
+    norm_text = re.sub(r"[\s\u00A0·ㆍ,./()\-]", "", raw_text)
+    if norm_text in {"\uACC4", "\uD569\uACC4", "\uC804\uCCB4"} or s == "TOTAL":
         return "TOTAL"
 
     def _normalize_token(raw: str) -> str:
@@ -153,46 +154,13 @@ def _industry_code_token(text: str) -> str:
 
 
 def order_province_industry_categories(categories: List[str]) -> List[str]:
-    # Requested fixed UI order:
-    # * 광공업(BC) -> * 도소매·숙박음식점업(GI) -> * 사업·개인·공공서비스 및 기타(EL~U)
-    # -> * 사회간접자본 및 기타서비스업(D~U) -> * 전기·운수·통신·금융(DHJK)
-    # -> A 농업... -> C 제조업... -> F 건설업... -> 계
-    def _name_rank(cat: str) -> int:
-        raw = str(cat or "").strip()
-        n = re.sub(r"\s+", "", raw)
-        if raw in {"계", "합계", "전체"}:
-            return 8
-        if "광공업" in n:
-            return 0
-        if "도소매" in n and "숙박음식" in n:
-            return 1
-        if "사업" in n and "개인" in n and "공공서비스" in n and "기타" in n:
-            return 2
-        if "사회간접자본" in n and "기타서비스" in n:
-            return 3
-        if "전기" in n and "운수" in n and "통신" in n and "금융" in n:
-            return 4
-        if raw.startswith("A ") or ("농업" in n and "어업" in n):
-            return 5
-        if raw.startswith("C ") or "제조업" in n:
-            return 6
-        if raw.startswith("F ") or "건설업" in n:
-            return 7
-        return 999
-
-    # Fallback by code token for edge variants.
-    ordered_tokens = ["BC", "GI", "EL~U", "D~U", "DHJK", "A", "C", "F", "TOTAL"]
-    token_order_map = {tok: idx for idx, tok in enumerate(ordered_tokens)}
-
-    def _resolved_rank(cat: str) -> int:
-        by_name = _name_rank(cat)
-        by_token = token_order_map.get(_industry_code_token(cat), 999)
-        return by_name if by_name < 999 else by_token
-
-    return sorted(
-        categories,
-        key=lambda x: (_resolved_rank(x), str(x)),
-    )
+    # Requested fixed UI order (province mode):
+    # ? -> A ??... -> * ???(BC) -> C ???... -> * ?????? ? ??????(D~U)
+    # -> F ???... -> * ??????????(GI) -> * ??????????? ? ??(EL~U)
+    # -> * ???????????(DHJK)
+    ordered_tokens = ["TOTAL", "A", "BC", "C", "D~U", "F", "GI", "EL~U", "DHJK"]
+    order_map = {tok: idx for idx, tok in enumerate(ordered_tokens)}
+    return sorted(categories, key=lambda x: (order_map.get(_industry_code_token(x), 999), str(x)))
 
 
 def norm_age_category(text: str) -> str:

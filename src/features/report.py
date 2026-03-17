@@ -29,7 +29,8 @@ def _industry_code_from_label(label: object) -> str:
         return ""
 
     raw_text = str(label or "").strip()
-    if raw_text in {"계", "합계", "전체"} or s == "TOTAL":
+    norm_text = re.sub(r"[\s\u00A0·ㆍ,./()\-]", "", raw_text)
+    if norm_text in {"\uACC4", "\uD569\uACC4", "\uC804\uCCB4"} or s == "TOTAL":
         return "TOTAL"
 
     def _normalize_token(raw: str) -> str:
