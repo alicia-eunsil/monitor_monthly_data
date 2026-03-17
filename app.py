@@ -57,6 +57,9 @@ st.set_page_config(
 st.markdown(
     """
 <style>
+.stApp {
+  font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+}
 .stApp p, .stApp li, .stApp label, .stApp div[data-baseweb="radio"] span {
   font-size: 1.03rem;
 }

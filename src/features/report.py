@@ -242,8 +242,19 @@ def _build_report_docx_bytes(
     _add_docx_table(doc, activity_table)
 
     doc.add_heading("##취업자수 상세현황", level=1)
+    current_title = ""
     for line in structure_lines:
-        doc.add_paragraph(_to_docx_text(line), style="List Bullet")
+        raw = _to_docx_text(line)
+        if raw.startswith("[[TITLE]]"):
+            current_title = raw.replace("[[TITLE]]", "", 1).strip()
+            p = doc.add_paragraph(style="List Bullet")
+            p.add_run(current_title).bold = True
+            continue
+        style_name = "List Bullet 2" if current_title else "List Bullet"
+        try:
+            doc.add_paragraph(raw, style=style_name)
+        except Exception:  # noqa: BLE001
+            doc.add_paragraph(raw, style="List Bullet")
 
     doc.add_heading(_to_docx_text(reference_title), level=1)
     for line in reference_lines:
@@ -274,6 +285,40 @@ def _lines_to_html(lines: List[str]) -> str:
         return "<p>??? ??</p>"
     items = "".join(f"<li>{html.escape(_clean_html_report_text(line))}</li>" for line in lines)
     return f"<ul>{items}</ul>"
+
+
+def _structure_lines_to_html(lines: List[str]) -> str:
+    if not lines:
+        return "<p>데이터 없음</p>"
+    blocks: List[Dict[str, Any]] = []
+    current: Optional[Dict[str, Any]] = None
+    for line in lines:
+        raw = _clean_html_report_text(line)
+        if raw.startswith("[[TITLE]]"):
+            if current is not None:
+                blocks.append(current)
+            current = {"title": raw.replace("[[TITLE]]", "", 1).strip(), "items": []}
+            continue
+        if current is None:
+            current = {"title": "", "items": []}
+        current["items"].append(raw)
+    if current is not None:
+        blocks.append(current)
+
+    html_blocks: List[str] = []
+    for blk in blocks:
+        title = html.escape(str(blk.get("title", "")).strip())
+        items = blk.get("items", [])
+        if items:
+            sub = "".join(f"<li>{html.escape(str(x))}</li>" for x in items)
+            if title:
+                html_blocks.append(f"<li><strong>{title}</strong><ul>{sub}</ul></li>")
+            else:
+                html_blocks.append(sub)
+        else:
+            if title:
+                html_blocks.append(f"<li><strong>{title}</strong></li>")
+    return f"<ul>{''.join(html_blocks)}</ul>"
 
 
 def _table_to_html(df: pd.DataFrame) -> str:
@@ -361,6 +406,7 @@ def _build_printable_report_html(
     h1 {{
       margin: 0;
       font-size: 33px;
+      font-weight: 800;
       color: var(--navy-900);
       text-decoration: underline;
       text-decoration-thickness: 2px;
@@ -370,12 +416,14 @@ def _build_printable_report_html(
       margin: 18px 0 10px 0;
       color: var(--navy-700);
       font-size: 27px;
+      font-weight: 800;
       border-left: 6px solid var(--navy-700);
       padding-left: 10px;
     }}
     h3 {{
       margin: 0 0 8px 0;
       font-size: 19px;
+      font-weight: 800;
       color: var(--navy-900);
     }}
     ul {{
@@ -434,6 +482,13 @@ def _build_printable_report_html(
     .page-break {{
       page-break-before: always;
     }}
+    .footer-note {{
+      margin-top: 16px;
+      text-align: right;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }}
     @media print {{
       .toolbar {{ display: none; }}
       body {{
@@ -466,12 +521,13 @@ def _build_printable_report_html(
     <h2>##경제활동인구 현황요약</h2>
     <section class="section-block">{_table_to_html(activity_table)}</section>
     <h2>##취업자수 상세현황</h2>
-    <section class="section-block">{_lines_to_html(structure_lines)}</section>
+    <section class="section-block">{_structure_lines_to_html(structure_lines)}</section>
     <h2>{html.escape(_clean_html_report_text(reference_title))}</h2>
     <section class="section-block">{_lines_to_html(reference_lines)}</section>
     <div class="page-break"></div>
     <h2>[참고] 취업자수 상세내용</h2>
     {detail_joined}
+    <div class="footer-note">경기도일자리재단 데이터팀</div>
   </article>
 </body>
 </html>
@@ -589,13 +645,13 @@ def render_report_template(
 
     emp_delta = float(emp_row["delta_value"]) if emp_row is not None and pd.notna(emp_row.get("delta_value")) else np.nan
     if pd.isna(emp_delta):
-        emp_direction = "방향을 확인할 수 없습니다."
+        emp_direction = "방향 확인 불가"
     elif emp_delta > 0:
-        emp_direction = "증가했습니다."
+        emp_direction = "증가"
     elif emp_delta < 0:
-        emp_direction = "감소했습니다."
+        emp_direction = "감소"
     else:
-        emp_direction = "보합입니다."
+        emp_direction = "보합"
 
     compare_base = province_report_df if not province_report_df.empty else report_df
     gy_meta_summary: Dict[str, Any] = {}
@@ -706,11 +762,11 @@ def render_report_template(
         f"고용률은 {fmt_num(emp_rate_row['latest_value'] if emp_rate_row is not None else np.nan, str(emp_rate_row['unit']) if emp_rate_row is not None else '%')}"
         f"({yoy_text} 대비 {fmt_num(emp_rate_row['delta_value'] if emp_rate_row is not None else np.nan, str(emp_rate_row['unit']) if emp_rate_row is not None else '%')}), "
         f"실업률은 {fmt_num(unemp_rate_row['latest_value'] if unemp_rate_row is not None else np.nan, str(unemp_rate_row['unit']) if unemp_rate_row is not None else '%')}"
-        f"({yoy_text} 대비 {fmt_num(unemp_rate_row['delta_value'] if unemp_rate_row is not None else np.nan, str(unemp_rate_row['unit']) if unemp_rate_row is not None else '%')})입니다.",
-        f"(산업) 증가요인 1위는 {_top_factor_text(industry_factor_df, str(industry_meta.get('unit', '')), True)}, "
-        f"감소요인 1위는 {_top_factor_text(industry_factor_df, str(industry_meta.get('unit', '')), False)}입니다.",
-        f"(직종) 증가요인 1위는 {_top_factor_text(occupation_df, str(industry_meta.get('unit', '')), True)}, "
-        f"감소요인 1위는 {_top_factor_text(occupation_df, str(industry_meta.get('unit', '')), False)}입니다.",
+        f"({yoy_text} 대비 {fmt_num(unemp_rate_row['delta_value'] if unemp_rate_row is not None else np.nan, str(unemp_rate_row['unit']) if unemp_rate_row is not None else '%')})",
+        f"(산업) 증가요인 1위 {_top_factor_text(industry_factor_df, str(industry_meta.get('unit', '')), True)}, "
+        f"감소요인 1위 {_top_factor_text(industry_factor_df, str(industry_meta.get('unit', '')), False)}",
+        f"(직종) 증가요인 1위 {_top_factor_text(occupation_df, str(industry_meta.get('unit', '')), True)}, "
+        f"감소요인 1위 {_top_factor_text(occupation_df, str(industry_meta.get('unit', '')), False)}",
     ]
     if gy_meta_summary.get("ok"):
         share_now = gy_meta_summary.get("latest_share_pct")
@@ -722,7 +778,7 @@ def render_report_template(
         contrib_prev_text = "-" if pd.isna(contrib_prev) else f"{float(contrib_prev):,.1f}%"
         contrib_diff_text = "-" if pd.isna(contrib_diff) else f"{float(contrib_diff):+,.1f}%p"
         summary_lines.append(
-            f"전국 취업자 중 {region} 비중은 {share_text}이며, 증감 기여율은 {contrib_prev_text}에서 {contrib_now_text}로 {contrib_diff_text} 변화했습니다."
+            f"전국 취업자 중 {region} 비중 {share_text}, 증감 기여율 {contrib_prev_text} → {contrib_now_text} ({contrib_diff_text})"
         )
     top_up, top_down = _pick_top_streak_items()
     if top_up and top_down:
@@ -774,7 +830,8 @@ def render_report_template(
             min_len=3,
             yoy_label=yoy_text,
         )
-        structure_lines.extend([title, line_pos, line_neg])
+        structure_lines.append(f"[[TITLE]]{title}")
+        structure_lines.extend([line_pos, line_neg])
         if streak_line:
             structure_lines.append(streak_line)
         st.markdown(f"- **{title}**")
@@ -860,32 +917,32 @@ def render_report_template(
             gg_yoy = gy_meta.get("latest_gg_yoy_abs")
             nat_flow = "증가분" if pd.notna(nat_yoy) and float(nat_yoy) > 0 else ("감소분" if pd.notna(nat_yoy) and float(nat_yoy) < 0 else "변동분")
 
-            reference_lines.append(f"기준시점은 {ref_latest}, 비교시점은 {ref_prev}입니다.")
+            reference_lines.append(f"기준시점 {ref_latest}, 비교시점 {ref_prev}")
             reference_lines.append(
                 f"{ref_latest} 기준 전국 취업자는 {fmt_num(gy_meta.get('latest_nat_value'), ref_unit)}, "
-                f"{region} 취업자는 {fmt_num(gy_meta.get('latest_gg_value'), ref_unit)}입니다."
+                f"{region} 취업자 {fmt_num(gy_meta.get('latest_gg_value'), ref_unit)}"
             )
             reference_lines.append(
                 f"전국 대비 {region} 비중은 {ref_prev} {share_prev_text}에서 "
-                f"{ref_latest} {share_now_text}로 {share_change_text} 변화했습니다."
+                f"{ref_latest} {share_now_text} ({share_change_text})"
             )
             reference_lines.append(
                 f"전국 취업자 {nat_flow} 대비 {region} 기여율은 {ref_prev} {contrib_prev_text}에서 "
-                f"{ref_latest} {contrib_now_text}로 {contrib_change_text} 변화했습니다."
+                f"{ref_latest} {contrib_now_text} ({contrib_change_text})"
             )
             reference_lines.append(
                 f"같은 시점 전년비 증감은 전국 {fmt_num(nat_yoy, ref_unit)}, "
-                f"{region} {fmt_num(gg_yoy, ref_unit)}입니다."
+                f"{region} {fmt_num(gg_yoy, ref_unit)}"
             )
             for line in reference_lines:
                 st.markdown(f"- {line}")
-            st.caption("참고: 전국 증감이 작을수록 기여율(%)은 크게 흔들릴 수 있습니다.")
+            st.caption("참고: 전국 증감이 작을수록 기여율(%) 변동폭 확대 가능")
         else:
-            reference_lines.append("전국 대비 참고 지표를 계산할 수 없습니다.")
-            st.markdown("- 전국 대비 참고 지표를 계산할 수 없습니다.")
+            reference_lines.append("전국 대비 참고 지표 계산 불가")
+            st.markdown("- 전국 대비 참고 지표 계산 불가")
     else:
-        reference_lines.append("전국 선택 시에는 전국대비 지표를 표시하지 않습니다.")
-        st.markdown("- 전국 선택 시에는 전국대비 지표를 표시하지 않습니다.")
+        reference_lines.append("전국 선택: 전국대비 지표 미표시")
+        st.markdown("- 전국 선택: 전국대비 지표 미표시")
 
     st.markdown("---")
     _report_heading("[참고] 취업자수 상세내용")
