@@ -1,4 +1,5 @@
 import html
+import html
 import re
 from io import BytesIO
 from typing import Any, Dict, List, Optional
@@ -6,14 +7,8 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from docx import Document
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from src.core.category_rules import norm_indicator_name, order_categories_like_ui
 from src.core.formatters import escape_markdown_text, fmt_num, fmt_period, fmt_triangle_delta
@@ -267,53 +262,22 @@ def _build_report_docx_bytes(
     return buf.getvalue()
 
 
-def _to_pdf_text(text: object) -> str:
-    return str(text).replace("\\", "")
+def _lines_to_html(lines: List[str]) -> str:
+    if not lines:
+        return "<p>데이터 없음</p>"
+    items = "".join(f"<li>{html.escape(str(line))}</li>" for line in lines)
+    return f"<ul>{items}</ul>"
 
 
-def _pick_pdf_font_name() -> str:
-    # Prefer built-in Korean CID font; fallback to Helvetica if unavailable.
-    try:
-        pdfmetrics.registerFont(UnicodeCIDFont("HYSMyeongJo-Medium"))
-        return "HYSMyeongJo-Medium"
-    except Exception:  # noqa: BLE001
-        return "Helvetica"
-
-
-def _add_pdf_table_story(story: List[Any], df: pd.DataFrame, font_name: str) -> None:
+def _table_to_html(df: pd.DataFrame) -> str:
     if df is None or df.empty:
-        story.append(Paragraph(_to_pdf_text("데이터 없음"), ParagraphStyle("pdf_body_fallback", fontName=font_name, fontSize=9)))
-        story.append(Spacer(1, 4 * mm))
-        return
-
-    view = df.copy()
-    view = view.fillna("-")
-    headers = [_to_pdf_text(c) for c in view.columns.tolist()]
-    rows = [[_to_pdf_text(v) for v in row] for row in view.astype(str).values.tolist()]
-    data = [headers] + rows
-
-    available_width = A4[0] - (18 * mm * 2)
-    n_cols = max(1, len(headers))
-    col_width = available_width / n_cols
-    table = Table(data, colWidths=[col_width] * n_cols, repeatRows=1)
-    table.setStyle(
-        TableStyle(
-            [
-                ("FONTNAME", (0, 0), (-1, -1), font_name),
-                ("FONTSIZE", (0, 0), (-1, -1), 8),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
-            ]
-        )
-    )
-    story.append(table)
-    story.append(Spacer(1, 5 * mm))
+        return "<p>데이터 없음</p>"
+    view = df.copy().fillna("-")
+    view.columns = [str(c) for c in view.columns]
+    return view.to_html(index=False, escape=True, classes="brief-table")
 
 
-def _build_report_pdf_bytes(
+def _build_printable_report_html(
     title: str,
     summary_lines: List[str],
     activity_table: pd.DataFrame,
@@ -321,76 +285,188 @@ def _build_report_pdf_bytes(
     reference_title: str,
     reference_lines: List[str],
     detail_sections: List[Dict[str, Any]],
-) -> bytes:
-    font_name = _pick_pdf_font_name()
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "pdf_title",
-        parent=styles["Heading1"],
-        fontName=font_name,
-        fontSize=16,
-        leading=20,
-        spaceAfter=6 * mm,
-    )
-    heading_style = ParagraphStyle(
-        "pdf_heading",
-        parent=styles["Heading2"],
-        fontName=font_name,
-        fontSize=12,
-        leading=15,
-        spaceBefore=3 * mm,
-        spaceAfter=2 * mm,
-    )
-    body_style = ParagraphStyle(
-        "pdf_body",
-        parent=styles["Normal"],
-        fontName=font_name,
-        fontSize=9,
-        leading=13,
-    )
-
-    buf = BytesIO()
-    doc = SimpleDocTemplate(
-        buf,
-        pagesize=A4,
-        leftMargin=18 * mm,
-        rightMargin=18 * mm,
-        topMargin=14 * mm,
-        bottomMargin=14 * mm,
-    )
-    story: List[Any] = []
-
-    story.append(Paragraph(html.escape(_to_pdf_text(title)), title_style))
-    story.append(Paragraph(html.escape(_to_pdf_text("(출처: 경제활동인구조사, 통계청)")), body_style))
-    story.append(Spacer(1, 3 * mm))
-
-    story.append(Paragraph(html.escape("##월간 핵심요약"), heading_style))
-    for line in summary_lines:
-        story.append(Paragraph(html.escape(f"- {_to_pdf_text(line)}"), body_style))
-    story.append(Spacer(1, 2 * mm))
-
-    story.append(Paragraph(html.escape("##경제활동인구 현황요약"), heading_style))
-    _add_pdf_table_story(story, activity_table, font_name)
-
-    story.append(Paragraph(html.escape("##취업자수 상세현황"), heading_style))
-    for line in structure_lines:
-        story.append(Paragraph(html.escape(f"- {_to_pdf_text(line)}"), body_style))
-    story.append(Spacer(1, 2 * mm))
-
-    story.append(Paragraph(html.escape(_to_pdf_text(reference_title)), heading_style))
-    for line in reference_lines:
-        story.append(Paragraph(html.escape(f"- {_to_pdf_text(line)}"), body_style))
-
-    story.append(PageBreak())
-    story.append(Paragraph(html.escape("[참고] 취업자수 상세내용"), heading_style))
+) -> str:
+    detail_html = []
     for section in detail_sections:
-        story.append(Paragraph(html.escape(_to_pdf_text(section.get("title", ""))), heading_style))
-        for line in section.get("lines", []):
-            story.append(Paragraph(html.escape(f"- {_to_pdf_text(line)}"), body_style))
-        _add_pdf_table_story(story, section.get("table", pd.DataFrame()), font_name)
+        sec_title = html.escape(str(section.get("title", "")))
+        sec_lines = _lines_to_html([str(x) for x in section.get("lines", [])])
+        sec_table = _table_to_html(section.get("table", pd.DataFrame()))
+        detail_html.append(
+            f"<section class='section-block detail-block'><h3>{sec_title}</h3>{sec_lines}{sec_table}</section>"
+        )
+    detail_joined = "".join(detail_html)
 
-    doc.build(story)
-    return buf.getvalue()
+    return f"""
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    :root {{
+      --navy-900: #0f2742;
+      --navy-700: #1e3a5f;
+      --navy-500: #2f567f;
+      --line: #d6dde8;
+      --text: #111827;
+      --muted: #5f6f86;
+      --paper: #ffffff;
+      --soft: #f4f7fb;
+    }}
+    body {{
+      font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+      color: var(--text);
+      margin: 0;
+      padding: 20px;
+      line-height: 1.6;
+      background: var(--soft);
+    }}
+    .sheet {{
+      max-width: 980px;
+      margin: 0 auto;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 22px 24px;
+      box-shadow: 0 12px 30px rgba(15, 39, 66, 0.08);
+    }}
+    .toolbar {{
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 14px;
+    }}
+    .print-btn {{
+      border: 1px solid var(--navy-700);
+      color: #fff;
+      background: linear-gradient(180deg, var(--navy-500), var(--navy-700));
+      padding: 7px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+    }}
+    .hint {{
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    h1 {{
+      margin: 0;
+      font-size: 33px;
+      color: var(--navy-900);
+      text-decoration: underline;
+      text-decoration-thickness: 2px;
+      text-underline-offset: 3px;
+    }}
+    h2 {{
+      margin: 18px 0 10px 0;
+      color: var(--navy-700);
+      font-size: 27px;
+      border-left: 6px solid var(--navy-700);
+      padding-left: 10px;
+    }}
+    h3 {{
+      margin: 0 0 8px 0;
+      font-size: 19px;
+      color: var(--navy-900);
+    }}
+    ul {{
+      margin: 4px 0 4px 18px;
+      padding: 0;
+    }}
+    li {{
+      margin: 4px 0;
+    }}
+    li::marker {{
+      color: var(--navy-700);
+      font-weight: 700;
+    }}
+    .section-block {{
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin: 10px 0 14px 0;
+      background: #fff;
+    }}
+    .detail-block {{
+      margin-top: 12px;
+    }}
+    table.brief-table {{
+      border-collapse: collapse;
+      width: 100%;
+      margin: 8px 0 14px 0;
+      table-layout: fixed;
+      font-size: 13px;
+    }}
+    table.brief-table th, table.brief-table td {{
+      border: 1px solid var(--line);
+      padding: 7px 8px;
+      text-align: center;
+      word-break: break-word;
+    }}
+    table.brief-table th {{
+      background: var(--navy-700);
+      color: #fff;
+      font-weight: 700;
+    }}
+    table.brief-table tr:nth-child(even) td {{
+      background: #f8fbff;
+    }}
+    hr {{
+      border: none;
+      border-top: 1px solid var(--line);
+      margin: 10px 0 16px 0;
+    }}
+    .source {{
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 4px;
+      margin-bottom: 8px;
+    }}
+    .page-break {{
+      page-break-before: always;
+    }}
+    @media print {{
+      .toolbar {{ display: none; }}
+      body {{
+        padding: 0;
+        background: #fff;
+      }}
+      .sheet {{
+        max-width: none;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        padding: 0;
+      }}
+      table.brief-table {{ font-size: 11px; }}
+      @page {{ size: A4; margin: 12mm; }}
+    }}
+  </style>
+</head>
+<body>
+  <article class="sheet">
+    <div class="toolbar">
+      <button class="print-btn" onclick="window.print()">인쇄 / PDF 저장</button>
+      <span class="hint">브라우저 인쇄(Ctrl+P)에서 PDF 저장을 선택하세요.</span>
+    </div>
+    <h1>{html.escape(title)}</h1>
+    <div class="source">(출처: 경제활동인구조사, 통계청)</div>
+    <hr />
+    <h2>##월간 핵심요약</h2>
+    <section class="section-block">{_lines_to_html(summary_lines)}</section>
+    <h2>##경제활동인구 현황요약</h2>
+    <section class="section-block">{_table_to_html(activity_table)}</section>
+    <h2>##취업자수 상세현황</h2>
+    <section class="section-block">{_lines_to_html(structure_lines)}</section>
+    <h2>{html.escape(reference_title)}</h2>
+    <section class="section-block">{_lines_to_html(reference_lines)}</section>
+    <div class="page-break"></div>
+    <h2>[참고] 취업자수 상세내용</h2>
+    {detail_joined}
+  </article>
+</body>
+</html>
+"""
 
 
 def render_report_template(
@@ -862,6 +938,21 @@ def render_report_template(
 
     doc_file_safe_region = re.sub(r"[^0-9A-Za-z가-힣_\\-]", "_", str(region))
     doc_file_safe_period = re.sub(r"[^0-9A-Za-z가-힣_\\-]", "_", str(latest_text))
+
+    printable_html = _build_printable_report_html(
+        title=report_title,
+        summary_lines=summary_lines,
+        activity_table=activity_view,
+        structure_lines=structure_lines,
+        reference_title=f"[참고] 전국대비 {region} 현황",
+        reference_lines=reference_lines,
+        detail_sections=detail_sections,
+    )
+    st.markdown("---")
+    st.markdown("#### 인쇄용 HTML 리포트")
+    st.caption("아래 영역에서 인쇄 버튼 또는 Ctrl+P로 PDF 저장이 가능합니다.")
+    components.html(printable_html, height=1200, scrolling=True)
+
     doc_bytes = _build_report_docx_bytes(
         title=report_title,
         summary_lines=summary_lines,
@@ -871,30 +962,10 @@ def render_report_template(
         reference_lines=reference_lines,
         detail_sections=detail_sections,
     )
-    pdf_bytes = _build_report_pdf_bytes(
-        title=report_title,
-        summary_lines=summary_lines,
-        activity_table=activity_view,
-        structure_lines=structure_lines,
-        reference_title=f"[참고] 전국대비 {region} 현황",
-        reference_lines=reference_lines,
-        detail_sections=detail_sections,
+    st.download_button(
+        "DOCX 다운로드",
+        data=doc_bytes,
+        file_name=f"{doc_file_safe_period}_{doc_file_safe_region}_경제활동인구_브리프.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        key="download_report_docx",
     )
-
-    dl_col1, dl_col2 = st.columns(2)
-    with dl_col1:
-        st.download_button(
-            "DOCX 다운로드",
-            data=doc_bytes,
-            file_name=f"{doc_file_safe_period}_{doc_file_safe_region}_경제활동인구_브리프.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            key="download_report_docx",
-        )
-    with dl_col2:
-        st.download_button(
-            "PDF 다운로드",
-            data=pdf_bytes,
-            file_name=f"{doc_file_safe_period}_{doc_file_safe_region}_경제활동인구_브리프.pdf",
-            mime="application/pdf",
-            key="download_report_pdf",
-        )
