@@ -34,6 +34,7 @@ from src.features.new_history import (
     render_new_history_tab as _render_new_history_tab,
     render_new_monthly_report as _render_new_monthly_report,
 )
+from src.features.auto_discovery import render_auto_discovery_tab as _render_auto_discovery_tab
 from src.features.report import render_report_template as _render_report_template
 from src.services.loader import load_all_data_with_progress
 from src.transform import build_stats, series_filter
@@ -586,8 +587,9 @@ if region_scope == "gyeonggi31":
 else:
     event_source = visible_data
 events = _collect_new_events(event_source)
+labels = _time_labels(active_datasets)
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(
     [
         "① 경제활동인구현황",
         "② 연령별 취업자",
@@ -597,6 +599,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
         "⑥ NEW HISTORY",
         "⑦ 요약",
         "⑧ 리포트",
+        "⑨ 자동 질문 발견",
     ]
 )
 with tab1:
@@ -628,7 +631,7 @@ with tab7:
     )
     if region_scope == "province":
         st.markdown("---")
-        _render_ai_insights(visible_data, region_pool, _time_labels(active_datasets), card_fn=_card)
+        _render_ai_insights(visible_data, region_pool, labels, card_fn=_card)
 with tab8:
     st.subheader("리포트")
     _render_report_template(
@@ -637,8 +640,10 @@ with tab8:
         region_pool=region_pool,
         datasets=active_datasets,
         is_gyeonggi31_mode=is_gyeonggi31_mode,
-        labels=_time_labels(active_datasets),
+        labels=labels,
     )
+with tab9:
+    _render_auto_discovery_tab(visible_data, labels=labels)
 
 st.markdown(
     "<hr style='margin-top:2rem; margin-bottom:0.5rem;'>"
