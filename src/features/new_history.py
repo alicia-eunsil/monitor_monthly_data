@@ -5,7 +5,7 @@ import streamlit as st
 
 import src.config as app_config
 from src.core.category_rules import ACTIVITY_INDICATOR_ORDER, norm_indicator_name
-from src.core.formatters import fmt_num, fmt_period, time_labels
+from src.core.formatters import escape_markdown_text, fmt_num, fmt_period, time_labels
 
 GYEONGGI_SIGUNGU = getattr(app_config, "GYEONGGI_SIGUNGU", [])
 
@@ -55,9 +55,12 @@ def _build_consecutive_change_lines(
         unit_text = _duration_unit(str(cand.get("prd_se", "M")))
         start_txt = fmt_period(cand["start"], str(cand.get("prd_se", "M")))
         end_txt = fmt_period(cand["end"], str(cand.get("prd_se", "M")))
+        # Escape markdown-sensitive characters (notably "~") to avoid strikethrough rendering.
+        range_txt = f"{escape_markdown_text(start_txt)}\\~{escape_markdown_text(end_txt)}"
+        label_txt = escape_markdown_text(cand["label"])
         if include_label:
-            return f"{cand['label']} {start_txt}~{end_txt} {cand['len']}{unit_text} 연속 {direction}"
-        return f"{start_txt}~{end_txt}, {cand['len']}{unit_text} 연속 {direction}"
+            return f"{label_txt} {range_txt} {cand['len']}{unit_text} 연속 {direction}"
+        return f"{range_txt}, {cand['len']}{unit_text} 연속 {direction}"
 
     lines: List[str] = []
     min_show_all_len = 3
