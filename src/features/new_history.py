@@ -10,6 +10,141 @@ from src.core.formatters import fmt_num, fmt_period, time_labels
 GYEONGGI_SIGUNGU = getattr(app_config, "GYEONGGI_SIGUNGU", [])
 
 
+def _current_streak_length(values: pd.Series, positive: bool) -> int:
+    if values.empty:
+        return 0
+    count = 0
+    for v in reversed(values.tolist()):
+        if pd.isna(v):
+            break
+        vv = float(v)
+        if positive and vv > 0:
+            count += 1
+            continue
+        if (not positive) and vv < 0:
+            count += 1
+            continue
+        break
+    return count
+
+
+def _build_consecutive_change_lines(
+    source_df: pd.DataFrame,
+    region: str,
+    asof_period: pd.Timestamp,
+    labels: Dict[str, str],
+) -> List[str]:
+    if not region or source_df.empty or pd.isna(asof_period):
+        return []
+
+    point_label = labels.get("point", "월")
+    yoy_label = labels.get("yoy", "전년동월")
+    dataset_defs = [
+        ("activity", "경제활동인구현황(취업자)"),
+        ("industry", "산업별 취업자수"),
+        ("occupation", "직종별 취업자수"),
+        ("status", "종사상지위별 취업자"),
+        ("age", "연령별 취업자"),
+    ]
+
+    lines: List[str] = []
+    for ds_key, ds_title in dataset_defs:
+        ds = source_df[
+            (source_df["dataset_key"].astype(str) == ds_key)
+            & (source_df["region_name"].astype(str) == str(region))
+            & (pd.to_datetime(source_df["period"], errors="coerce") <= pd.Timestamp(asof_period))
+        ].copy()
+        if ds.empty or "yoy_abs" not in ds.columns:
+            continue
+        ds["period"] = pd.to_datetime(ds["period"], errors="coerce")
+        ds = ds.dropna(subset=["period"])
+        if ds.empty:
+            continue
+
+        if ds_key == "activity":
+            target_norm = norm_indicator_name("취업자")
+            ds["norm_indicator"] = ds["indicator_name"].apply(norm_indicator_name)
+            ds = ds[ds["norm_indicator"] == target_norm].copy()
+            if ds.empty:
+                continue
+
+        best_up: Optional[Dict[str, object]] = None
+        best_down: Optional[Dict[str, object]] = None
+        group_cols = ["indicator_name", "category_name"]
+        for _, g in ds.groupby(group_cols, dropna=False):
+            g = g.sort_values("period")
+            if g.empty:
+                continue
+            latest_period = pd.Timestamp(g["period"].iloc[-1])
+            if latest_period != pd.Timestamp(asof_period):
+                continue
+            yoy_values = pd.to_numeric(g["yoy_abs"], errors="coerce")
+            if yoy_values.empty or pd.isna(yoy_values.iloc[-1]):
+                continue
+            latest_yoy = float(yoy_values.iloc[-1])
+            cat = str(g["category_name"].iloc[0]).strip()
+            ind = str(g["indicator_name"].iloc[0]).strip()
+            label = cat if cat else (ind if ind else "전체")
+            prd_se = str(g["prd_se"].dropna().iloc[0]).upper() if "prd_se" in g.columns and not g["prd_se"].dropna().empty else "M"
+
+            up_len = _current_streak_length(yoy_values, positive=True)
+            if up_len > 0:
+                start_p = pd.Timestamp(g["period"].iloc[len(g) - up_len])
+                cand = {
+                    "label": label,
+                    "len": int(up_len),
+                    "start": start_p,
+                    "end": latest_period,
+                    "latest_yoy": latest_yoy,
+                    "prd_se": prd_se,
+                }
+                if (best_up is None) or (cand["len"] > best_up["len"]) or (
+                    cand["len"] == best_up["len"] and abs(float(cand["latest_yoy"])) > abs(float(best_up["latest_yoy"]))
+                ):
+                    best_up = cand
+
+            down_len = _current_streak_length(yoy_values, positive=False)
+            if down_len > 0:
+                start_p = pd.Timestamp(g["period"].iloc[len(g) - down_len])
+                cand = {
+                    "label": label,
+                    "len": int(down_len),
+                    "start": start_p,
+                    "end": latest_period,
+                    "latest_yoy": latest_yoy,
+                    "prd_se": prd_se,
+                }
+                if (best_down is None) or (cand["len"] > best_down["len"]) or (
+                    cand["len"] == best_down["len"] and abs(float(cand["latest_yoy"])) > abs(float(best_down["latest_yoy"]))
+                ):
+                    best_down = cand
+
+        if best_up is None and best_down is None:
+            continue
+
+        if best_up is None:
+            up_text = "없음"
+        else:
+            up_text = (
+                f"{best_up['label']} {best_up['len']}{point_label}"
+                f" ({fmt_period(best_up['start'], str(best_up['prd_se']))}~{fmt_period(best_up['end'], str(best_up['prd_se']))})"
+            )
+        if best_down is None:
+            down_text = "없음"
+        else:
+            down_text = (
+                f"{best_down['label']} {best_down['len']}{point_label}"
+                f" ({fmt_period(best_down['start'], str(best_down['prd_se']))}~{fmt_period(best_down['end'], str(best_down['prd_se']))})"
+            )
+
+        lines.append(
+            f"- {ds_title}: 증가 연속 최장 **{up_text}**, 감소 연속 최장 **{down_text}** "
+            f"({yoy_label}대비 증감 기준)"
+        )
+
+    return lines
+
+
 def collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
     rows: List[Dict[str, str]] = []
     key_cols = ["dataset_key", "dataset_title", "region_name", "indicator_name", "category_name", "prd_se"]
@@ -226,6 +361,26 @@ def render_new_monthly_report(
 
     if activity_lines:
         st.markdown("\n".join(activity_lines))
+
+    selected_rows = month_table[month_table.iloc[:, 0].astype(str) == str(selected_month)]
+    selected_month_dt = (
+        pd.to_datetime(selected_rows.iloc[:, 1], errors="coerce").dropna().max() if not selected_rows.empty else pd.NaT
+    )
+    region_candidates = source_df["region_name"].dropna().astype(str).str.strip().unique().tolist()
+    if "31" in str(report_scope):
+        sigungu_candidates = sorted([r for r in GYEONGGI_SIGUNGU if r in region_candidates])
+        streak_region = sigungu_candidates[0] if sigungu_candidates else ""
+    else:
+        streak_region = "경기도" if "경기도" in region_candidates else (region_candidates[0] if region_candidates else "")
+    streak_lines = _build_consecutive_change_lines(
+        source_df=source_df,
+        region=streak_region,
+        asof_period=selected_month_dt,
+        labels=labels,
+    )
+    if streak_lines:
+        st.markdown("##### 연속 증가/감소 요약")
+        st.markdown("\n".join(streak_lines))
 
     total_count = len(month_df)
     max_count = int((month_df["유형"] == "최고").sum())
