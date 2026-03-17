@@ -32,7 +32,7 @@ def _industry_code_from_label(label: object) -> str:
         token = re.sub(r"[^A-Z~]", "", m.group(1).upper())
         if token:
             return token
-    m = re.match(r"^\*?\s*([A-Z])\b", s)
+    m = re.match(r"^\*?\s*([A-Z])", s)
     if m:
         return m.group(1)
     return ""

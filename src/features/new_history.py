@@ -47,7 +47,20 @@ def _build_consecutive_change_lines(
         ("age", "연령별 취업자"),
     ]
 
+    def _duration_unit(prd_se: str) -> str:
+        return "반기" if str(prd_se).upper() == "H" else "개월"
+
+    def _format_item(cand: Dict[str, object], increase: bool, include_label: bool) -> str:
+        direction = "증가" if increase else "감소"
+        unit_text = _duration_unit(str(cand.get("prd_se", "M")))
+        start_txt = fmt_period(cand["start"], str(cand.get("prd_se", "M")))
+        end_txt = fmt_period(cand["end"], str(cand.get("prd_se", "M")))
+        if include_label:
+            return f"{cand['label']} {start_txt}~{end_txt} {cand['len']}{unit_text} 연속 {direction}"
+        return f"{start_txt}~{end_txt}, {cand['len']}{unit_text} 연속 {direction}"
+
     lines: List[str] = []
+    min_show_all_len = 3
     for ds_key, ds_title in dataset_defs:
         ds = source_df[
             (source_df["dataset_key"].astype(str) == ds_key)
@@ -68,8 +81,8 @@ def _build_consecutive_change_lines(
             if ds.empty:
                 continue
 
-        best_up: Optional[Dict[str, object]] = None
-        best_down: Optional[Dict[str, object]] = None
+        up_items: List[Dict[str, object]] = []
+        down_items: List[Dict[str, object]] = []
         group_cols = ["indicator_name", "category_name"]
         for _, g in ds.groupby(group_cols, dropna=False):
             g = g.sort_values("period")
@@ -90,57 +103,52 @@ def _build_consecutive_change_lines(
             up_len = _current_streak_length(yoy_values, positive=True)
             if up_len > 0:
                 start_p = pd.Timestamp(g["period"].iloc[len(g) - up_len])
-                cand = {
+                up_items.append(
+                    {
                     "label": label,
                     "len": int(up_len),
                     "start": start_p,
                     "end": latest_period,
                     "latest_yoy": latest_yoy,
                     "prd_se": prd_se,
-                }
-                if (best_up is None) or (cand["len"] > best_up["len"]) or (
-                    cand["len"] == best_up["len"] and abs(float(cand["latest_yoy"])) > abs(float(best_up["latest_yoy"]))
-                ):
-                    best_up = cand
+                    }
+                )
 
             down_len = _current_streak_length(yoy_values, positive=False)
             if down_len > 0:
                 start_p = pd.Timestamp(g["period"].iloc[len(g) - down_len])
-                cand = {
+                down_items.append(
+                    {
                     "label": label,
                     "len": int(down_len),
                     "start": start_p,
                     "end": latest_period,
                     "latest_yoy": latest_yoy,
                     "prd_se": prd_se,
-                }
-                if (best_down is None) or (cand["len"] > best_down["len"]) or (
-                    cand["len"] == best_down["len"] and abs(float(cand["latest_yoy"])) > abs(float(best_down["latest_yoy"]))
-                ):
-                    best_down = cand
+                    }
+                )
 
-        if best_up is None and best_down is None:
+        if not up_items and not down_items:
             continue
 
-        if best_up is None:
-            up_text = "없음"
-        else:
-            up_text = (
-                f"{best_up['label']} {best_up['len']}{point_label}"
-                f" ({fmt_period(best_up['start'], str(best_up['prd_se']))}~{fmt_period(best_up['end'], str(best_up['prd_se']))})"
-            )
-        if best_down is None:
-            down_text = "없음"
-        else:
-            down_text = (
-                f"{best_down['label']} {best_down['len']}{point_label}"
-                f" ({fmt_period(best_down['start'], str(best_down['prd_se']))}~{fmt_period(best_down['end'], str(best_down['prd_se']))})"
-            )
+        up_items = sorted(up_items, key=lambda x: (-int(x["len"]), -abs(float(x["latest_yoy"])), str(x["label"])))
+        down_items = sorted(down_items, key=lambda x: (-int(x["len"]), -abs(float(x["latest_yoy"])), str(x["label"])))
 
-        lines.append(
-            f"- {ds_title}: 증가 연속 최장 **{up_text}**, 감소 연속 최장 **{down_text}** "
-            f"({yoy_label}대비 증감 기준)"
-        )
+        up_show = [x for x in up_items if int(x["len"]) >= min_show_all_len]
+        down_show = [x for x in down_items if int(x["len"]) >= min_show_all_len]
+        if not up_show and up_items:
+            up_show = [up_items[0]]
+        if not down_show and down_items:
+            down_show = [down_items[0]]
+
+        include_label = ds_key != "activity"
+        segs: List[str] = []
+        if up_show:
+            segs.extend([_format_item(x, increase=True, include_label=include_label) for x in up_show])
+        if down_show:
+            segs.extend([_format_item(x, increase=False, include_label=include_label) for x in down_show])
+        if segs:
+            lines.append(f"- {ds_title}: {', '.join(segs)} ({yoy_label}대비 증감 기준)")
 
     return lines
 
