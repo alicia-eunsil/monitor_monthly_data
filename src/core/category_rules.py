@@ -114,6 +114,32 @@ def order_sigungu_industry_categories(categories: List[str]) -> List[str]:
     return sorted(categories, key=lambda x: (_rank(x), x))
 
 
+def _industry_code_token(text: str) -> str:
+    s = str(text or "").strip().upper()
+    if not s:
+        return ""
+    if s in {"계", "합계", "전체"}:
+        return "TOTAL"
+    # Prefer explicit code in parenthesis: e.g. (BC), (G,I), (D,H,J,K), (EL~U)
+    m = re.search(r"\(([^()]*)\)", s)
+    if m:
+        token = re.sub(r"[^A-Z~]", "", m.group(1).upper())
+        if token:
+            return token
+    # Fallback to leading alphabet class code: e.g. "A 농업...", "C 제조업...", "F 건설업..."
+    m = re.match(r"^\*?\s*([A-Z])\b", s)
+    if m:
+        return m.group(1)
+    return ""
+
+
+def order_province_industry_categories(categories: List[str]) -> List[str]:
+    # Requested UI order for province industry tab.
+    ordered_tokens = ["BC", "GI", "EL~U", "D~U", "DHJK", "A", "C", "F", "TOTAL"]
+    order_map = {tok: idx for idx, tok in enumerate(ordered_tokens)}
+    return sorted(categories, key=lambda x: (order_map.get(_industry_code_token(x), 999), x))
+
+
 def norm_age_category(text: str) -> str:
     s = str(text).strip()
     s = re.sub(r"\s+", "", s)
@@ -218,7 +244,8 @@ def is_valid_industry_category(name: object, code: object = "") -> bool:
 
 
 def apply_industry_category_filter(df: pd.DataFrame) -> tuple[pd.DataFrame, Dict[str, int]]:
-    if df.empty or "dataset_key" not in df.columns or "category_name" not in df.columns:
+    # Keep all industry categories as-is.
+    if df.empty or "dataset_key" not in df.columns:
         return df, {"before_rows": 0, "after_rows": 0, "removed_rows": 0}
 
     out = df.copy()
@@ -226,38 +253,11 @@ def apply_industry_category_filter(df: pd.DataFrame) -> tuple[pd.DataFrame, Dict
     before_rows = int(industry_mask.sum())
     if before_rows == 0:
         return out, {"before_rows": 0, "after_rows": 0, "removed_rows": 0}
-
-    has_code_col = "category_code" in out.columns
-    if has_code_col:
-        valid_mask = out.loc[industry_mask].apply(
-            lambda row: is_valid_industry_category(row.get("category_name", ""), row.get("category_code", "")),
-            axis=1,
-        )
-        # If code has alphabet but name does not, append code for UI readability.
-        name_series = out.loc[industry_mask, "category_name"].astype(str).str.strip()
-        code_series = out.loc[industry_mask, "category_code"].astype(str).str.strip()
-        alpha_in_name = name_series.str.contains(r"[A-Za-z]", regex=True, na=False)
-        alpha_in_code = code_series.str.contains(r"[A-Za-z]", regex=True, na=False)
-        attach_code = valid_mask & (~alpha_in_name) & alpha_in_code
-        if attach_code.any():
-            idx = out.loc[industry_mask].index[attach_code]
-            out.loc[idx, "category_name"] = (
-                out.loc[idx, "category_name"].astype(str).str.strip()
-                + "("
-                + out.loc[idx, "category_code"].astype(str).str.strip()
-                + ")"
-            )
-    else:
-        valid_mask = out.loc[industry_mask, "category_name"].apply(is_valid_industry_category)
-    keep_mask = (~industry_mask).copy()
-    keep_mask.loc[industry_mask] = valid_mask.values
-    out = out[keep_mask].copy()
-
-    after_rows = int((out["dataset_key"].astype(str) == "industry").sum())
+    after_rows = before_rows
     return out, {
         "before_rows": before_rows,
         "after_rows": after_rows,
-        "removed_rows": before_rows - after_rows,
+        "removed_rows": 0,
     }
 
 
@@ -278,6 +278,8 @@ def order_categories_like_ui(categories: List[str], dataset_key: str, is_gyeongg
         if dataset_key == "occupation":
             return order_sigungu_occupation_categories(ordered)
     else:
+        if dataset_key == "industry":
+            return order_province_industry_categories(ordered)
         if dataset_key == "age":
             return order_age_categories(ordered)
         if dataset_key == "status":

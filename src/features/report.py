@@ -1,5 +1,6 @@
 import re
 from io import BytesIO
+import re
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -18,6 +19,32 @@ from src.features.insights import (
     infer_lag_from_df,
 )
 from src.features.new_history import collect_new_events
+
+ALLOWED_INDUSTRY_FACTOR_CODES = {"A", "C", "F", "GI", "EL~U", "DHJK"}
+
+
+def _industry_code_from_label(label: object) -> str:
+    s = str(label or "").strip().upper()
+    if not s:
+        return ""
+    m = re.search(r"\(([^()]*)\)", s)
+    if m:
+        token = re.sub(r"[^A-Z~]", "", m.group(1).upper())
+        if token:
+            return token
+    m = re.match(r"^\*?\s*([A-Z])\b", s)
+    if m:
+        return m.group(1)
+    return ""
+
+
+def _filter_industry_factor_table(table: pd.DataFrame) -> pd.DataFrame:
+    if table is None or table.empty or "분류" not in table.columns:
+        return table.copy() if isinstance(table, pd.DataFrame) else pd.DataFrame()
+    view = table.copy()
+    view["_industry_code"] = view["분류"].map(_industry_code_from_label)
+    view = view[view["_industry_code"].isin(ALLOWED_INDUSTRY_FACTOR_CODES)].copy()
+    return view.drop(columns=["_industry_code"], errors="ignore")
 
 
 def _to_docx_text(text: object) -> str:
@@ -187,6 +214,7 @@ def render_report_template(
     unemp_rate_row = _get_row(norm_indicator_name("실업률"))
 
     industry_df, industry_meta = compute_contribution_table(report_df, region=region, dataset_key="industry", lag=lag)
+    industry_factor_df = _filter_industry_factor_table(industry_df)
     occupation_df, _ = compute_contribution_table(report_df, region=region, dataset_key="occupation", lag=lag)
 
     emp_delta = float(emp_row["delta_value"]) if emp_row is not None and pd.notna(emp_row.get("delta_value")) else np.nan
@@ -222,8 +250,8 @@ def render_report_template(
         f"({yoy_text} 대비 {fmt_num(emp_rate_row['delta_value'] if emp_rate_row is not None else np.nan, str(emp_rate_row['unit']) if emp_rate_row is not None else '%')}), "
         f"실업률은 {fmt_num(unemp_rate_row['latest_value'] if unemp_rate_row is not None else np.nan, str(unemp_rate_row['unit']) if unemp_rate_row is not None else '%')}"
         f"({yoy_text} 대비 {fmt_num(unemp_rate_row['delta_value'] if unemp_rate_row is not None else np.nan, str(unemp_rate_row['unit']) if unemp_rate_row is not None else '%')})입니다.",
-        f"(산업) 증가요인 1위는 {_top_factor_text(industry_df, str(industry_meta.get('unit', '')), True)}, "
-        f"감소요인 1위는 {_top_factor_text(industry_df, str(industry_meta.get('unit', '')), False)}입니다.",
+        f"(산업) 증가요인 1위는 {_top_factor_text(industry_factor_df, str(industry_meta.get('unit', '')), True)}, "
+        f"감소요인 1위는 {_top_factor_text(industry_factor_df, str(industry_meta.get('unit', '')), False)}입니다.",
         f"(직종) 증가요인 1위는 {_top_factor_text(occupation_df, str(industry_meta.get('unit', '')), True)}, "
         f"감소요인 1위는 {_top_factor_text(occupation_df, str(industry_meta.get('unit', '')), False)}입니다.",
     ]
@@ -268,8 +296,9 @@ def render_report_template(
             st.markdown(f"- **{title}**: 데이터가 부족해 요약을 생성하지 못했습니다.")
             continue
         unit = str(meta.get("unit", ""))
-        pos_text = fmt_contrib_items(tbl, unit, positive=True, top_n=3)
-        neg_text = fmt_contrib_items(tbl, unit, positive=False, top_n=3)
+        factor_tbl = _filter_industry_factor_table(tbl) if ds_key == "industry" else tbl
+        pos_text = fmt_contrib_items(factor_tbl, unit, positive=True, top_n=3)
+        neg_text = fmt_contrib_items(factor_tbl, unit, positive=False, top_n=3)
         line_pos = f"증가요인: {pos_text}"
         line_neg = f"감소요인: {neg_text}"
         structure_lines.extend([title, line_pos, line_neg])
@@ -395,8 +424,9 @@ def render_report_template(
         latest = fmt_period(meta.get("latest_period"), prd_se)
         prev = fmt_period(meta.get("prev_period"), prd_se)
         total_delta = fmt_num(meta.get("total_delta"), unit)
-        top_pos = tbl[tbl["증감"] > 0].nlargest(1, "증감")
-        top_neg = tbl[tbl["증감"] < 0].nsmallest(1, "증감")
+        factor_tbl = _filter_industry_factor_table(tbl) if ds_key == "industry" else tbl
+        top_pos = factor_tbl[factor_tbl["증감"] > 0].nlargest(1, "증감")
+        top_neg = factor_tbl[factor_tbl["증감"] < 0].nsmallest(1, "증감")
         pos_line = f"{escape_markdown_text(top_pos.iloc[0]['분류'])}({fmt_num(top_pos.iloc[0]['증감'], unit)})" if not top_pos.empty else "없음"
         neg_line = f"{escape_markdown_text(top_neg.iloc[0]['분류'])}({fmt_num(top_neg.iloc[0]['증감'], unit)})" if not top_neg.empty else "없음"
         st.markdown(f"- {latest} 기준 총증감: **{total_delta}** ({prev} 대비)")
@@ -424,9 +454,9 @@ def render_report_template(
     if not for_pdf:
         st.markdown("##### 점검 액션")
         action_lines = []
-        if not industry_df.empty:
-            pos = industry_df[industry_df["증감"] > 0].nlargest(1, "증감")
-            neg = industry_df[industry_df["증감"] < 0].nsmallest(1, "증감")
+        if not industry_factor_df.empty:
+            pos = industry_factor_df[industry_factor_df["증감"] > 0].nlargest(1, "증감")
+            neg = industry_factor_df[industry_factor_df["증감"] < 0].nsmallest(1, "증감")
             if not pos.empty:
                 action_lines.append(f"- 산업 증가 1위({escape_markdown_text(pos.iloc[0]['분류'])})의 증가 지속 여부를 다음 {labels['point']}에 점검")
             if not neg.empty:

@@ -13,6 +13,7 @@ from src.core.category_rules import (
     order_activity_indicators as _order_activity_indicators,
     order_age_categories as _order_age_categories,
     order_occupation_categories as _order_occupation_categories,
+    order_province_industry_categories as _order_province_industry_categories,
     order_sigungu_age_categories as _order_sigungu_age_categories,
     order_sigungu_industry_categories as _order_sigungu_industry_categories,
     order_sigungu_occupation_categories as _order_sigungu_occupation_categories,
@@ -109,7 +110,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-DATA_MODEL_VERSION = "2026-03-17-industry-alpha-filter-v3"
+DATA_MODEL_VERSION = "2026-03-17-industry-order-v4"
 
 
 def _seeded_api_key() -> str:
@@ -336,6 +337,8 @@ def _render_dataset(
             if dataset_key == "occupation":
                 categories = _order_sigungu_occupation_categories(categories)
         else:
+            if dataset_key == "industry":
+                categories = _order_province_industry_categories(categories)
             if dataset_key == "age":
                 categories = _order_age_categories(categories)
             if dataset_key == "status":
