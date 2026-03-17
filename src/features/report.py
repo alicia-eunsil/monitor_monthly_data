@@ -47,6 +47,121 @@ def _filter_industry_factor_table(table: pd.DataFrame) -> pd.DataFrame:
     return view.drop(columns=["_industry_code"], errors="ignore")
 
 
+def _current_streak_length(values: pd.Series, positive: bool) -> int:
+    if values.empty:
+        return 0
+    cnt = 0
+    for v in reversed(values.tolist()):
+        if pd.isna(v):
+            break
+        vv = float(v)
+        if positive and vv > 0:
+            cnt += 1
+            continue
+        if (not positive) and vv < 0:
+            cnt += 1
+            continue
+        break
+    return cnt
+
+
+def _build_dataset_streak_summary_line(
+    source_df: pd.DataFrame,
+    region: str,
+    dataset_key: str,
+    asof_period: pd.Timestamp,
+    indicator_name: str = "",
+    min_len: int = 3,
+    yoy_label: str = "전년동월",
+) -> str:
+    if source_df.empty or not region or pd.isna(asof_period):
+        return ""
+    ds = source_df[
+        (source_df["dataset_key"].astype(str) == str(dataset_key))
+        & (source_df["region_name"].astype(str) == str(region))
+        & (pd.to_datetime(source_df["period"], errors="coerce") <= pd.Timestamp(asof_period))
+    ].copy()
+    if ds.empty or "yoy_abs" not in ds.columns:
+        return ""
+    ds["period"] = pd.to_datetime(ds["period"], errors="coerce")
+    ds = ds.dropna(subset=["period"])
+    if ds.empty:
+        return ""
+    if indicator_name:
+        ds = ds[ds["indicator_name"].astype(str) == str(indicator_name)].copy()
+    if ds.empty:
+        return ""
+
+    up_items: List[Dict[str, object]] = []
+    down_items: List[Dict[str, object]] = []
+    for _, g in ds.groupby(["indicator_name", "category_name"], dropna=False):
+        g = g.sort_values("period")
+        if g.empty:
+            continue
+        latest_period = pd.Timestamp(g["period"].iloc[-1])
+        if latest_period != pd.Timestamp(asof_period):
+            continue
+        yoy_values = pd.to_numeric(g["yoy_abs"], errors="coerce")
+        if yoy_values.empty or pd.isna(yoy_values.iloc[-1]):
+            continue
+        latest_yoy = float(yoy_values.iloc[-1])
+        cat = str(g["category_name"].iloc[0]).strip()
+        ind = str(g["indicator_name"].iloc[0]).strip()
+        label = cat if cat else (ind if ind else "전체")
+        prd_se = (
+            str(g["prd_se"].dropna().iloc[0]).upper()
+            if "prd_se" in g.columns and not g["prd_se"].dropna().empty
+            else "M"
+        )
+        unit_text = "반기" if prd_se == "H" else "개월"
+
+        up_len = _current_streak_length(yoy_values, positive=True)
+        if up_len >= min_len:
+            up_items.append(
+                {
+                    "label": label,
+                    "len": int(up_len),
+                    "start": pd.Timestamp(g["period"].iloc[len(g) - up_len]),
+                    "end": latest_period,
+                    "latest_yoy": latest_yoy,
+                    "unit": unit_text,
+                    "dir": "증가",
+                }
+            )
+        down_len = _current_streak_length(yoy_values, positive=False)
+        if down_len >= min_len:
+            down_items.append(
+                {
+                    "label": label,
+                    "len": int(down_len),
+                    "start": pd.Timestamp(g["period"].iloc[len(g) - down_len]),
+                    "end": latest_period,
+                    "latest_yoy": latest_yoy,
+                    "unit": unit_text,
+                    "dir": "감소",
+                }
+            )
+
+    if not up_items and not down_items:
+        ds_prd_se = (
+            str(ds["prd_se"].dropna().iloc[0]).upper()
+            if "prd_se" in ds.columns and not ds["prd_se"].dropna().empty
+            else "M"
+        )
+        dur_unit = "반기" if ds_prd_se == "H" else "개월"
+        return f"연속 증가/감소 요약(3{dur_unit} 이상): 없음 ({yoy_label}대비 증감 기준)"
+
+    all_items = up_items + down_items
+    all_items = sorted(all_items, key=lambda x: (-int(x["len"]), -abs(float(x["latest_yoy"])), str(x["label"])))
+    tokens: List[str] = []
+    for item in all_items:
+        s_txt = escape_markdown_text(fmt_period(item["start"], "H" if item["unit"] == "반기" else "M"))
+        e_txt = escape_markdown_text(fmt_period(item["end"], "H" if item["unit"] == "반기" else "M"))
+        l_txt = escape_markdown_text(str(item["label"]))
+        tokens.append(f"{l_txt} {s_txt}\\~{e_txt} {item['len']}{item['unit']} 연속 {item['dir']}")
+    return f"연속 증가/감소 요약(3{all_items[0]['unit']} 이상): " + ", ".join(tokens) + f" ({yoy_label}대비 증감 기준)"
+
+
 def _to_docx_text(text: object) -> str:
     return str(text).replace("\\", "")
 
@@ -301,10 +416,23 @@ def render_report_template(
         neg_text = fmt_contrib_items(factor_tbl, unit, positive=False, top_n=3)
         line_pos = f"증가요인: {pos_text}"
         line_neg = f"감소요인: {neg_text}"
+        streak_line = _build_dataset_streak_summary_line(
+            source_df=report_df,
+            region=region,
+            dataset_key=ds_key,
+            asof_period=pd.Timestamp(selected_period),
+            indicator_name=str(meta.get("indicator", "")),
+            min_len=3,
+            yoy_label=yoy_text,
+        )
         structure_lines.extend([title, line_pos, line_neg])
+        if streak_line:
+            structure_lines.append(streak_line)
         st.markdown(f"- **{title}**")
         st.markdown(f"  - {line_pos}")
         st.markdown(f"  - {line_neg}")
+        if streak_line:
+            st.markdown(f"  - {streak_line}")
         if report_events.empty:
             line_new = f"이번 {labels['point']} NEW 달성: 없음"
             structure_lines.append(line_new)
