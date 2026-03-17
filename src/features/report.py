@@ -1,12 +1,19 @@
+import html
 import re
 from io import BytesIO
-import re
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 from docx import Document
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from src.core.category_rules import norm_indicator_name, order_categories_like_ui
 from src.core.formatters import escape_markdown_text, fmt_num, fmt_period, fmt_triangle_delta
@@ -257,6 +264,132 @@ def _build_report_docx_bytes(
 
     buf = BytesIO()
     doc.save(buf)
+    return buf.getvalue()
+
+
+def _to_pdf_text(text: object) -> str:
+    return str(text).replace("\\", "")
+
+
+def _pick_pdf_font_name() -> str:
+    # Prefer built-in Korean CID font; fallback to Helvetica if unavailable.
+    try:
+        pdfmetrics.registerFont(UnicodeCIDFont("HYSMyeongJo-Medium"))
+        return "HYSMyeongJo-Medium"
+    except Exception:  # noqa: BLE001
+        return "Helvetica"
+
+
+def _add_pdf_table_story(story: List[Any], df: pd.DataFrame, font_name: str) -> None:
+    if df is None or df.empty:
+        story.append(Paragraph(_to_pdf_text("데이터 없음"), ParagraphStyle("pdf_body_fallback", fontName=font_name, fontSize=9)))
+        story.append(Spacer(1, 4 * mm))
+        return
+
+    view = df.copy()
+    view = view.fillna("-")
+    headers = [_to_pdf_text(c) for c in view.columns.tolist()]
+    rows = [[_to_pdf_text(v) for v in row] for row in view.astype(str).values.tolist()]
+    data = [headers] + rows
+
+    available_width = A4[0] - (18 * mm * 2)
+    n_cols = max(1, len(headers))
+    col_width = available_width / n_cols
+    table = Table(data, colWidths=[col_width] * n_cols, repeatRows=1)
+    table.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (-1, -1), font_name),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+            ]
+        )
+    )
+    story.append(table)
+    story.append(Spacer(1, 5 * mm))
+
+
+def _build_report_pdf_bytes(
+    title: str,
+    summary_lines: List[str],
+    activity_table: pd.DataFrame,
+    structure_lines: List[str],
+    reference_title: str,
+    reference_lines: List[str],
+    detail_sections: List[Dict[str, Any]],
+) -> bytes:
+    font_name = _pick_pdf_font_name()
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "pdf_title",
+        parent=styles["Heading1"],
+        fontName=font_name,
+        fontSize=16,
+        leading=20,
+        spaceAfter=6 * mm,
+    )
+    heading_style = ParagraphStyle(
+        "pdf_heading",
+        parent=styles["Heading2"],
+        fontName=font_name,
+        fontSize=12,
+        leading=15,
+        spaceBefore=3 * mm,
+        spaceAfter=2 * mm,
+    )
+    body_style = ParagraphStyle(
+        "pdf_body",
+        parent=styles["Normal"],
+        fontName=font_name,
+        fontSize=9,
+        leading=13,
+    )
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=18 * mm,
+        rightMargin=18 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+    )
+    story: List[Any] = []
+
+    story.append(Paragraph(html.escape(_to_pdf_text(title)), title_style))
+    story.append(Paragraph(html.escape(_to_pdf_text("(출처: 경제활동인구조사, 통계청)")), body_style))
+    story.append(Spacer(1, 3 * mm))
+
+    story.append(Paragraph(html.escape("##월간 핵심요약"), heading_style))
+    for line in summary_lines:
+        story.append(Paragraph(html.escape(f"- {_to_pdf_text(line)}"), body_style))
+    story.append(Spacer(1, 2 * mm))
+
+    story.append(Paragraph(html.escape("##경제활동인구 현황요약"), heading_style))
+    _add_pdf_table_story(story, activity_table, font_name)
+
+    story.append(Paragraph(html.escape("##취업자수 상세현황"), heading_style))
+    for line in structure_lines:
+        story.append(Paragraph(html.escape(f"- {_to_pdf_text(line)}"), body_style))
+    story.append(Spacer(1, 2 * mm))
+
+    story.append(Paragraph(html.escape(_to_pdf_text(reference_title)), heading_style))
+    for line in reference_lines:
+        story.append(Paragraph(html.escape(f"- {_to_pdf_text(line)}"), body_style))
+
+    story.append(PageBreak())
+    story.append(Paragraph(html.escape("[참고] 취업자수 상세내용"), heading_style))
+    for section in detail_sections:
+        story.append(Paragraph(html.escape(_to_pdf_text(section.get("title", ""))), heading_style))
+        for line in section.get("lines", []):
+            story.append(Paragraph(html.escape(f"- {_to_pdf_text(line)}"), body_style))
+        _add_pdf_table_story(story, section.get("table", pd.DataFrame()), font_name)
+
+    doc.build(story)
     return buf.getvalue()
 
 
@@ -738,10 +871,30 @@ def render_report_template(
         reference_lines=reference_lines,
         detail_sections=detail_sections,
     )
-    st.download_button(
-        "DOCX 다운로드",
-        data=doc_bytes,
-        file_name=f"{doc_file_safe_period}_{doc_file_safe_region}_경제활동인구_브리프.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        key="download_report_docx",
+    pdf_bytes = _build_report_pdf_bytes(
+        title=report_title,
+        summary_lines=summary_lines,
+        activity_table=activity_view,
+        structure_lines=structure_lines,
+        reference_title=f"[참고] 전국대비 {region} 현황",
+        reference_lines=reference_lines,
+        detail_sections=detail_sections,
     )
+
+    dl_col1, dl_col2 = st.columns(2)
+    with dl_col1:
+        st.download_button(
+            "DOCX 다운로드",
+            data=doc_bytes,
+            file_name=f"{doc_file_safe_period}_{doc_file_safe_region}_경제활동인구_브리프.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            key="download_report_docx",
+        )
+    with dl_col2:
+        st.download_button(
+            "PDF 다운로드",
+            data=pdf_bytes,
+            file_name=f"{doc_file_safe_period}_{doc_file_safe_region}_경제활동인구_브리프.pdf",
+            mime="application/pdf",
+            key="download_report_pdf",
+        )
