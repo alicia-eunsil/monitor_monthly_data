@@ -412,7 +412,11 @@ def render_report_template(
 
     def _pick_top_streak_items() -> tuple[Optional[Dict[str, object]], Optional[Dict[str, object]]]:
         source_defs = [
-            ("경제활동인구현황(취업자)", "activity", str(emp_row["indicator_name"]) if emp_row is not None else "취업자"),
+            (
+                "경제활동인구현황(취업자)",
+                "activity",
+                str(emp_row.get("지표", "취업자")) if emp_row is not None else "취업자",
+            ),
             ("산업별 취업자수", "industry", str(industry_meta.get("indicator", ""))),
             ("직종별 취업자수", "occupation", str(occupation_meta.get("indicator", ""))),
             ("종사상지위별 취업자", "status", ""),
