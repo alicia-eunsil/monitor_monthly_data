@@ -262,18 +262,26 @@ def _build_report_docx_bytes(
     return buf.getvalue()
 
 
+def _clean_html_report_text(text: object) -> str:
+    s = str(text)
+    s = re.sub(r"\\([\\`*_{}\[\]()#+\-.!|~])", r"\1", s)
+    s = s.replace("\\", "")
+    return s
+
+
 def _lines_to_html(lines: List[str]) -> str:
     if not lines:
-        return "<p>데이터 없음</p>"
-    items = "".join(f"<li>{html.escape(str(line))}</li>" for line in lines)
+        return "<p>??? ??</p>"
+    items = "".join(f"<li>{html.escape(_clean_html_report_text(line))}</li>" for line in lines)
     return f"<ul>{items}</ul>"
 
 
 def _table_to_html(df: pd.DataFrame) -> str:
     if df is None or df.empty:
-        return "<p>데이터 없음</p>"
+        return "<p>??? ??</p>"
     view = df.copy().fillna("-")
-    view.columns = [str(c) for c in view.columns]
+    view.columns = [_clean_html_report_text(c) for c in view.columns]
+    view = view.astype(str).applymap(_clean_html_report_text)
     return view.to_html(index=False, escape=True, classes="brief-table")
 
 
@@ -288,7 +296,7 @@ def _build_printable_report_html(
 ) -> str:
     detail_html = []
     for section in detail_sections:
-        sec_title = html.escape(str(section.get("title", "")))
+        sec_title = html.escape(_clean_html_report_text(section.get("title", "")))
         sec_lines = _lines_to_html([str(x) for x in section.get("lines", [])])
         sec_table = _table_to_html(section.get("table", pd.DataFrame()))
         detail_html.append(
@@ -450,7 +458,7 @@ def _build_printable_report_html(
       <button class="print-btn" onclick="window.print()">인쇄 / PDF 저장</button>
       <span class="hint">브라우저 인쇄(Ctrl+P)에서 PDF 저장을 선택하세요.</span>
     </div>
-    <h1>{html.escape(title)}</h1>
+    <h1>{html.escape(_clean_html_report_text(title))}</h1>
     <div class="source">(출처: 경제활동인구조사, 통계청)</div>
     <hr />
     <h2>##월간 핵심요약</h2>
@@ -459,7 +467,7 @@ def _build_printable_report_html(
     <section class="section-block">{_table_to_html(activity_table)}</section>
     <h2>##취업자수 상세현황</h2>
     <section class="section-block">{_lines_to_html(structure_lines)}</section>
-    <h2>{html.escape(reference_title)}</h2>
+    <h2>{html.escape(_clean_html_report_text(reference_title))}</h2>
     <section class="section-block">{_lines_to_html(reference_lines)}</section>
     <div class="page-break"></div>
     <h2>[참고] 취업자수 상세내용</h2>

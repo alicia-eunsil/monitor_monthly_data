@@ -76,26 +76,6 @@ $env:api_key="YOUR_KOSIS_API_KEY"
 Streamlit Cloud 예시:
 - App settings > Secrets에 `API_KEY` 또는 `api_key` 등록
 
-## 접속코드 설정
-
-앱은 접속코드가 설정되어 있어야 실행된다.
-
-아래 4개 중 하나로 설정하면 된다.
-
-1. 환경변수 `access_code`
-2. 환경변수 `ACCESS_CODE`
-3. Streamlit secrets `access_code`
-4. Streamlit secrets `ACCESS_CODE`
-
-로컬 예시:
-
-```powershell
-$env:ACCESS_CODE="YOUR_ACCESS_CODE"
-```
-
-Streamlit Cloud 예시:
-- App settings > Secrets에 `ACCESS_CODE` 또는 `access_code` 등록
-
 ## 실행
 
 ```powershell
