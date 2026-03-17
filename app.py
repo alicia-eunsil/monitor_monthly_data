@@ -287,6 +287,24 @@ def _render_dataset(
                 key=f"indicator_{dataset_key}",
                 horizontal=True,
             )
+    elif dataset_key == "industry" and indicators:
+        # Industry datasets can include multiple item IDs; auto-pick the one
+        # with the broadest category coverage for the selected region.
+        drop_labels = {"시도별", "산업별", "직업별", "직종별"}
+        region_slice = subset[subset["region_name"] == region]
+        if region_slice.empty:
+            region_slice = subset
+
+        def _category_count(ind_name: str) -> int:
+            pool = region_slice[region_slice["indicator_name"] == ind_name]
+            cats = [
+                c
+                for c in pool["category_name"].dropna().unique().tolist()
+                if str(c).strip() != "" and str(c).strip() not in drop_labels
+            ]
+            return len(cats)
+
+        indicator = sorted(indicators, key=lambda x: (_category_count(x), x), reverse=True)[0]
     else:
         category_container = col2
 
