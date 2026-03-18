@@ -604,14 +604,17 @@ def build_ai_gyeonggi_contribution_commentary(meta: Dict[str, Any], labels: Dict
             f"비중은 {prev_period_text} **{float(prev_share):,.2f}%** → "
             f"{latest} 비중 **{float(share):,.2f}%** (**{share_yoy_text}**). "
             f"기여율은 {prev_period_text} **{'-' if pd.isna(prev_contrib) else f'{float(prev_contrib):,.1f}%'}** → "
-            f"{latest} **{contrib_text}** (**{contrib_yoy_text}**)."
+            f"{latest} **{contrib_text}** "
+            f"(경기 증감 {fmt_num(gg_delta, unit)} / 전국 증감 {fmt_num(nat_delta, unit)}, "
+            f"{contrib_yoy_text})."
             if pd.notna(prev_share)
             else f"- 전년동월({yoy}) 기준 비교 데이터가 부족합니다."
         ),
         (
             f"- {latest}의 {yoy} 대비 증감은 전국 {fmt_num_bold(nat_delta, unit)}, "
             f"경기도 {fmt_num_bold(gg_delta, unit)}이며, "
-            f"전국 {nat_flow} 중 경기도 기여율은 **{contrib_text}**입니다."
+            f"전국 {nat_flow} 중 경기도 기여율은 **{contrib_text}**이며, "
+            f"취업자수 기준으로 경기 {fmt_num_bold(gg_delta, unit)} / 전국 {fmt_num_bold(nat_delta, unit)}입니다."
         ),
         (
             f"- **최근 12개월 비중 변화**: {recent_start_text} **{'-' if pd.isna(recent_start_share) else f'{float(recent_start_share):,.2f}%'}** → "
@@ -651,26 +654,13 @@ def render_ai_insights(
                 share_sub,
             )
         with c2:
-            contrib_pct = gy_meta.get("latest_contrib_pct")
-            contrib_num = gy_meta.get("latest_gg_yoy_abs")
-            contrib_value = (
-                "-"
-                if pd.isna(contrib_pct)
-                else (
-                    f"{float(contrib_pct):,.1f}%"
-                    if pd.isna(contrib_num)
-                    else f"{float(contrib_pct):,.1f}% ({fmt_num(contrib_num, str(gy_meta.get('unit', '')))})"
-                )
-            )
             contrib_sub = (
-                f"취업자수 경기 {fmt_num(gy_meta.get('latest_gg_value'), str(gy_meta.get('unit', '')))} / "
-                f"전국 {fmt_num(gy_meta.get('latest_nat_value'), str(gy_meta.get('unit', '')))} | "
                 f"경기 증감 {fmt_num(gy_meta.get('latest_gg_yoy_abs'), str(gy_meta.get('unit', '')))} / "
                 f"전국 증감 {fmt_num(gy_meta.get('latest_nat_yoy_abs'), str(gy_meta.get('unit', '')))}"
             )
             card_fn(
                 f"전국 증감 기여율({labels.get('yoy', '전년동월')}대비)",
-                contrib_value,
+                "-" if pd.isna(gy_meta.get("latest_contrib_pct")) else f"{float(gy_meta.get('latest_contrib_pct')):,.1f}%",
                 contrib_sub,
             )
         plot_df = gy_trend[["period", "share_pct", "contrib_pct"]].dropna(subset=["period"], how="any").copy()
