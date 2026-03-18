@@ -651,13 +651,26 @@ def render_ai_insights(
                 share_sub,
             )
         with c2:
+            contrib_pct = gy_meta.get("latest_contrib_pct")
+            contrib_num = gy_meta.get("latest_gg_yoy_abs")
+            contrib_value = (
+                "-"
+                if pd.isna(contrib_pct)
+                else (
+                    f"{float(contrib_pct):,.1f}%"
+                    if pd.isna(contrib_num)
+                    else f"{float(contrib_pct):,.1f}% ({fmt_num(contrib_num, str(gy_meta.get('unit', '')))})"
+                )
+            )
             contrib_sub = (
+                f"취업자수 경기 {fmt_num(gy_meta.get('latest_gg_value'), str(gy_meta.get('unit', '')))} / "
+                f"전국 {fmt_num(gy_meta.get('latest_nat_value'), str(gy_meta.get('unit', '')))} | "
                 f"경기 증감 {fmt_num(gy_meta.get('latest_gg_yoy_abs'), str(gy_meta.get('unit', '')))} / "
                 f"전국 증감 {fmt_num(gy_meta.get('latest_nat_yoy_abs'), str(gy_meta.get('unit', '')))}"
             )
             card_fn(
                 f"전국 증감 기여율({labels.get('yoy', '전년동월')}대비)",
-                "-" if pd.isna(gy_meta.get("latest_contrib_pct")) else f"{float(gy_meta.get('latest_contrib_pct')):,.1f}%",
+                contrib_value,
                 contrib_sub,
             )
         plot_df = gy_trend[["period", "share_pct", "contrib_pct"]].dropna(subset=["period"], how="any").copy()
