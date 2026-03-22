@@ -6,26 +6,14 @@ import streamlit as st
 import src.config as app_config
 from src.core.category_rules import ACTIVITY_INDICATOR_ORDER, norm_indicator_name
 from src.core.formatters import escape_markdown_text, fmt_num, fmt_period, time_labels
+from src.features.new_event_summary import (
+    build_dataset_count_lines,
+    build_new_count_summary_lines,
+    build_new_focus_line,
+)
+from src.features.streak_utils import current_streak_length as _current_streak_length
 
 GYEONGGI_SIGUNGU = getattr(app_config, "GYEONGGI_SIGUNGU", [])
-
-
-def _current_streak_length(values: pd.Series, positive: bool) -> int:
-    if values.empty:
-        return 0
-    count = 0
-    for v in reversed(values.tolist()):
-        if pd.isna(v):
-            break
-        vv = float(v)
-        if positive and vv > 0:
-            count += 1
-            continue
-        if (not positive) and vv < 0:
-            count += 1
-            continue
-        break
-    return count
 
 
 def _build_consecutive_change_lines(
@@ -238,6 +226,7 @@ def render_new_monthly_report(
     report_scope: str,
     datasets: List[Any],
     source_df: pd.DataFrame,
+    compact: bool = False,
 ) -> None:
     if events.empty:
         st.info("리포트로 표시할 NEW 이벤트가 없습니다.")
@@ -288,10 +277,10 @@ def render_new_monthly_report(
             return ""
         diff = int(cur) - int(prev)
         if diff > 0:
-            return f" (▲{diff:,})"
+            return f" (+{diff:,})"
         if diff < 0:
-            return f" (▼{abs(diff):,})"
-        return " (→0)"
+            return f" (-{abs(diff):,})"
+        return " (=)"
 
     st.markdown(f"#### {selected_month} NEW 리포트 ({scope_title})")
 
@@ -299,7 +288,7 @@ def render_new_monthly_report(
     activity_df = source_df[source_df["dataset_key"] == "activity"].copy()
     activity_df["period"] = pd.to_datetime(activity_df["period"], errors="coerce")
     activity_df = activity_df.dropna(subset=["period"])
-    if not activity_df.empty:
+    if (not compact) and not activity_df.empty:
         region_candidates = activity_df["region_name"].dropna().astype(str).str.strip().unique().tolist()
         summary_region = "경기도" if "경기도" in region_candidates else ""
         if not summary_region and report_scope == "31개 시군":
@@ -393,39 +382,32 @@ def render_new_monthly_report(
         st.markdown("##### 연속 증가/감소 요약")
         st.markdown("\n".join(streak_lines))
 
-    total_count = len(month_df)
-    max_count = int((month_df["유형"] == "최고").sum())
-    min_count = int((month_df["유형"] == "최저").sum())
-    prev_total_count = len(prev_month_df) if prev_month else None
-    prev_max_count = int((prev_month_df["유형"] == "최고").sum()) if prev_month else None
-    prev_min_count = int((prev_month_df["유형"] == "최저").sum()) if prev_month else None
     st.markdown(
         "\n".join(
-            [
-                f"##### {labels['point']} 요약",
-                f"- 총 NEW 이벤트: **{total_count:,}건**{_fmt_delta(total_count, prev_total_count)}",
-                f"- 최고 NEW: **{max_count:,}건**{_fmt_delta(max_count, prev_max_count)}",
-                f"- 최저 NEW: **{min_count:,}건**{_fmt_delta(min_count, prev_min_count)}",
-            ]
+            build_new_count_summary_lines(
+                month_df=month_df,
+                prev_month_df=prev_month_df if prev_month else None,
+                labels=labels,
+            )
         )
     )
 
-    ds_summary = month_df.groupby("데이터셋", as_index=False).size().rename(columns={"size": "NEW 건수"})
-    dataset_tab_order = [cfg.title for cfg in datasets]
-    ds_summary["정렬순서"] = ds_summary["데이터셋"].map({name: idx for idx, name in enumerate(dataset_tab_order)})
-    ds_summary = ds_summary.sort_values(by=["정렬순서", "데이터셋"], ascending=[True, True], na_position="last").drop(columns=["정렬순서"])
-    prev_ds_map: Dict[str, int] = {}
-    if prev_month:
-        prev_ds_map = prev_month_df.groupby("데이터셋").size().astype(int).to_dict()
-    ds_lines = ["##### 데이터셋별 건수"]
-    ds_lines.extend(
-        [
-            f"- {row['데이터셋']}: **{int(row['NEW 건수']):,}건**"
-            f"{_fmt_delta(int(row['NEW 건수']), prev_ds_map.get(str(row['데이터셋']))) if prev_month else ''}"
-            for _, row in ds_summary.iterrows()
-        ]
+    st.markdown(
+        "\n".join(
+            build_dataset_count_lines(
+                month_df=month_df,
+                prev_month_df=prev_month_df if prev_month else None,
+                datasets=datasets,
+                top_n=3 if compact else None,
+            )
+        )
     )
-    st.markdown("\n".join(ds_lines))
+    if compact:
+        point_label = str(labels.get("point", "월"))
+        st.markdown(f"- {build_new_focus_line(month_df, '최고', f'이번 {point_label} NEW 핵심')}")
+        st.markdown(f"- {build_new_focus_line(month_df, '최저', f'이번 {point_label} NEW 리스크')}")
+        st.caption("See tab 6 (NEW HISTORY) for event details and tab 8 (Report) for full document view.")
+        return
 
     type_summary = month_df.groupby(["구분", "범위", "유형"], as_index=False).size().rename(columns={"size": "NEW 건수"})
     metric_order = {"원자료": 0, "YoY(절대)": 1, "YoY(증감률)": 2}

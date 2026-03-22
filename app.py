@@ -615,25 +615,26 @@ with tab5:
 with tab6:
     _render_new_history_tab(events)
 with tab7:
-    st.subheader("요약")
-    report_scope = st.radio(
-        "리포트 범위",
+    st.subheader("요약(간략)")
+    summary_scope = st.radio(
+        "요약 범위",
         ["경기도 전체", "31개 시군"],
         index=0,
         horizontal=True,
-        key="report_scope",
+        key="summary_scope",
     )
     _render_new_monthly_report(
         events,
-        report_scope=report_scope,
+        report_scope=summary_scope,
         datasets=active_datasets,
         source_df=data,
+        compact=True,
     )
     if region_scope == "province":
         st.markdown("---")
         _render_ai_insights(visible_data, region_pool, labels, card_fn=_card)
 with tab8:
-    st.subheader("리포트")
+    st.subheader("리포트(상세/다운로드)")
     _render_report_template(
         df=visible_data,
         province_df=scope_data.get("province", pd.DataFrame()),

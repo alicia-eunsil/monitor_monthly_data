@@ -21,6 +21,8 @@ from src.features.insights import (
     infer_lag_from_df,
 )
 from src.features.new_history import collect_new_events
+from src.features.new_event_summary import build_new_focus_line
+from src.features.streak_utils import current_streak_length as _current_streak_length
 
 ALLOWED_INDUSTRY_FACTOR_CODES = {"A", "C", "F", "GI", "EL~U", "DHJK"}
 
@@ -67,24 +69,6 @@ def _filter_industry_factor_table(table: pd.DataFrame) -> pd.DataFrame:
     view["_industry_code"] = view["분류"].map(_industry_code_from_label)
     view = view[view["_industry_code"].isin(ALLOWED_INDUSTRY_FACTOR_CODES)].copy()
     return view.drop(columns=["_industry_code"], errors="ignore")
-
-
-def _current_streak_length(values: pd.Series, positive: bool) -> int:
-    if values.empty:
-        return 0
-    cnt = 0
-    for v in reversed(values.tolist()):
-        if pd.isna(v):
-            break
-        vv = float(v)
-        if positive and vv > 0:
-            cnt += 1
-            continue
-        if (not positive) and vv < 0:
-            cnt += 1
-            continue
-        break
-    return cnt
 
 
 def _collect_dataset_streak_items(
@@ -725,36 +709,6 @@ def render_report_template(
         down_pool = sorted(down_pool, key=sort_key)
         return (up_pool[0] if up_pool else None, down_pool[0] if down_pool else None)
 
-    def _build_new_focus_line(event_type: str, line_title: str) -> str:
-        if report_events.empty:
-            return f"{line_title}: 없음"
-        view = report_events[report_events["유형"].astype(str) == str(event_type)].copy()
-        if view.empty:
-            return f"{line_title}: 없음"
-
-        ds_order = {
-            "경제활동인구현황": 0,
-            "산업별 취업자수": 1,
-            "직종별 취업자수": 2,
-            "종사상지위별 취업자": 3,
-            "연령별 취업자": 4,
-        }
-        metric_order = {"원자료": 0, "YoY(절대)": 1, "YoY(증감률)": 2}
-        scope_order = {"전체기간": 0, "최근5년": 1}
-        view["_ds"] = view["데이터셋"].map(ds_order).fillna(99)
-        view["_metric"] = view["구분"].map(metric_order).fillna(99)
-        view["_scope"] = view["범위"].map(scope_order).fillna(99)
-        view = view.sort_values(["_ds", "_metric", "_scope", "지표", "분류"])
-
-        items: List[str] = []
-        for _, row in view.head(2).iterrows():
-            cat = str(row.get("분류", "")).strip()
-            cat_text = cat if cat else "전체"
-            items.append(
-                f"{row['데이터셋']} {row['지표']}/{cat_text} ({row['구분']} {row['범위']} {row['유형']})"
-            )
-        return f"{line_title}: " + (", ".join(items) if items else "없음")
-
     _report_heading("월간 핵심요약")
     summary_lines = [
         f"{latest_text} {region} 취업자는 {fmt_num(emp_row['latest_value'] if emp_row is not None else np.nan, str(emp_row['unit']) if emp_row is not None else '')}로, "
@@ -790,8 +744,8 @@ def render_report_template(
     elif top_down:
         summary_lines.append(f"연속흐름: {_fmt_streak_item(top_down)} ({yoy_text}대비 증감 기준)")
 
-    summary_lines.append(_build_new_focus_line("최고", "이번 달 NEW 핵심"))
-    summary_lines.append(_build_new_focus_line("최저", "이번 달 NEW 리스크"))
+    summary_lines.append(build_new_focus_line(report_events, "최고", "이번 달 NEW 핵심"))
+    summary_lines.append(build_new_focus_line(report_events, "최저", "이번 달 NEW 리스크"))
 
     st.markdown("\n".join([f"- {line}" for line in summary_lines]))
 
