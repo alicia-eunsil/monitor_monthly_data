@@ -122,7 +122,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-DATA_MODEL_VERSION = "2026-03-17-industry-order-v4"
+DATA_MODEL_VERSION = "2026-03-23-no-gyeonggi-total-v1"
 
 
 def _seeded_api_key() -> str:
@@ -575,7 +575,7 @@ if visible_data.empty:
     st.stop()
 
 if region_scope == "gyeonggi31":
-    event_source = data[data["region_name"].isin(GYEONGGI_SIGUNGU + ["경기도"])].copy()
+    event_source = data[data["region_name"].isin(GYEONGGI_SIGUNGU)].copy()
 else:
     event_source = visible_data
 events = _collect_new_events(event_source)
@@ -608,9 +608,13 @@ with tab6:
     _render_new_history_tab(events)
 with tab7:
     st.subheader("요약(간략)")
+    if region_scope == "gyeonggi31":
+        summary_scope_options = ["31개 시군"]
+    else:
+        summary_scope_options = ["경기도 전체"]
     summary_scope = st.radio(
         "요약 범위",
-        ["경기도 전체", "31개 시군"],
+        summary_scope_options,
         index=0,
         horizontal=True,
         key="summary_scope",

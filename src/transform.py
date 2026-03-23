@@ -322,23 +322,6 @@ def normalize_records(
         out = pd.concat([direct_city, district_agg], ignore_index=True, sort=False)
         out = out.drop(columns=["_from_district"], errors="ignore")
 
-        # Add Gyeonggi total series for report use.
-        g_cols = ["dataset_key", "dataset_title", "prd_se", "indicator_name", "category_name", "period"]
-        gyeonggi_total = (
-            out.groupby(g_cols, as_index=False, dropna=False)
-            .agg(
-                {
-                    "value": "sum",
-                    "unit": "first",
-                    "indicator_code": "first",
-                    "category_code": "first",
-                }
-            )
-        )
-        if not gyeonggi_total.empty:
-            gyeonggi_total["region_name"] = "경기도"
-            gyeonggi_total["region_code"] = "31"
-            out = pd.concat([out, gyeonggi_total], ignore_index=True, sort=False)
     out = out.dropna(subset=["period", "value"])
     out = out.sort_values(["region_name", "indicator_name", "category_name", "period"])
     out = out.drop_duplicates(
