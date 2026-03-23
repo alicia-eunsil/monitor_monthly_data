@@ -406,64 +406,25 @@ def _render_dataset(
     unit = str(series_df["unit"].dropna().iloc[-1]) if not series_df["unit"].dropna().empty else ""
 
     st.caption(f"최신 기준{labels['point']}: {latest_period}")
-    top_cols = st.columns(3)
-    with top_cols[0]:
-        _card(
-            "최신",
-            _fmt_num(stats.get("level_latest_value"), unit),
-            latest_period,
-            False,
-        )
-    with top_cols[1]:
-        _card(
-            "전체기간 최고",
-            _fmt_num(stats.get("level_max_all_value"), unit),
-            _fmt_period(stats.get("level_max_all_period"), prd_se),
-            bool(stats.get("level_is_new_max_all")),
-            "value-max",
-        )
-    with top_cols[2]:
-        _card(
-            "전체기간 최저",
-            _fmt_num(stats.get("level_min_all_value"), unit),
-            _fmt_period(stats.get("level_min_all_period"), prd_se),
-            bool(stats.get("level_is_new_min_all")),
-            "value-min",
-        )
-
-    bottom_cols = st.columns(4)
-    with bottom_cols[0]:
-        _card(
-            "최근 10년 중 최고",
-            _fmt_num(stats.get("level_max_10y_value"), unit),
-            _fmt_period(stats.get("level_max_10y_period"), prd_se),
-            bool(stats.get("level_is_new_max_10y")),
-            "value-max",
-        )
-    with bottom_cols[1]:
-        _card(
-            "최근 10년 중 최저",
-            _fmt_num(stats.get("level_min_10y_value"), unit),
-            _fmt_period(stats.get("level_min_10y_period"), prd_se),
-            bool(stats.get("level_is_new_min_10y")),
-            "value-min",
-        )
-    with bottom_cols[2]:
-        _card(
-            "최근 5년 중 최고",
-            _fmt_num(stats.get("level_max_5y_value"), unit),
-            _fmt_period(stats.get("level_max_5y_period"), prd_se),
-            bool(stats.get("level_is_new_max_5y")),
-            "value-max",
-        )
-    with bottom_cols[3]:
-        _card(
-            "최근 5년 중 최저",
-            _fmt_num(stats.get("level_min_5y_value"), unit),
-            _fmt_period(stats.get("level_min_5y_period"), prd_se),
-            bool(stats.get("level_is_new_min_5y")),
-            "value-min",
-        )
+    card_specs = [
+        ("최신", stats.get("level_latest_value"), latest_period, False, ""),
+        ("전체기간 최고", stats.get("level_max_all_value"), _fmt_period(stats.get("level_max_all_period"), prd_se), bool(stats.get("level_is_new_max_all")), "value-max"),
+        ("전체기간 최저", stats.get("level_min_all_value"), _fmt_period(stats.get("level_min_all_period"), prd_se), bool(stats.get("level_is_new_min_all")), "value-min"),
+        ("최근 10년 중 최고", stats.get("level_max_10y_value"), _fmt_period(stats.get("level_max_10y_period"), prd_se), bool(stats.get("level_is_new_max_10y")), "value-max"),
+        ("최근 10년 중 최저", stats.get("level_min_10y_value"), _fmt_period(stats.get("level_min_10y_period"), prd_se), bool(stats.get("level_is_new_min_10y")), "value-min"),
+        ("최근 5년 중 최고", stats.get("level_max_5y_value"), _fmt_period(stats.get("level_max_5y_period"), prd_se), bool(stats.get("level_is_new_max_5y")), "value-max"),
+        ("최근 5년 중 최저", stats.get("level_min_5y_value"), _fmt_period(stats.get("level_min_5y_period"), prd_se), bool(stats.get("level_is_new_min_5y")), "value-min"),
+    ]
+    card_cols = st.columns(len(card_specs))
+    for col, (title, raw_value, sub_text, is_new, value_class) in zip(card_cols, card_specs):
+        with col:
+            _card(
+                title,
+                _fmt_num(raw_value, unit),
+                str(sub_text),
+                bool(is_new),
+                value_class,
+            )
 
     st.markdown(f"#### {labels['trend']} 추이")
     level_df = series_df[["period", "value"]].dropna(subset=["value"]).copy()
