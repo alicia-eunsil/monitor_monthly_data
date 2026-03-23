@@ -390,11 +390,11 @@ def series_filter(
     return subset
 
 
-def _slice_recent_5y(series_df: pd.DataFrame) -> pd.DataFrame:
+def _slice_recent_years(series_df: pd.DataFrame, years: int) -> pd.DataFrame:
     if series_df.empty:
         return series_df
     latest_period = series_df["period"].max()
-    cutoff = latest_period - pd.DateOffset(years=5)
+    cutoff = latest_period - pd.DateOffset(years=int(years))
     return series_df[series_df["period"] >= cutoff]
 
 
@@ -413,11 +413,14 @@ def build_stats(series_df: pd.DataFrame) -> Dict[str, object]:
         return stats
 
     latest = series_df.iloc[-1]
-    recent_5y = _slice_recent_5y(series_df)
+    recent_10y = _slice_recent_years(series_df, 10)
+    recent_5y = _slice_recent_years(series_df, 5)
 
     for metric_col, prefix in [("value", "level"), ("yoy_abs", "yoy_abs"), ("yoy_pct", "yoy_pct")]:
         max_all_v, max_all_p = _extreme(series_df, metric_col, "max")
         min_all_v, min_all_p = _extreme(series_df, metric_col, "min")
+        max_10_v, max_10_p = _extreme(recent_10y, metric_col, "max")
+        min_10_v, min_10_p = _extreme(recent_10y, metric_col, "min")
         max_5_v, max_5_p = _extreme(recent_5y, metric_col, "max")
         min_5_v, min_5_p = _extreme(recent_5y, metric_col, "min")
 
@@ -425,6 +428,10 @@ def build_stats(series_df: pd.DataFrame) -> Dict[str, object]:
         stats[f"{prefix}_max_all_period"] = max_all_p
         stats[f"{prefix}_min_all_value"] = min_all_v
         stats[f"{prefix}_min_all_period"] = min_all_p
+        stats[f"{prefix}_max_10y_value"] = max_10_v
+        stats[f"{prefix}_max_10y_period"] = max_10_p
+        stats[f"{prefix}_min_10y_value"] = min_10_v
+        stats[f"{prefix}_min_10y_period"] = min_10_p
         stats[f"{prefix}_max_5y_value"] = max_5_v
         stats[f"{prefix}_max_5y_period"] = max_5_p
         stats[f"{prefix}_min_5y_value"] = min_5_v
@@ -436,6 +443,8 @@ def build_stats(series_df: pd.DataFrame) -> Dict[str, object]:
         stats[f"{prefix}_latest_period"] = latest_period
         stats[f"{prefix}_is_new_max_all"] = pd.notna(max_all_p) and latest_period == max_all_p
         stats[f"{prefix}_is_new_min_all"] = pd.notna(min_all_p) and latest_period == min_all_p
+        stats[f"{prefix}_is_new_max_10y"] = pd.notna(max_10_p) and latest_period == max_10_p
+        stats[f"{prefix}_is_new_min_10y"] = pd.notna(min_10_p) and latest_period == min_10_p
         stats[f"{prefix}_is_new_max_5y"] = pd.notna(max_5_p) and latest_period == max_5_p
         stats[f"{prefix}_is_new_min_5y"] = pd.notna(min_5_p) and latest_period == min_5_p
 

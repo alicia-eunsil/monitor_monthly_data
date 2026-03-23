@@ -144,6 +144,65 @@ def _build_consecutive_change_lines(
     return lines
 
 
+def _pick_streak_region(source_df: pd.DataFrame, report_scope: str) -> str:
+    region_candidates = source_df["region_name"].dropna().astype(str).str.strip().unique().tolist()
+    if "31" in str(report_scope):
+        sigungu_candidates = sorted([r for r in GYEONGGI_SIGUNGU if r in region_candidates])
+        return sigungu_candidates[0] if sigungu_candidates else ""
+    return "경기도" if "경기도" in region_candidates else (region_candidates[0] if region_candidates else "")
+
+
+def _build_dataset_new_event_lines(
+    month_df: pd.DataFrame,
+    datasets: List[Any],
+    top_n_datasets: Optional[int] = None,
+    per_dataset_events: int = 3,
+) -> List[str]:
+    if month_df.empty:
+        return ["##### 데이터셋별 NEW 이벤트", "- 표시할 데이터가 없습니다."]
+
+    ds_order = [str(getattr(cfg, "title", "")).strip() for cfg in datasets]
+    metric_order = {"원자료": 0, "YoY(절대)": 1, "YoY(증감률)": 2}
+    scope_order = {"전체기간": 0, "최근10년": 1, "최근5년": 2}
+    event_type_order = {"최고": 0, "최저": 1}
+
+    summary = month_df.groupby("데이터셋", as_index=False).size().rename(columns={"size": "건수"})
+    summary["정렬_데이터셋"] = summary["데이터셋"].map({name: idx for idx, name in enumerate(ds_order)}).fillna(999)
+    summary = summary.sort_values(["정렬_데이터셋", "데이터셋"]).drop(columns=["정렬_데이터셋"])
+    ds_names = summary["데이터셋"].astype(str).tolist()
+    if top_n_datasets is not None:
+        ds_names = ds_names[: int(top_n_datasets)]
+
+    lines: List[str] = ["##### 데이터셋별 NEW 이벤트"]
+    for ds_name in ds_names:
+        ds_view = month_df[month_df["데이터셋"].astype(str) == str(ds_name)].copy()
+        if ds_view.empty:
+            lines.append(f"- {ds_name}: 없음")
+            continue
+        ds_view["정렬_구분"] = ds_view["구분"].map(metric_order).fillna(999)
+        ds_view["정렬_범위"] = ds_view["범위"].map(scope_order).fillna(999)
+        ds_view["정렬_유형"] = ds_view["유형"].map(event_type_order).fillna(999)
+        ds_view = ds_view.sort_values(["정렬_구분", "정렬_범위", "정렬_유형", "지표", "분류"]).drop(
+            columns=["정렬_구분", "정렬_범위", "정렬_유형"]
+        )
+
+        tokens: List[str] = []
+        for _, row in ds_view.head(int(per_dataset_events)).iterrows():
+            category_text = str(row.get("분류", "")).strip() or "전체"
+            tokens.append(
+                f"{row['지표']}/{category_text}"
+                f"({row['구분']} {row['범위']} {row['유형']})"
+            )
+        remain = int(len(ds_view) - len(tokens))
+        if remain > 0:
+            tokens.append(f"외 {remain:,}건")
+        lines.append(f"- {ds_name}: " + ", ".join(tokens))
+
+    if top_n_datasets is not None and len(summary) > len(ds_names):
+        lines.append(f"- ... 데이터셋 {len(summary):,}개 중 상위 {len(ds_names):,}개만 표시")
+    return lines
+
+
 def collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
     rows: List[Dict[str, str]] = []
     key_cols = ["dataset_key", "dataset_title", "region_name", "indicator_name", "category_name", "prd_se"]
@@ -230,6 +289,7 @@ def render_new_monthly_report(
     datasets: List[Any],
     source_df: pd.DataFrame,
     compact: bool = False,
+    include_consecutive_summary: bool = True,
 ) -> None:
     if events.empty:
         st.info("리포트로 표시할 NEW 이벤트가 없습니다.")
@@ -369,21 +429,16 @@ def render_new_monthly_report(
     selected_month_dt = (
         pd.to_datetime(selected_rows.iloc[:, 1], errors="coerce").dropna().max() if not selected_rows.empty else pd.NaT
     )
-    region_candidates = source_df["region_name"].dropna().astype(str).str.strip().unique().tolist()
-    if "31" in str(report_scope):
-        sigungu_candidates = sorted([r for r in GYEONGGI_SIGUNGU if r in region_candidates])
-        streak_region = sigungu_candidates[0] if sigungu_candidates else ""
-    else:
-        streak_region = "경기도" if "경기도" in region_candidates else (region_candidates[0] if region_candidates else "")
-    streak_lines = _build_consecutive_change_lines(
-        source_df=source_df,
-        region=streak_region,
-        asof_period=selected_month_dt,
-        labels=labels,
-    )
-    if streak_lines:
-        st.markdown("##### 연속 증가/감소 요약")
-        st.markdown("\n".join(streak_lines))
+    if include_consecutive_summary:
+        streak_lines = _build_consecutive_change_lines(
+            source_df=source_df,
+            region=_pick_streak_region(source_df, report_scope),
+            asof_period=selected_month_dt,
+            labels=labels,
+        )
+        if streak_lines:
+            st.markdown("##### 연속 증가/감소 요약")
+            st.markdown("\n".join(streak_lines))
 
     st.markdown(
         "\n".join(
@@ -402,6 +457,16 @@ def render_new_monthly_report(
                 prev_month_df=prev_month_df if prev_month else None,
                 datasets=datasets,
                 top_n=3 if compact else None,
+            )
+        )
+    )
+    st.markdown(
+        "\n".join(
+            _build_dataset_new_event_lines(
+                month_df=month_df,
+                datasets=datasets,
+                top_n_datasets=3 if compact else None,
+                per_dataset_events=2 if compact else 3,
             )
         )
     )
@@ -447,6 +512,58 @@ def render_new_monthly_report(
     if len(detail_df) > max_detail_rows:
         detail_lines.append(f"- ... 총 {len(detail_df):,}건 중 상위 {max_detail_rows:,}건만 표시")
     st.markdown("\n".join(detail_lines))
+
+
+def render_consecutive_change_summary(
+    events: pd.DataFrame,
+    report_scope: str,
+    datasets: List[Any],
+    source_df: pd.DataFrame,
+) -> None:
+    if events.empty:
+        return
+    if report_scope == "경기도 전체":
+        view = events[events["지역"] == "경기도"].copy()
+    else:
+        view = events[events["지역"].isin(GYEONGGI_SIGUNGU)].copy()
+    if view.empty:
+        return
+
+    if "기준월_ts" in view.columns:
+        view["기준월_dt"] = pd.to_datetime(view["기준월_ts"], errors="coerce")
+    else:
+        view["기준월_dt"] = pd.to_datetime(view["기준월"], errors="coerce")
+    view = view.dropna(subset=["기준월_dt"])
+    if view.empty:
+        return
+
+    month_table = (
+        view[["기준월", "기준월_dt"]]
+        .drop_duplicates()
+        .sort_values("기준월_dt", ascending=False)
+        .reset_index(drop=True)
+    )
+    if month_table.empty:
+        return
+
+    selected_month = str(st.session_state.get("report_month", month_table.iloc[0]["기준월"]))
+    if selected_month not in month_table["기준월"].astype(str).tolist():
+        selected_month = str(month_table.iloc[0]["기준월"])
+    selected_rows = month_table[month_table["기준월"].astype(str) == selected_month]
+    asof_period = pd.to_datetime(selected_rows["기준월_dt"], errors="coerce").dropna().max()
+    if pd.isna(asof_period):
+        return
+
+    labels = time_labels([str(getattr(cfg, "prd_se", "M")) for cfg in datasets])
+    streak_lines = _build_consecutive_change_lines(
+        source_df=source_df,
+        region=_pick_streak_region(source_df, report_scope),
+        asof_period=pd.Timestamp(asof_period),
+        labels=labels,
+    )
+    if streak_lines:
+        st.markdown("##### 연속 증가/감소 요약")
+        st.markdown("\n".join(streak_lines))
 
 
 def render_new_history_tab(events: pd.DataFrame) -> None:

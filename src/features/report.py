@@ -675,9 +675,9 @@ def render_report_template(
         )
         return ordered.drop(columns=["_metric", "_scope", "_type"], errors="ignore")
 
-    def _build_activity_new_line(events_df: pd.DataFrame, point_label: str) -> str:
+    def _build_activity_new_lines(events_df: pd.DataFrame, point_label: str) -> List[str]:
         if events_df is None or events_df.empty:
-            return f"이번 {point_label} NEW 달성: 없음"
+            return [f"이번 {point_label} NEW 달성: 없음"]
 
         activity_titles = (
             report_df.loc[report_df["dataset_key"].astype(str) == "activity", "dataset_title"]
@@ -694,22 +694,22 @@ def render_report_template(
         else:
             view = view[view["_dataset_title"].str.contains("경제활동인구", na=False)]
         if view.empty:
-            return f"이번 {point_label} NEW 달성: 없음"
+            return [f"이번 {point_label} NEW 달성: 없음"]
 
         view = _sort_new_events(view)
-        tokens: List[str] = []
+        lines: List[str] = [f"이번 {point_label} NEW 달성 ({len(view):,}건)"]
         max_items = 6
         for _, er in view.head(max_items).iterrows():
             indicator = str(er.get("지표", "")).strip() or "지표"
             category = str(er.get("분류", "")).strip() or "전체"
-            tokens.append(
+            lines.append(
                 f"{indicator}/{category}"
                 f"({str(er.get('구분', ''))} {str(er.get('범위', ''))} {str(er.get('유형', ''))} NEW)"
             )
-        remain = int(len(view) - len(tokens))
+        remain = int(len(view) - max_items)
         if remain > 0:
-            tokens.append(f"외 {remain}건")
-        return f"이번 {point_label} NEW 달성: " + ", ".join(tokens)
+            lines.append(f"기타 {remain:,}건")
+        return lines
 
     def _fmt_streak_item(item: Dict[str, object]) -> str:
         prd_se_local = "H" if str(item.get("unit", "")) == "반기" else "M"
@@ -812,8 +812,8 @@ def render_report_template(
     activity_view[delta_col] = activity_view.apply(lambda r: fmt_triangle_delta(r[delta_col], str(r["unit"]), fmt_num), axis=1)
     activity_view = activity_view.drop(columns=["unit"])
     st.dataframe(activity_view, use_container_width=True, hide_index=True)
-    activity_new_line = _build_activity_new_line(report_events, labels.get("point", "월"))
-    st.markdown(f"- {activity_new_line}")
+    activity_new_lines = _build_activity_new_lines(report_events, labels.get("point", "월"))
+    st.markdown("\n".join([f"- {line}" for line in activity_new_lines]))
 
     _report_heading("취업자수 상세현황")
     structure_lines: List[str] = []

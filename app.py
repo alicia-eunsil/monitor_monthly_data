@@ -31,6 +31,7 @@ from src.core.formatters import (
 from src.features.insights import render_ai_insights as _render_ai_insights
 from src.features.new_history import (
     collect_new_events as _collect_new_events,
+    render_consecutive_change_summary as _render_consecutive_change_summary,
     render_new_history_tab as _render_new_history_tab,
     render_new_monthly_report as _render_new_monthly_report,
 )
@@ -239,6 +240,18 @@ def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str, prd_se: str)
         },
         {
             "지표": label,
+            "구간": "최근 10년",
+            "최고": _fmt_num(stats.get(f"{prefix}_max_10y_value"), display_unit),
+            "최고 시점": _fmt_period(stats.get(f"{prefix}_max_10y_period"), prd_se),
+            "최저": _fmt_num(stats.get(f"{prefix}_min_10y_value"), display_unit),
+            "최저 시점": _fmt_period(stats.get(f"{prefix}_min_10y_period"), prd_se),
+            "비고": _remark_new(
+                bool(stats.get(f"{prefix}_is_new_max_10y")),
+                bool(stats.get(f"{prefix}_is_new_min_10y")),
+            ),
+        },
+        {
+            "지표": label,
             "구간": "최근 5년",
             "최고": _fmt_num(stats.get(f"{prefix}_max_5y_value"), display_unit),
             "최고 시점": _fmt_period(stats.get(f"{prefix}_max_5y_period"), prd_se),
@@ -393,15 +406,15 @@ def _render_dataset(
     unit = str(series_df["unit"].dropna().iloc[-1]) if not series_df["unit"].dropna().empty else ""
 
     st.caption(f"최신 기준{labels['point']}: {latest_period}")
-    cols = st.columns(5)
-    with cols[0]:
+    top_cols = st.columns(3)
+    with top_cols[0]:
         _card(
             "최신",
             _fmt_num(stats.get("level_latest_value"), unit),
             latest_period,
             False,
         )
-    with cols[1]:
+    with top_cols[1]:
         _card(
             "전체기간 최고",
             _fmt_num(stats.get("level_max_all_value"), unit),
@@ -409,7 +422,7 @@ def _render_dataset(
             bool(stats.get("level_is_new_max_all")),
             "value-max",
         )
-    with cols[2]:
+    with top_cols[2]:
         _card(
             "전체기간 최저",
             _fmt_num(stats.get("level_min_all_value"), unit),
@@ -417,7 +430,25 @@ def _render_dataset(
             bool(stats.get("level_is_new_min_all")),
             "value-min",
         )
-    with cols[3]:
+
+    bottom_cols = st.columns(4)
+    with bottom_cols[0]:
+        _card(
+            "최근 10년 중 최고",
+            _fmt_num(stats.get("level_max_10y_value"), unit),
+            _fmt_period(stats.get("level_max_10y_period"), prd_se),
+            bool(stats.get("level_is_new_max_10y")),
+            "value-max",
+        )
+    with bottom_cols[1]:
+        _card(
+            "최근 10년 중 최저",
+            _fmt_num(stats.get("level_min_10y_value"), unit),
+            _fmt_period(stats.get("level_min_10y_period"), prd_se),
+            bool(stats.get("level_is_new_min_10y")),
+            "value-min",
+        )
+    with bottom_cols[2]:
         _card(
             "최근 5년 중 최고",
             _fmt_num(stats.get("level_max_5y_value"), unit),
@@ -425,7 +456,7 @@ def _render_dataset(
             bool(stats.get("level_is_new_max_5y")),
             "value-max",
         )
-    with cols[4]:
+    with bottom_cols[3]:
         _card(
             "최근 5년 중 최저",
             _fmt_num(stats.get("level_min_5y_value"), unit),
@@ -629,6 +660,13 @@ with tab7:
         datasets=active_datasets,
         source_df=data,
         compact=True,
+        include_consecutive_summary=False,
+    )
+    _render_consecutive_change_summary(
+        events=events,
+        report_scope=summary_scope,
+        datasets=active_datasets,
+        source_df=data,
     )
     if region_scope == "province":
         st.markdown("---")
