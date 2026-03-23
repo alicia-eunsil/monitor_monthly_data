@@ -659,6 +659,22 @@ def render_report_template(
             & (report_events["기준월"].astype(str) == str(latest_text))
         ].copy()
 
+    def _sort_new_events(view: pd.DataFrame) -> pd.DataFrame:
+        if view is None or view.empty:
+            return view
+        metric_order = {"원자료": 0, "YoY(절대)": 1, "YoY(증감률)": 2}
+        scope_order = {"전체기간": 0, "최근10년": 1, "최근5년": 2}
+        type_order = {"최고": 0, "최저": 1}
+        ordered = view.copy()
+        ordered["_metric"] = ordered["구분"].map(metric_order).fillna(999)
+        ordered["_scope"] = ordered["범위"].map(scope_order).fillna(999)
+        ordered["_type"] = ordered["유형"].map(type_order).fillna(999)
+        ordered = ordered.sort_values(
+            ["지표", "_metric", "_scope", "_type", "분류"],
+            ascending=[True, True, True, True, True],
+        )
+        return ordered.drop(columns=["_metric", "_scope", "_type"], errors="ignore")
+
     def _build_activity_new_line(events_df: pd.DataFrame, point_label: str) -> str:
         if events_df is None or events_df.empty:
             return f"이번 {point_label} NEW 달성: 없음"
@@ -680,7 +696,7 @@ def render_report_template(
         if view.empty:
             return f"이번 {point_label} NEW 달성: 없음"
 
-        view = view.sort_values(["지표", "구분", "범위", "유형", "분류"], ascending=[True, True, True, True, True])
+        view = _sort_new_events(view)
         tokens: List[str] = []
         max_items = 6
         for _, er in view.head(max_items).iterrows():
@@ -842,7 +858,7 @@ def render_report_template(
                 structure_lines.append(line_new)
                 st.markdown(f"  - {line_new}")
             else:
-                ds_events = ds_events.sort_values(["구분", "범위", "유형", "분류"], ascending=[True, True, True, True])
+                ds_events = _sort_new_events(ds_events)
                 event_tokens: List[str] = []
                 for _, er in ds_events.iterrows():
                     cat = str(er.get("분류", "")).strip() or "전체"

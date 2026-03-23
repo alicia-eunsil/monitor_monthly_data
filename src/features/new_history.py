@@ -150,7 +150,8 @@ def collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
     for _, series in df.groupby(key_cols, dropna=False):
         series = series.sort_values("period")
         prd_se = str(series["prd_se"].iloc[0]).upper() if "prd_se" in series.columns else "M"
-        recent_window = 10 if prd_se == "H" else 60
+        recent_5y_window = 10 if prd_se == "H" else 60
+        recent_10y_window = 20 if prd_se == "H" else 120
         meta = {
             "데이터셋": str(series["dataset_title"].iloc[0]),
             "지역": str(series["region_name"].iloc[0]),
@@ -170,10 +171,12 @@ def collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
 
             prev_max = metric_df[metric_col].cummax().shift(1)
             prev_min = metric_df[metric_col].cummin().shift(1)
-            prev_5y_max = metric_df[metric_col].shift(1).rolling(window=recent_window, min_periods=1).max()
-            prev_5y_min = metric_df[metric_col].shift(1).rolling(window=recent_window, min_periods=1).min()
+            prev_10y_max = metric_df[metric_col].shift(1).rolling(window=recent_10y_window, min_periods=1).max()
+            prev_10y_min = metric_df[metric_col].shift(1).rolling(window=recent_10y_window, min_periods=1).min()
+            prev_5y_max = metric_df[metric_col].shift(1).rolling(window=recent_5y_window, min_periods=1).max()
+            prev_5y_min = metric_df[metric_col].shift(1).rolling(window=recent_5y_window, min_periods=1).min()
 
-            for scope_label, scope_series in [("전체기간", prev_max), ("최근5년", prev_5y_max)]:
+            for scope_label, scope_series in [("전체기간", prev_max), ("최근10년", prev_10y_max), ("최근5년", prev_5y_max)]:
                 is_new_max = metric_df[metric_col] > scope_series
                 for _, row in metric_df[is_new_max.fillna(False)].iterrows():
                     rows.append(
@@ -188,7 +191,7 @@ def collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
                         }
                     )
 
-            for scope_label, scope_series in [("전체기간", prev_min), ("최근5년", prev_5y_min)]:
+            for scope_label, scope_series in [("전체기간", prev_min), ("최근10년", prev_10y_min), ("최근5년", prev_5y_min)]:
                 is_new_min = metric_df[metric_col] < scope_series
                 for _, row in metric_df[is_new_min.fillna(False)].iterrows():
                     rows.append(
@@ -411,7 +414,7 @@ def render_new_monthly_report(
 
     type_summary = month_df.groupby(["구분", "범위", "유형"], as_index=False).size().rename(columns={"size": "NEW 건수"})
     metric_order = {"원자료": 0, "YoY(절대)": 1, "YoY(증감률)": 2}
-    scope_order = {"전체기간": 0, "최근5년": 1}
+    scope_order = {"전체기간": 0, "최근10년": 1, "최근5년": 2}
     event_type_order = {"최고": 0, "최저": 1}
     type_summary["정렬_구분"] = type_summary["구분"].map(metric_order).fillna(999)
     type_summary["정렬_범위"] = type_summary["범위"].map(scope_order).fillna(999)

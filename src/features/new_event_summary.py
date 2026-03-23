@@ -94,7 +94,7 @@ def build_new_focus_line(
         "연령별 취업자": 4,
     }
     metric_order = {"원자료": 0, "YoY(절대)": 1, "YoY(증감률)": 2}
-    scope_order = {"전체기간": 0, "최근5년": 1}
+    scope_order = {"전체기간": 0, "최근10년": 1, "최근5년": 2}
     view["_ds"] = view["데이터셋"].map(ds_order).fillna(99)
     view["_metric"] = view["구분"].map(metric_order).fillna(99)
     view["_scope"] = view["범위"].map(scope_order).fillna(99)
