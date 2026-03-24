@@ -77,6 +77,29 @@ st.markdown(
 .stApp div[data-baseweb="tab"] button {
   font-size: 1.0rem;
 }
+.stApp div[role="radiogroup"][aria-label="메뉴"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.45rem;
+}
+.stApp div[role="radiogroup"][aria-label="메뉴"] > label {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 0.48rem 0.7rem;
+  min-height: 2.2rem;
+}
+.stApp div[role="radiogroup"][aria-label="메뉴"] > label span {
+  font-size: 0.98rem;
+  font-weight: 700;
+}
+.stApp div[role="radiogroup"][aria-label="메뉴"] > label:has(input:checked) {
+  border-color: #1e3a5f;
+  background: #1e3a5f;
+}
+.stApp div[role="radiogroup"][aria-label="메뉴"] > label:has(input:checked) span {
+  color: #ffffff !important;
+}
 .stApp div[data-baseweb="radio"] > div {
   flex-wrap: nowrap;
   overflow-x: auto;
@@ -617,6 +640,7 @@ page_options = [
     "⑧ 리포트",
     "⑨ 자동 질문 발견",
 ]
+st.markdown("#### 메인 메뉴")
 active_page = st.radio("메뉴", page_options, horizontal=True, key="active_page")
 
 needs_events = active_page in {"⑥ NEW HISTORY", "⑦ 요약"}
