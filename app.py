@@ -274,6 +274,7 @@ def _render_dataset(
     default_region: str,
     datasets: List[DatasetConfig],
     is_gyeonggi31_mode: bool,
+    scope_tag: str,
 ) -> None:
     cfg = next(x for x in datasets if x.key == dataset_key)
     subset = df[df["dataset_key"] == dataset_key].copy()
@@ -290,103 +291,132 @@ def _render_dataset(
     if dataset_key == "activity":
         # Keep activity indicators on one line by giving wider horizontal space.
         col1, col2 = st.columns([0.6, 5.4])
-        col3 = st.container()
     elif dataset_key in {"industry", "occupation", "age", "status"}:
         # Narrow region control and widen classification area.
         col1, col2 = st.columns([0.6, 3.4])
-        col3 = st.container()
     else:
-        col1, col2, col3 = st.columns([0.6, 2.2, 2.2])
-    with col1:
-        region = st.selectbox(
-            "지역",
-            region_options,
-            index=default_region_index,
-            key=f"region_{dataset_key}",
-        )
+        col1, col2, _ = st.columns([0.6, 2.2, 2.2])
+
+    state_prefix = f"{scope_tag}_{dataset_key}"
+    region_state_key = f"{state_prefix}_region"
+    indicator_state_key = f"{state_prefix}_indicator"
+    category_state_key = f"{state_prefix}_category"
+
+    if st.session_state.get(region_state_key) not in region_options:
+        st.session_state[region_state_key] = region_options[default_region_index]
 
     indicators = sorted(subset["indicator_name"].dropna().unique().tolist())
-    indicator = indicators[0] if indicators else ""
-    category_container = col2
     if dataset_key == "activity":
         indicators = _order_activity_indicators(indicators)
-        with col2:
-            indicator = st.radio(
-                "지표",
-                indicators,
-                key=f"indicator_{dataset_key}",
-                horizontal=True,
+    if indicators and st.session_state.get(indicator_state_key) not in indicators:
+        st.session_state[indicator_state_key] = indicators[0]
+
+    with st.form(key=f"filters_{state_prefix}", border=False):
+        with col1:
+            region_input = st.selectbox(
+                "지역",
+                region_options,
+                index=region_options.index(st.session_state[region_state_key]),
+                key=f"{state_prefix}_region_input",
             )
-    elif dataset_key == "industry" and indicators:
-        # Industry datasets can include multiple item IDs; auto-pick the one
-        # with the broadest category coverage for the selected region.
-        drop_labels = {"시도별", "산업별", "산업명", "직업별", "직종별"}
-        region_slice = subset[subset["region_name"] == region]
-        if region_slice.empty:
-            region_slice = subset
 
-        def _category_count(ind_name: str) -> int:
-            pool = region_slice[region_slice["indicator_name"] == ind_name]
-            cats = [
-                c
-                for c in pool["category_name"].dropna().unique().tolist()
-                if str(c).strip() != "" and str(c).strip() not in drop_labels
-            ]
-            return len(cats)
-
-        indicator = sorted(indicators, key=lambda x: (_category_count(x), x), reverse=True)[0]
-    else:
+        indicator_input = st.session_state.get(indicator_state_key, indicators[0] if indicators else "")
         category_container = col2
-
-    category = ""
-    if cfg.has_category:
-        category_pool = subset[subset["region_name"] == region]
-        if indicator:
-            category_pool = category_pool[category_pool["indicator_name"] == indicator]
-        categories = sorted(
-            c for c in category_pool["category_name"].dropna().unique().tolist() if str(c).strip() != ""
-        )
-        if not categories:
-            categories = sorted(
-                c for c in subset["category_name"].dropna().unique().tolist() if str(c).strip() != ""
-            )
-        if dataset_key in {"industry", "occupation"}:
-            drop_labels = {"시도별", "산업별", "산업명", "직업별", "직종별"}
-            cleaned = [c for c in categories if str(c).strip() not in drop_labels]
-            if cleaned:
-                categories = cleaned
-        if is_gyeonggi31_mode:
-            if dataset_key == "industry":
-                categories = _order_sigungu_industry_categories(categories)
-            if dataset_key == "age":
-                categories = _order_sigungu_age_categories(categories)
-            if dataset_key == "status":
-                categories = _order_sigungu_status_categories(categories)
-            if dataset_key == "occupation":
-                categories = _order_sigungu_occupation_categories(categories)
-        else:
-            if dataset_key == "industry":
-                categories = _order_province_industry_categories(categories)
-            if dataset_key == "age":
-                categories = _order_age_categories(categories)
-            if dataset_key == "status":
-                categories = _order_status_categories(categories)
-            if dataset_key == "occupation":
-                categories = _order_occupation_categories(categories)
-        with category_container:
-            if dataset_key in {"industry", "occupation", "age", "status"}:
-                category = st.radio(
-                    cfg.category_label,
-                    categories,
-                    key=f"category_radio_{dataset_key}",
+        if dataset_key == "activity" and indicators:
+            with col2:
+                indicator_input = st.radio(
+                    "지표",
+                    indicators,
+                    index=indicators.index(indicator_input) if indicator_input in indicators else 0,
+                    key=f"{state_prefix}_indicator_input",
                     horizontal=True,
                 )
-            else:
-                category = st.selectbox(
-                    cfg.category_label,
-                    categories,
-                    key=f"category_select_{dataset_key}",
+        elif dataset_key == "industry" and indicators:
+            # Industry datasets can include multiple item IDs; auto-pick the one
+            # with the broadest category coverage for the selected region.
+            drop_labels = {"시도별", "산업별", "산업명", "직업별", "직종별"}
+            region_slice = subset[subset["region_name"] == region_input]
+            if region_slice.empty:
+                region_slice = subset
+
+            def _category_count(ind_name: str) -> int:
+                pool = region_slice[region_slice["indicator_name"] == ind_name]
+                cats = [
+                    c
+                    for c in pool["category_name"].dropna().unique().tolist()
+                    if str(c).strip() != "" and str(c).strip() not in drop_labels
+                ]
+                return len(cats)
+
+            indicator_input = sorted(indicators, key=lambda x: (_category_count(x), x), reverse=True)[0]
+
+        category_input = st.session_state.get(category_state_key, "")
+        if cfg.has_category:
+            category_pool = subset[subset["region_name"] == region_input]
+            if indicator_input:
+                category_pool = category_pool[category_pool["indicator_name"] == indicator_input]
+            categories = sorted(
+                c for c in category_pool["category_name"].dropna().unique().tolist() if str(c).strip() != ""
+            )
+            if not categories:
+                categories = sorted(
+                    c for c in subset["category_name"].dropna().unique().tolist() if str(c).strip() != ""
                 )
+            if dataset_key in {"industry", "occupation"}:
+                drop_labels = {"시도별", "산업별", "산업명", "직업별", "직종별"}
+                cleaned = [c for c in categories if str(c).strip() not in drop_labels]
+                if cleaned:
+                    categories = cleaned
+            if is_gyeonggi31_mode:
+                if dataset_key == "industry":
+                    categories = _order_sigungu_industry_categories(categories)
+                if dataset_key == "age":
+                    categories = _order_sigungu_age_categories(categories)
+                if dataset_key == "status":
+                    categories = _order_sigungu_status_categories(categories)
+                if dataset_key == "occupation":
+                    categories = _order_sigungu_occupation_categories(categories)
+            else:
+                if dataset_key == "industry":
+                    categories = _order_province_industry_categories(categories)
+                if dataset_key == "age":
+                    categories = _order_age_categories(categories)
+                if dataset_key == "status":
+                    categories = _order_status_categories(categories)
+                if dataset_key == "occupation":
+                    categories = _order_occupation_categories(categories)
+            if categories:
+                if category_input not in categories:
+                    category_input = categories[0]
+                with category_container:
+                    if dataset_key in {"industry", "occupation", "age", "status"}:
+                        category_input = st.radio(
+                            cfg.category_label,
+                            categories,
+                            index=categories.index(category_input),
+                            key=f"{state_prefix}_category_input",
+                            horizontal=True,
+                        )
+                    else:
+                        category_input = st.selectbox(
+                            cfg.category_label,
+                            categories,
+                            index=categories.index(category_input),
+                            key=f"{state_prefix}_category_select_input",
+                        )
+            else:
+                category_input = ""
+        apply_filter = st.form_submit_button("적용")
+
+    if apply_filter or region_state_key not in st.session_state:
+        st.session_state[region_state_key] = region_input
+        st.session_state[indicator_state_key] = indicator_input
+        if cfg.has_category:
+            st.session_state[category_state_key] = category_input
+
+    region = str(st.session_state.get(region_state_key, region_input))
+    indicator = str(st.session_state.get(indicator_state_key, indicator_input))
+    category = str(st.session_state.get(category_state_key, category_input if cfg.has_category else ""))
 
     series_df = series_filter(
         df=subset,
@@ -574,39 +604,83 @@ if visible_data.empty:
     st.warning("선택한 범위에서 조회된 데이터가 없습니다.")
     st.stop()
 
-if region_scope == "gyeonggi31":
-    event_source = data[data["region_name"].isin(GYEONGGI_SIGUNGU)].copy()
-else:
-    event_source = visible_data
-events = _collect_new_events(event_source)
 labels = _time_labels(active_datasets)
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(
-    [
-        "① 경제활동인구현황",
-        "② 연령별 취업자",
-        "③ 종사상지위별 취업자",
-        "④ 산업별 취업자수",
-        "⑤ 직종별 취업자수",
-        "⑥ NEW HISTORY",
-        "⑦ 요약",
-        "⑧ 리포트",
-        "⑨ 자동 질문 발견",
-    ]
-)
-with tab1:
-    _render_dataset(visible_data, "activity", region_pool, default_region, active_datasets, is_gyeonggi31_mode)
-with tab2:
-    _render_dataset(visible_data, "age", region_pool, default_region, active_datasets, is_gyeonggi31_mode)
-with tab3:
-    _render_dataset(visible_data, "status", region_pool, default_region, active_datasets, is_gyeonggi31_mode)
-with tab4:
-    _render_dataset(visible_data, "industry", region_pool, default_region, active_datasets, is_gyeonggi31_mode)
-with tab5:
-    _render_dataset(visible_data, "occupation", region_pool, default_region, active_datasets, is_gyeonggi31_mode)
-with tab6:
+page_options = [
+    "① 경제활동인구현황",
+    "② 연령별 취업자",
+    "③ 종사상지위별 취업자",
+    "④ 산업별 취업자수",
+    "⑤ 직종별 취업자수",
+    "⑥ NEW HISTORY",
+    "⑦ 요약",
+    "⑧ 리포트",
+    "⑨ 자동 질문 발견",
+]
+active_page = st.radio("메뉴", page_options, horizontal=True, key="active_page")
+
+needs_events = active_page in {"⑥ NEW HISTORY", "⑦ 요약"}
+events = pd.DataFrame()
+if needs_events:
+    if region_scope == "gyeonggi31":
+        event_source = data[data["region_name"].isin(GYEONGGI_SIGUNGU)].copy()
+    else:
+        event_source = visible_data
+    events = _collect_new_events(event_source)
+
+if active_page == "① 경제활동인구현황":
+    _render_dataset(
+        visible_data,
+        "activity",
+        region_pool,
+        default_region,
+        active_datasets,
+        is_gyeonggi31_mode,
+        scope_tag=region_scope,
+    )
+elif active_page == "② 연령별 취업자":
+    _render_dataset(
+        visible_data,
+        "age",
+        region_pool,
+        default_region,
+        active_datasets,
+        is_gyeonggi31_mode,
+        scope_tag=region_scope,
+    )
+elif active_page == "③ 종사상지위별 취업자":
+    _render_dataset(
+        visible_data,
+        "status",
+        region_pool,
+        default_region,
+        active_datasets,
+        is_gyeonggi31_mode,
+        scope_tag=region_scope,
+    )
+elif active_page == "④ 산업별 취업자수":
+    _render_dataset(
+        visible_data,
+        "industry",
+        region_pool,
+        default_region,
+        active_datasets,
+        is_gyeonggi31_mode,
+        scope_tag=region_scope,
+    )
+elif active_page == "⑤ 직종별 취업자수":
+    _render_dataset(
+        visible_data,
+        "occupation",
+        region_pool,
+        default_region,
+        active_datasets,
+        is_gyeonggi31_mode,
+        scope_tag=region_scope,
+    )
+elif active_page == "⑥ NEW HISTORY":
     _render_new_history_tab(events)
-with tab7:
+elif active_page == "⑦ 요약":
     st.subheader("요약(간략)")
     if region_scope == "gyeonggi31":
         summary_scope_options = ["31개 시군"]
@@ -636,7 +710,7 @@ with tab7:
     if region_scope == "province":
         st.markdown("---")
         _render_ai_insights(visible_data, region_pool, labels, card_fn=_card)
-with tab8:
+elif active_page == "⑧ 리포트":
     st.subheader("리포트(상세/다운로드)")
     _render_report_template(
         df=visible_data,
@@ -646,7 +720,7 @@ with tab8:
         is_gyeonggi31_mode=is_gyeonggi31_mode,
         labels=labels,
     )
-with tab9:
+elif active_page == "⑨ 자동 질문 발견":
     _render_auto_discovery_tab(visible_data, labels=labels)
 
 st.markdown(
