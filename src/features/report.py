@@ -939,7 +939,7 @@ def render_report_template(
                 f"{ref_latest} {contrib_now_text} ({contrib_change_text})"
             )
             reference_lines.append(
-                f"같은 시점 전년비 증감은 전국 {fmt_num(nat_yoy, ref_unit)}, "
+                f"같은 시점 {yoy_text}대비 증감은 전국 {fmt_num(nat_yoy, ref_unit)}, "
                 f"{region} {fmt_num(gg_yoy, ref_unit)}"
             )
             for line in reference_lines:
