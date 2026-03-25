@@ -630,19 +630,19 @@ if visible_data.empty:
 labels = _time_labels(active_datasets)
 
 page_options = [
-    "① 경제활동인구현황",
-    "② 연령별 취업자",
-    "③ 종사상지위별 취업자",
-    "④ 산업별 취업자수",
-    "⑤ 직종별 취업자수",
-    "⑥ NEW HISTORY",
+    "① NEW HISTORY",
+    "② 경제활동인구현황",
+    "③ 연령별 취업자",
+    "④ 종사상지위별 취업자",
+    "⑤ 산업별 취업자수",
+    "⑥ 직종별 취업자수",
     "⑦ 요약",
     "⑧ 리포트",
     "⑨ 자동 질문 발견",
 ]
 active_page = st.radio("메뉴", page_options, horizontal=True, key="active_page", label_visibility="collapsed")
 
-needs_events = active_page in {"⑥ NEW HISTORY", "⑦ 요약"}
+needs_events = active_page in {"① NEW HISTORY", "⑦ 요약"}
 events = pd.DataFrame()
 if needs_events:
     if region_scope == "gyeonggi31":
@@ -651,7 +651,9 @@ if needs_events:
         event_source = visible_data
     events = _collect_new_events(event_source)
 
-if active_page == "① 경제활동인구현황":
+if active_page == "① NEW HISTORY":
+    _render_new_history_tab(events)
+elif active_page == "② 경제활동인구현황":
     _render_dataset(
         visible_data,
         "activity",
@@ -661,7 +663,7 @@ if active_page == "① 경제활동인구현황":
         is_gyeonggi31_mode,
         scope_tag=region_scope,
     )
-elif active_page == "② 연령별 취업자":
+elif active_page == "③ 연령별 취업자":
     _render_dataset(
         visible_data,
         "age",
@@ -671,7 +673,7 @@ elif active_page == "② 연령별 취업자":
         is_gyeonggi31_mode,
         scope_tag=region_scope,
     )
-elif active_page == "③ 종사상지위별 취업자":
+elif active_page == "④ 종사상지위별 취업자":
     _render_dataset(
         visible_data,
         "status",
@@ -681,7 +683,7 @@ elif active_page == "③ 종사상지위별 취업자":
         is_gyeonggi31_mode,
         scope_tag=region_scope,
     )
-elif active_page == "④ 산업별 취업자수":
+elif active_page == "⑤ 산업별 취업자수":
     _render_dataset(
         visible_data,
         "industry",
@@ -691,7 +693,7 @@ elif active_page == "④ 산업별 취업자수":
         is_gyeonggi31_mode,
         scope_tag=region_scope,
     )
-elif active_page == "⑤ 직종별 취업자수":
+elif active_page == "⑥ 직종별 취업자수":
     _render_dataset(
         visible_data,
         "occupation",
@@ -701,8 +703,6 @@ elif active_page == "⑤ 직종별 취업자수":
         is_gyeonggi31_mode,
         scope_tag=region_scope,
     )
-elif active_page == "⑥ NEW HISTORY":
-    _render_new_history_tab(events)
 elif active_page == "⑦ 요약":
     st.subheader("요약(간략)")
     if region_scope == "gyeonggi31":
