@@ -97,7 +97,7 @@ st.markdown(
   border-color: #1e3a5f;
   background: #1e3a5f;
 }
-.stApp div[role="radiogroup"][aria-label="메뉴"] > label:has(input:checked) span {
+.stApp div[role="radiogroup"][aria-label="메뉴"] > label:has(input:checked) * {
   color: #ffffff !important;
 }
 .stApp div[data-baseweb="radio"] > div {
@@ -640,8 +640,7 @@ page_options = [
     "⑧ 리포트",
     "⑨ 자동 질문 발견",
 ]
-st.markdown("#### 메인 메뉴")
-active_page = st.radio("메뉴", page_options, horizontal=True, key="active_page")
+active_page = st.radio("메뉴", page_options, horizontal=True, key="active_page", label_visibility="collapsed")
 
 needs_events = active_page in {"⑥ NEW HISTORY", "⑦ 요약"}
 events = pd.DataFrame()
