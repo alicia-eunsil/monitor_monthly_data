@@ -378,12 +378,16 @@ def _classify(feature: pd.Series) -> str:
         return "하락 압력"
     if vulnerability >= 3:
         return "취약 확대"
+
+    # If overall signals are strong, classify as 상승/상승 둔화 first.
+    # Structural reshuffle is handled as a secondary interpretation (reason text).
+    if good >= 3:
+        if slowdown >= 2:
+            return "상승 둔화"
+        return "상승"
+
     if restructure >= 2 and pd.notna(emp) and emp > 0:
         return "산업·직종 재편"
-    if good >= 3 and slowdown >= 2:
-        return "상승 둔화"
-    if good >= 3:
-        return "상승"
     if slowdown >= 2:
         return "상승 둔화"
     if restructure >= 2:
