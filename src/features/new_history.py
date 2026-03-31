@@ -206,11 +206,24 @@ def _build_dataset_new_event_lines(
 def collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
     rows: List[Dict[str, str]] = []
     key_cols = ["dataset_key", "dataset_title", "region_name", "indicator_name", "category_name", "prd_se"]
+
+    def _prev_window_extreme(metric_df: pd.DataFrame, metric_col: str, years: int, mode: str) -> pd.Series:
+        values: List[float] = []
+        for _, row in metric_df.iterrows():
+            period = pd.Timestamp(row["period"])
+            cutoff = period - pd.DateOffset(years=int(years))
+            hist = metric_df[
+                (metric_df["period"] >= cutoff) & (metric_df["period"] < period)
+            ][metric_col]
+            if hist.empty:
+                values.append(float("nan"))
+            else:
+                values.append(float(hist.max()) if mode == "max" else float(hist.min()))
+        return pd.Series(values, index=metric_df.index, dtype="float64")
+
     for _, series in df.groupby(key_cols, dropna=False):
         series = series.sort_values("period")
         prd_se = str(series["prd_se"].iloc[0]).upper() if "prd_se" in series.columns else "M"
-        recent_5y_window = 10 if prd_se == "H" else 60
-        recent_10y_window = 20 if prd_se == "H" else 120
         meta = {
             "데이터셋": str(series["dataset_title"].iloc[0]),
             "지역": str(series["region_name"].iloc[0]),
@@ -230,10 +243,10 @@ def collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
 
             prev_max = metric_df[metric_col].cummax().shift(1)
             prev_min = metric_df[metric_col].cummin().shift(1)
-            prev_10y_max = metric_df[metric_col].shift(1).rolling(window=recent_10y_window, min_periods=1).max()
-            prev_10y_min = metric_df[metric_col].shift(1).rolling(window=recent_10y_window, min_periods=1).min()
-            prev_5y_max = metric_df[metric_col].shift(1).rolling(window=recent_5y_window, min_periods=1).max()
-            prev_5y_min = metric_df[metric_col].shift(1).rolling(window=recent_5y_window, min_periods=1).min()
+            prev_10y_max = _prev_window_extreme(metric_df, metric_col, years=10, mode="max")
+            prev_10y_min = _prev_window_extreme(metric_df, metric_col, years=10, mode="min")
+            prev_5y_max = _prev_window_extreme(metric_df, metric_col, years=5, mode="max")
+            prev_5y_min = _prev_window_extreme(metric_df, metric_col, years=5, mode="min")
 
             for scope_label, scope_series in [("전체기간", prev_max), ("최근10년", prev_10y_max), ("최근5년", prev_5y_max)]:
                 is_new_max = metric_df[metric_col] > scope_series
