@@ -3,8 +3,10 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Tuple
 
+import altair as alt
 import numpy as np
 import pandas as pd
+import pydeck as pdk
 import streamlit as st
 
 import src.config as app_config
@@ -15,29 +17,29 @@ GYEONGGI_SIGUNGU = getattr(app_config, "GYEONGGI_SIGUNGU", [])
 
 
 TYPE_ORDER = [
-    "전반 호조",
-    "호조-감속",
+    "상승",
+    "상승 둔화",
     "산업·직종 재편",
-    "구조 취약",
-    "하방 압력",
+    "취약 확대",
+    "하락 압력",
 ]
 
 TYPE_RULES = {
-    "전반 호조": "취업자·고용률 등 핵심 지표가 개선되고 최고 NEW가 우세한 시군",
-    "호조-감속": "총량은 양호하나 전년동기 대비 증감률 둔화/최저 신호가 함께 나타나는 시군",
+    "상승": "취업자·고용률 등 핵심 지표가 개선되고 최고 NEW가 우세한 시군",
+    "상승 둔화": "총량은 양호하나 전년동기 대비 증감률 둔화/최저 신호가 함께 나타나는 시군",
     "산업·직종 재편": "제조·기능계열 약화와 서비스·사무/판매계열 강화가 동시에 나타나는 시군",
-    "구조 취약": "청년·핵심 직종 약세와 최저 NEW 누적이 나타나는 시군",
-    "하방 압력": "취업자 감소, 고용률 약화, 실업률 상승 등 하방 신호가 우세한 시군",
+    "취약 확대": "청년·핵심 직종 약세와 최저 NEW 누적이 나타나는 시군",
+    "하락 압력": "취업자 감소, 고용률 약화, 실업률 상승 등 하방 신호가 우세한 시군",
 }
 
 POLICY_MATCH = {
-    "전반 호조": {
+    "상승": {
         "정책방향": "성장세 유지와 확산",
         "핵심대상": "증가 기여 상위 산업·직종",
         "권장과제": "채용연계 강화, 인력 미스매치 완화, 성장 업종 맞춤훈련",
         "점검지표": "최고 NEW 지속 여부, 확산도(증가 분류 비중)",
     },
-    "호조-감속": {
+    "상승 둔화": {
         "정책방향": "둔화 구간 선제 대응",
         "핵심대상": "증감률 둔화 분류(고용률, 취업자 증감률)",
         "권장과제": "증감률 하락 분류 집중점검, 단기 보강사업 투입",
@@ -49,19 +51,181 @@ POLICY_MATCH = {
         "권장과제": "전직·재배치 훈련, 업종 전환형 일자리 매칭, 취약업종 완충",
         "점검지표": "제조 vs 서비스 증감 격차, 기능 vs 서비스판매 격차",
     },
-    "구조 취약": {
+    "취약 확대": {
         "정책방향": "취약구간 회복",
         "핵심대상": "청년층, 기능·기계조작·조립, 단순노무 등 약세 분류",
         "권장과제": "청년 맞춤 채용지원, 취약직종 전환훈련, 생활권 단위 취업지원",
         "점검지표": "최저 NEW 누적, 청년 증감, 취약직종 연속감소",
     },
-    "하방 압력": {
+    "하락 압력": {
         "정책방향": "하방 리스크 완화",
         "핵심대상": "취업자 감소·실업률 상승 동반 시군",
         "권장과제": "집중 고용안정 패키지, 재취업 연계, 현장점검 강화",
         "점검지표": "취업자/고용률/실업률 3대 신호 동시 악화 여부",
     },
 }
+
+
+SIGUNGU_CENTER_LATLON = {
+    "수원시": (37.2636, 127.0286),
+    "성남시": (37.4201, 127.1262),
+    "의정부시": (37.7380, 127.0338),
+    "안양시": (37.3943, 126.9568),
+    "부천시": (37.5034, 126.7660),
+    "광명시": (37.4786, 126.8646),
+    "평택시": (36.9921, 127.1128),
+    "동두천시": (37.9036, 127.0606),
+    "안산시": (37.3219, 126.8309),
+    "고양시": (37.6584, 126.8320),
+    "과천시": (37.4292, 126.9870),
+    "구리시": (37.5943, 127.1296),
+    "남양주시": (37.6360, 127.2165),
+    "오산시": (37.1498, 127.0772),
+    "시흥시": (37.3802, 126.8029),
+    "군포시": (37.3615, 126.9353),
+    "의왕시": (37.3448, 126.9683),
+    "하남시": (37.5392, 127.2149),
+    "용인시": (37.2411, 127.1776),
+    "파주시": (37.7598, 126.7802),
+    "이천시": (37.2721, 127.4350),
+    "안성시": (37.0080, 127.2799),
+    "김포시": (37.6153, 126.7156),
+    "화성시": (37.1996, 126.8310),
+    "광주시": (37.4294, 127.2550),
+    "양주시": (37.7853, 127.0458),
+    "포천시": (37.8949, 127.2003),
+    "여주시": (37.2982, 127.6372),
+    "연천군": (38.0965, 127.0748),
+    "가평군": (37.8315, 127.5095),
+    "양평군": (37.4918, 127.4870),
+}
+
+
+TYPE_COLORS = {
+    "상승": [37, 99, 235, 180],
+    "상승 둔화": [30, 136, 229, 180],
+    "산업·직종 재편": [67, 160, 71, 180],
+    "취약 확대": [255, 167, 38, 180],
+    "하락 압력": [229, 57, 53, 180],
+}
+
+
+def _detect_region_type_cols(feature_df: pd.DataFrame) -> Tuple[str, str]:
+    if feature_df.empty:
+        return "", ""
+    cols = feature_df.columns.tolist()
+
+    type_col = ""
+    for c in cols:
+        vals = set(feature_df[c].dropna().astype(str).unique().tolist())
+        if vals and vals.issubset(set(TYPE_ORDER)):
+            type_col = c
+            break
+
+    region_col = ""
+    region_set = set([str(x) for x in GYEONGGI_SIGUNGU if str(x).strip()])
+    for c in cols:
+        vals = set(feature_df[c].dropna().astype(str).unique().tolist())
+        if vals and vals.issubset(region_set):
+            region_col = c
+            break
+
+    return region_col, type_col
+
+
+def _render_distribution_visuals(feature_df: pd.DataFrame) -> None:
+    region_col, type_col = _detect_region_type_cols(feature_df)
+    if not region_col or not type_col:
+        st.info("유형 분포 시각화를 위한 컬럼을 찾지 못했습니다.")
+        return
+
+    st.markdown("##### 유형 분포 시각화")
+
+    count_df = (
+        feature_df.groupby(type_col, as_index=False)
+        .size()
+        .rename(columns={"size": "시군 수"})
+    )
+    count_df["정렬"] = count_df[type_col].map({name: i for i, name in enumerate(TYPE_ORDER)}).fillna(999)
+    count_df = count_df.sort_values(["정렬", type_col]).drop(columns=["정렬"])
+
+    bar = (
+        alt.Chart(count_df)
+        .mark_bar(cornerRadiusEnd=4)
+        .encode(
+            y=alt.Y(f"{type_col}:N", sort=TYPE_ORDER, title="유형"),
+            x=alt.X("시군 수:Q", title="시군 수"),
+            color=alt.Color(
+                f"{type_col}:N",
+                scale=alt.Scale(domain=TYPE_ORDER, range=["#2563eb", "#1e88e5", "#43a047", "#ffa726", "#e53935"]),
+                legend=None,
+            ),
+            tooltip=[alt.Tooltip(f"{type_col}:N", title="유형"), alt.Tooltip("시군 수:Q", title="시군 수")],
+        )
+        .properties(height=220)
+    )
+    st.altair_chart(bar, use_container_width=True)
+
+    dot_src = feature_df[[region_col, type_col]].copy()
+    dot_src["정렬"] = dot_src[type_col].map({name: i for i, name in enumerate(TYPE_ORDER)}).fillna(999)
+    dot_src = dot_src.sort_values(["정렬", region_col]).drop(columns=["정렬"])
+
+    dot = (
+        alt.Chart(dot_src)
+        .mark_circle(size=90, opacity=0.9)
+        .encode(
+            x=alt.X(f"{type_col}:N", sort=TYPE_ORDER, title="유형"),
+            y=alt.Y(f"{region_col}:N", sort=alt.SortField(field=region_col, order="ascending"), title="시군"),
+            color=alt.Color(
+                f"{type_col}:N",
+                scale=alt.Scale(domain=TYPE_ORDER, range=["#2563eb", "#1e88e5", "#43a047", "#ffa726", "#e53935"]),
+                legend=None,
+            ),
+            tooltip=[alt.Tooltip(f"{region_col}:N", title="시군"), alt.Tooltip(f"{type_col}:N", title="유형")],
+        )
+        .properties(height=max(380, 16 * len(dot_src)))
+    )
+    st.altair_chart(dot, use_container_width=True)
+
+    city_table = (
+        feature_df.groupby(type_col)[region_col]
+        .apply(lambda s: ", ".join(sorted(s.astype(str).tolist())))
+        .reset_index()
+        .rename(columns={region_col: "시군명"})
+    )
+    city_table["정렬"] = city_table[type_col].map({name: i for i, name in enumerate(TYPE_ORDER)}).fillna(999)
+    city_table = city_table.sort_values(["정렬", type_col]).drop(columns=["정렬"])
+    st.dataframe(city_table, use_container_width=True, hide_index=True)
+
+    map_df = feature_df[[region_col, type_col]].copy()
+    map_df["lat"] = map_df[region_col].map(lambda x: SIGUNGU_CENTER_LATLON.get(str(x), (np.nan, np.nan))[0])
+    map_df["lon"] = map_df[region_col].map(lambda x: SIGUNGU_CENTER_LATLON.get(str(x), (np.nan, np.nan))[1])
+    map_df = map_df.dropna(subset=["lat", "lon"]).copy()
+    if map_df.empty:
+        st.info("지도 좌표를 매칭하지 못해 지도를 표시할 수 없습니다.")
+        return
+    map_df["color"] = map_df[type_col].map(lambda t: TYPE_COLORS.get(str(t), [120, 120, 120, 180]))
+
+    layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=map_df,
+        get_position="[lon, lat]",
+        get_color="color",
+        get_radius=7000,
+        pickable=True,
+        auto_highlight=True,
+    )
+    view_state = pdk.ViewState(
+        latitude=float(map_df["lat"].mean()),
+        longitude=float(map_df["lon"].mean()),
+        zoom=8.0,
+        pitch=0,
+    )
+    tooltip = {
+        "html": "<b>{%s}</b><br/>유형: {%s}" % (region_col, type_col),
+        "style": {"backgroundColor": "#1f2937", "color": "white"},
+    }
+    st.pydeck_chart(pdk.Deck(layers=[layer], initial_view_state=view_state, tooltip=tooltip), use_container_width=True)
 
 
 def _to_num(series: pd.Series) -> pd.Series:
@@ -250,22 +414,22 @@ def _classify(feature: pd.Series) -> str:
     slowdown += 1 if pd.notna(pop15) and pop15 < 0 else 0
 
     if down_pressure >= 3:
-        return "하방 압력"
+        return "하락 압력"
     if vulnerability >= 3:
-        return "구조 취약"
+        return "취약 확대"
     if restructure >= 2 and pd.notna(emp) and emp > 0:
         return "산업·직종 재편"
     if good >= 3 and slowdown >= 2:
-        return "호조-감속"
+        return "상승 둔화"
     if good >= 3:
-        return "전반 호조"
+        return "상승"
     if slowdown >= 2:
-        return "호조-감속"
+        return "상승 둔화"
     if restructure >= 2:
         return "산업·직종 재편"
     if vulnerability >= 2:
-        return "구조 취약"
-    return "하방 압력" if (pd.notna(emp) and emp < 0) else "호조-감속"
+        return "취약 확대"
+    return "하락 압력" if (pd.notna(emp) and emp < 0) else "상승 둔화"
 
 
 def _reason_text(feature: pd.Series, label: str) -> str:
@@ -454,3 +618,5 @@ def render_sigungu_typology_tab(df: pd.DataFrame, is_gyeonggi31_mode: bool, data
     policy_df["유형정렬"] = policy_df["유형"].map({name: i for i, name in enumerate(TYPE_ORDER)}).fillna(999)
     policy_df = policy_df.sort_values(["유형정렬", "유형"]).drop(columns=["유형정렬"])
     st.dataframe(policy_df, use_container_width=True, hide_index=True)
+
+    _render_distribution_visuals(feature)
