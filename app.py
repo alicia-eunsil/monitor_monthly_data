@@ -331,8 +331,42 @@ def _render_dataset(
     indicators = sorted(subset["indicator_name"].dropna().unique().tolist())
     if dataset_key == "activity":
         indicators = _order_activity_indicators(indicators)
+
+    def _pick_auto_indicator(region_name: str) -> str:
+        if not indicators:
+            return ""
+        drop_labels = {"시도별", "산업별", "산업명", "직업별", "직종별"}
+        region_slice = subset[subset["region_name"] == region_name]
+        if region_slice.empty:
+            region_slice = subset
+
+        def _category_count(ind_name: str) -> int:
+            pool = region_slice[region_slice["indicator_name"] == ind_name]
+            cats = [
+                c
+                for c in pool["category_name"].dropna().unique().tolist()
+                if str(c).strip() != "" and str(c).strip() not in drop_labels
+            ]
+            return len(cats)
+
+        def _priority(ind_name: str) -> tuple[int, int, str]:
+            compact = str(ind_name).replace(" ", "")
+            score = 0
+            if "취업자(천명)" in compact:
+                score += 300
+            elif "취업자" in compact and "천명" in compact:
+                score += 220
+            elif "취업자" in compact:
+                score += 120
+            return (score, _category_count(ind_name), str(ind_name))
+
+        return sorted(indicators, key=_priority, reverse=True)[0]
+
     if indicators and st.session_state.get(indicator_state_key) not in indicators:
-        st.session_state[indicator_state_key] = indicators[0]
+        default_indicator = indicators[0]
+        if dataset_key in {"industry", "occupation", "age", "status"}:
+            default_indicator = _pick_auto_indicator(st.session_state[region_state_key])
+        st.session_state[indicator_state_key] = default_indicator
 
     with st.form(key=f"filters_{state_prefix}", border=False):
         with col1:
@@ -354,24 +388,8 @@ def _render_dataset(
                     key=f"{state_prefix}_indicator_input",
                     horizontal=True,
                 )
-        elif dataset_key == "industry" and indicators:
-            # Industry datasets can include multiple item IDs; auto-pick the one
-            # with the broadest category coverage for the selected region.
-            drop_labels = {"시도별", "산업별", "산업명", "직업별", "직종별"}
-            region_slice = subset[subset["region_name"] == region_input]
-            if region_slice.empty:
-                region_slice = subset
-
-            def _category_count(ind_name: str) -> int:
-                pool = region_slice[region_slice["indicator_name"] == ind_name]
-                cats = [
-                    c
-                    for c in pool["category_name"].dropna().unique().tolist()
-                    if str(c).strip() != "" and str(c).strip() not in drop_labels
-                ]
-                return len(cats)
-
-            indicator_input = sorted(indicators, key=lambda x: (_category_count(x), x), reverse=True)[0]
+        elif dataset_key in {"industry", "occupation", "age", "status"} and indicators:
+            indicator_input = _pick_auto_indicator(region_input)
 
         category_input = st.session_state.get(category_state_key, "")
         if cfg.has_category:
@@ -436,10 +454,16 @@ def _render_dataset(
         st.session_state[indicator_state_key] = indicator_input
         if cfg.has_category:
             st.session_state[category_state_key] = category_input
+    elif dataset_key in {"industry", "occupation", "age", "status"}:
+        # Hidden-indicator datasets should always keep the auto-selected indicator
+        # in sync with current region/category context.
+        st.session_state[indicator_state_key] = indicator_input
 
     region = str(st.session_state.get(region_state_key, region_input))
     indicator = str(st.session_state.get(indicator_state_key, indicator_input))
     category = str(st.session_state.get(category_state_key, category_input if cfg.has_category else ""))
+    if dataset_key in {"industry", "occupation", "age", "status"} and indicator:
+        st.caption(f"지표: {indicator}")
 
     series_df = series_filter(
         df=subset,
