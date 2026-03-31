@@ -35,8 +35,8 @@ from src.features.new_history import (
     render_new_history_tab as _render_new_history_tab,
     render_new_monthly_report as _render_new_monthly_report,
 )
-from src.features.auto_discovery import render_auto_discovery_tab as _render_auto_discovery_tab
 from src.features.report import render_report_template as _render_report_template
+from src.features.sigungu_typology import render_sigungu_typology_tab as _render_sigungu_typology_tab
 from src.services.loader import load_all_data_with_progress
 from src.transform import build_stats, series_filter
 
@@ -662,7 +662,7 @@ page_options = [
     "⑥ 직종별 취업자수",
     "⑦ 요약",
     "⑧ 리포트",
-    "⑨ 자동 질문 발견",
+    "⑨ 시군 유형화·정책매칭",
 ]
 active_page = st.radio("메뉴", page_options, horizontal=True, key="active_page", label_visibility="collapsed")
 
@@ -767,8 +767,8 @@ elif active_page == "⑧ 리포트":
         is_gyeonggi31_mode=is_gyeonggi31_mode,
         labels=labels,
     )
-elif active_page == "⑨ 자동 질문 발견":
-    _render_auto_discovery_tab(visible_data, labels=labels)
+elif active_page == "⑨ 시군 유형화·정책매칭":
+    _render_sigungu_typology_tab(visible_data, is_gyeonggi31_mode=is_gyeonggi31_mode, datasets=active_datasets)
 
 st.markdown(
     "<hr style='margin-top:2rem; margin-bottom:0.5rem;'>"

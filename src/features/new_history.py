@@ -1,5 +1,7 @@
 from typing import Any, Dict, List, Optional
 
+from collections import deque
+
 import pandas as pd
 import streamlit as st
 
@@ -208,17 +210,41 @@ def collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
     key_cols = ["dataset_key", "dataset_title", "region_name", "indicator_name", "category_name", "prd_se"]
 
     def _prev_window_extreme(metric_df: pd.DataFrame, metric_col: str, years: int, mode: str) -> pd.Series:
-        # Date-based rolling window over shifted series:
-        # shift(1) excludes current point and keeps only prior observations.
+        # Exact date-based window (same boundary rule as build_stats/_slice_recent_years):
+        # previous points with period >= (current_period - years) and < current_period.
         if metric_df.empty:
             return pd.Series(dtype="float64")
-        window_days = max(1, int(round(float(years) * 365.25)))
-        window = f"{window_days}D"
-        indexed = metric_df.set_index("period")[metric_col].astype(float).sort_index()
-        shifted = indexed.shift(1)
-        rolled = shifted.rolling(window=window, min_periods=1)
-        out = rolled.max() if mode == "max" else rolled.min()
-        return pd.Series(out.to_numpy(), index=metric_df.index, dtype="float64")
+        periods = pd.to_datetime(metric_df["period"]).tolist()
+        values = metric_df[metric_col].astype(float).tolist()
+        n = len(values)
+        out = [float("nan")] * n
+
+        if mode == "max":
+            mono = deque()  # decreasing by value
+            def pop_cond(last_idx: int, new_val: float) -> bool:
+                return values[last_idx] <= new_val
+        else:
+            mono = deque()  # increasing by value
+            def pop_cond(last_idx: int, new_val: float) -> bool:
+                return values[last_idx] >= new_val
+
+        left = 0
+        for i in range(n):
+            cutoff = pd.Timestamp(periods[i]) - pd.DateOffset(years=int(years))
+            while left < i and pd.Timestamp(periods[left]) < cutoff:
+                if mono and mono[0] == left:
+                    mono.popleft()
+                left += 1
+
+            if mono:
+                out[i] = float(values[mono[0]])
+
+            cur_val = float(values[i])
+            while mono and pop_cond(mono[-1], cur_val):
+                mono.pop()
+            mono.append(i)
+
+        return pd.Series(out, index=metric_df.index, dtype="float64")
 
     for _, series in df.groupby(key_cols, dropna=False):
         series = series.sort_values("period")
@@ -486,7 +512,7 @@ def render_new_monthly_report(
         point_label = str(labels.get("point", "월"))
         st.markdown(f"- {build_new_focus_line(month_df, '최고', f'이번 {point_label} NEW 핵심')}")
         st.markdown(f"- {build_new_focus_line(month_df, '최저', f'이번 {point_label} NEW 리스크')}")
-        st.caption("See tab 6 (NEW HISTORY) for event details and tab 8 (Report) for full document view.")
+        st.caption("See tab 1 (NEW HISTORY) for event details and tab 8 (Report) for full document view.")
         return
 
     type_summary = month_df.groupby(["구분", "범위", "유형"], as_index=False).size().rename(columns={"size": "NEW 건수"})
