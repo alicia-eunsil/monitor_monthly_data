@@ -208,18 +208,17 @@ def collect_new_events(df: pd.DataFrame) -> pd.DataFrame:
     key_cols = ["dataset_key", "dataset_title", "region_name", "indicator_name", "category_name", "prd_se"]
 
     def _prev_window_extreme(metric_df: pd.DataFrame, metric_col: str, years: int, mode: str) -> pd.Series:
-        values: List[float] = []
-        for _, row in metric_df.iterrows():
-            period = pd.Timestamp(row["period"])
-            cutoff = period - pd.DateOffset(years=int(years))
-            hist = metric_df[
-                (metric_df["period"] >= cutoff) & (metric_df["period"] < period)
-            ][metric_col]
-            if hist.empty:
-                values.append(float("nan"))
-            else:
-                values.append(float(hist.max()) if mode == "max" else float(hist.min()))
-        return pd.Series(values, index=metric_df.index, dtype="float64")
+        # Date-based rolling window over shifted series:
+        # shift(1) excludes current point and keeps only prior observations.
+        if metric_df.empty:
+            return pd.Series(dtype="float64")
+        window_days = max(1, int(round(float(years) * 365.25)))
+        window = f"{window_days}D"
+        indexed = metric_df.set_index("period")[metric_col].astype(float).sort_index()
+        shifted = indexed.shift(1)
+        rolled = shifted.rolling(window=window, min_periods=1)
+        out = rolled.max() if mode == "max" else rolled.min()
+        return pd.Series(out.to_numpy(), index=metric_df.index, dtype="float64")
 
     for _, series in df.groupby(key_cols, dropna=False):
         series = series.sort_values("period")
