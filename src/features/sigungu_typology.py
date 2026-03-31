@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Tuple
 
-import altair as alt
 import numpy as np
 import pandas as pd
 import pydeck as pdk
@@ -141,52 +140,6 @@ def _render_distribution_visuals(feature_df: pd.DataFrame) -> None:
 
     st.markdown("##### 유형 분포 시각화")
 
-    count_df = (
-        feature_df.groupby(type_col, as_index=False)
-        .size()
-        .rename(columns={"size": "시군 수"})
-    )
-    count_df["정렬"] = count_df[type_col].map({name: i for i, name in enumerate(TYPE_ORDER)}).fillna(999)
-    count_df = count_df.sort_values(["정렬", type_col]).drop(columns=["정렬"])
-
-    bar = (
-        alt.Chart(count_df)
-        .mark_bar(cornerRadiusEnd=4)
-        .encode(
-            y=alt.Y(f"{type_col}:N", sort=TYPE_ORDER, title="유형"),
-            x=alt.X("시군 수:Q", title="시군 수"),
-            color=alt.Color(
-                f"{type_col}:N",
-                scale=alt.Scale(domain=TYPE_ORDER, range=["#2563eb", "#1e88e5", "#43a047", "#ffa726", "#e53935"]),
-                legend=None,
-            ),
-            tooltip=[alt.Tooltip(f"{type_col}:N", title="유형"), alt.Tooltip("시군 수:Q", title="시군 수")],
-        )
-        .properties(height=220)
-    )
-    st.altair_chart(bar, use_container_width=True)
-
-    dot_src = feature_df[[region_col, type_col]].copy()
-    dot_src["정렬"] = dot_src[type_col].map({name: i for i, name in enumerate(TYPE_ORDER)}).fillna(999)
-    dot_src = dot_src.sort_values(["정렬", region_col]).drop(columns=["정렬"])
-
-    dot = (
-        alt.Chart(dot_src)
-        .mark_circle(size=90, opacity=0.9)
-        .encode(
-            x=alt.X(f"{type_col}:N", sort=TYPE_ORDER, title="유형"),
-            y=alt.Y(f"{region_col}:N", sort=alt.SortField(field=region_col, order="ascending"), title="시군"),
-            color=alt.Color(
-                f"{type_col}:N",
-                scale=alt.Scale(domain=TYPE_ORDER, range=["#2563eb", "#1e88e5", "#43a047", "#ffa726", "#e53935"]),
-                legend=None,
-            ),
-            tooltip=[alt.Tooltip(f"{region_col}:N", title="시군"), alt.Tooltip(f"{type_col}:N", title="유형")],
-        )
-        .properties(height=max(380, 16 * len(dot_src)))
-    )
-    st.altair_chart(dot, use_container_width=True)
-
     city_table = (
         feature_df.groupby(type_col)[region_col]
         .apply(lambda s: ", ".join(sorted(s.astype(str).tolist())))
@@ -211,7 +164,7 @@ def _render_distribution_visuals(feature_df: pd.DataFrame) -> None:
         data=map_df,
         get_position="[lon, lat]",
         get_color="color",
-        get_radius=7000,
+        get_radius=3800,
         pickable=True,
         auto_highlight=True,
     )
@@ -225,7 +178,15 @@ def _render_distribution_visuals(feature_df: pd.DataFrame) -> None:
         "html": "<b>{%s}</b><br/>유형: {%s}" % (region_col, type_col),
         "style": {"backgroundColor": "#1f2937", "color": "white"},
     }
-    st.pydeck_chart(pdk.Deck(layers=[layer], initial_view_state=view_state, tooltip=tooltip), use_container_width=True)
+    st.pydeck_chart(
+        pdk.Deck(
+            layers=[layer],
+            initial_view_state=view_state,
+            tooltip=tooltip,
+            map_style="light",
+        ),
+        use_container_width=True,
+    )
 
 
 def _to_num(series: pd.Series) -> pd.Series:
