@@ -145,7 +145,19 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-DATA_MODEL_VERSION = "2026-03-23-no-gyeonggi-total-v1"
+DATA_MODEL_VERSION = "2026-04-02-empty-data-diagnostics-v1"
+
+
+def _is_valid_scope_data(scope_data: object) -> bool:
+    if not isinstance(scope_data, dict):
+        return False
+    for scope_key in ["province", "gyeonggi31"]:
+        frame = scope_data.get(scope_key)
+        if not isinstance(frame, pd.DataFrame):
+            return False
+        if not frame.empty and "region_name" not in frame.columns:
+            return False
+    return True
 
 
 def _seeded_api_key() -> str:
@@ -577,6 +589,7 @@ with st.sidebar:
         st.session_state.pop("_loaded_data_version", None)
         st.session_state.pop("_loaded_scope_data", None)
         st.session_state.pop("_loaded_errors", None)
+        st.session_state.pop("_loaded_empty_data_warnings", None)
         st.session_state.pop("_loaded_debug_logs", None)
         st.rerun()
     sidebar_status = st.empty()
@@ -592,16 +605,18 @@ loading_notice = st.empty()
 loading_notice.info("데이터 불러오는 중... (약 10분 소요예정)")
 loading_progress = st.empty()
 try:
+    cached_scope_data = st.session_state.get("_loaded_scope_data")
     if (
         st.session_state.get("_loaded_api_key") == api_key
         and st.session_state.get("_loaded_data_version") == DATA_MODEL_VERSION
-        and "_loaded_scope_data" in st.session_state
+        and _is_valid_scope_data(cached_scope_data)
     ):
-        scope_data = st.session_state["_loaded_scope_data"]
+        scope_data = cached_scope_data
         load_errors = st.session_state.get("_loaded_errors", [])
+        empty_data_warnings = st.session_state.get("_loaded_empty_data_warnings", [])
         debug_logs = st.session_state.get("_loaded_debug_logs", [])
     else:
-        scope_data, load_errors, debug_logs = load_all_data_with_progress(
+        scope_data, load_errors, debug_logs, empty_data_warnings = load_all_data_with_progress(
             api_key=api_key,
             status_box=sidebar_status,
             progress_box=sidebar_progress_box,
@@ -612,6 +627,7 @@ try:
         st.session_state["_loaded_data_version"] = DATA_MODEL_VERSION
         st.session_state["_loaded_scope_data"] = scope_data
         st.session_state["_loaded_errors"] = load_errors
+        st.session_state["_loaded_empty_data_warnings"] = empty_data_warnings
         st.session_state["_loaded_debug_logs"] = debug_logs
 finally:
     loading_notice.empty()
@@ -621,6 +637,10 @@ if load_errors:
     st.error("일부 데이터셋 조회 중 오류가 발생했습니다.")
     for err in load_errors:
         st.write(f"- {err}")
+if empty_data_warnings:
+    st.warning("일부 데이터셋에서 API 응답이 비어 있거나 파싱 결과가 0건입니다.")
+    for msg in empty_data_warnings:
+        st.write(f"- {msg}")
 
 if debug_logs:
     with st.sidebar:
@@ -642,6 +662,9 @@ data = scope_data.get(region_scope, pd.DataFrame())
 
 if data.empty:
     st.warning("조회된 데이터가 없습니다. API 파라미터를 확인하세요.")
+    st.stop()
+if "region_name" not in data.columns:
+    st.error("데이터 스키마가 올바르지 않습니다. 사이드바에서 '데이터 새로고침'을 눌러주세요.")
     st.stop()
 
 region_pool = TARGET_REGIONS if region_scope == "province" else GYEONGGI_SIGUNGU
