@@ -678,9 +678,12 @@ if missing_columns:
         st.session_state.pop("_loaded_debug_logs", None)
         st.warning("데이터 스키마 불일치를 감지해 자동으로 데이터를 다시 불러옵니다.")
         st.rerun()
+    present_columns = sorted(map(str, data.columns.tolist()))
+    preview_columns = ", ".join(present_columns[:20]) if present_columns else "(없음)"
     st.error(
         "데이터 스키마가 올바르지 않습니다. "
-        f"누락 컬럼: {', '.join(missing_columns)}. 사이드바에서 '데이터 새로고침'을 눌러주세요."
+        f"누락 컬럼: {', '.join(missing_columns)}. 현재 컬럼: {preview_columns}. "
+        "사이드바의 진단 로그를 확인해 주세요."
     )
     st.stop()
 st.session_state.pop("_schema_recovery_attempted", None)

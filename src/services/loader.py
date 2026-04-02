@@ -7,6 +7,16 @@ from src.core.category_rules import apply_industry_category_filter
 from src.kosis_client import KosisClient
 from src.transform import add_yoy, normalize_records
 
+REQUIRED_SCOPE_COLUMNS = {
+    "dataset_key",
+    "region_name",
+    "indicator_name",
+    "category_name",
+    "period",
+    "value",
+    "prd_se",
+}
+
 DatasetConfig = getattr(app_config, "DatasetConfig", Any)
 datasets_for_scope = getattr(
     app_config,
@@ -46,6 +56,7 @@ def load_all_data_with_progress(
         ("province", "전국·17개 시도", datasets_for_scope("province")),
         ("gyeonggi31", "경기 31개 시군", datasets_for_scope("gyeonggi31")),
     ]
+    scope_title_map = {k: t for k, t, _ in scope_defs}
     total_steps = sum(len(ds) * 2 for _, _, ds in scope_defs) + len(scope_defs)
     step = 0
     frames_by_scope: Dict[str, List[pd.DataFrame]] = {k: [] for k, _, _ in scope_defs}
@@ -144,6 +155,15 @@ def load_all_data_with_progress(
         frames = frames_by_scope.get(scope_key, [])
         if frames:
             combined = pd.concat(frames, ignore_index=True)
+            missing_required = sorted(REQUIRED_SCOPE_COLUMNS - set(combined.columns))
+            debug_logs.append(f"[{scope_key}:all] combined_cols={list(combined.columns)}")
+            if missing_required:
+                errors.append(
+                    f"{scope_title_map.get(scope_key, scope_key)} - 통합 데이터 스키마 누락: {', '.join(missing_required)}"
+                )
+                debug_logs.append(f"[{scope_key}:all] missing_required_cols={missing_required}")
+                data_by_scope[scope_key] = pd.DataFrame()
+                continue
             combined = add_yoy(combined)
             combined, filter_stats = apply_industry_category_filter(combined)
             debug_logs.append(
