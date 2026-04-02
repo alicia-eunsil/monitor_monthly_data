@@ -348,6 +348,16 @@ def add_yoy(df: pd.DataFrame) -> pd.DataFrame:
     out = df.sort_values(group_cols + ["period"]).copy()
 
     def _calc_group(g: pd.DataFrame) -> pd.DataFrame:
+        # Pandas version differences may exclude grouping columns from `g` in groupby.apply.
+        # Re-attach from group key so downstream schema stays stable.
+        missing_group_cols = [c for c in group_cols if c not in g.columns]
+        if missing_group_cols:
+            key_values = g.name if isinstance(g.name, tuple) else (g.name,)
+            key_values = tuple(key_values) + ("",) * max(0, len(group_cols) - len(tuple(key_values)))
+            key_map = {col: key_values[idx] for idx, col in enumerate(group_cols)}
+            for col in missing_group_cols:
+                g[col] = key_map.get(col, "")
+
         lag = 2 if str(g["prd_se"].iloc[0]).upper() == "H" else 12
         g = g.copy()
         values = pd.to_numeric(g["value"], errors="coerce")
