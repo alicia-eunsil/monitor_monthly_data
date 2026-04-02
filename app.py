@@ -217,6 +217,15 @@ def _card(title: str, value: str, sub: str, is_new: bool = False, value_class: s
 
 
 def _style_extreme_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
+    def _style_map(
+        base: pd.io.formats.style.Styler,
+        func: Any,
+        subset: List[str],
+    ) -> pd.io.formats.style.Styler:
+        if hasattr(base, "map"):
+            return base.map(func, subset=subset)
+        return base.applymap(func, subset=subset)
+
     styler = df.style.set_properties(**{"text-align": "center"}).set_table_styles(
         [
             {"selector": "table", "props": [("width", "100%")]},
@@ -226,11 +235,12 @@ def _style_extreme_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         overwrite=False,
     )
     if "최고" in df.columns:
-        styler = styler.applymap(lambda _: "color:#b91c1c;font-weight:700;", subset=["최고"])
+        styler = _style_map(styler, lambda _: "color:#b91c1c;font-weight:700;", subset=["최고"])
     if "최저" in df.columns:
-        styler = styler.applymap(lambda _: "color:#1d4ed8;font-weight:700;", subset=["최저"])
+        styler = _style_map(styler, lambda _: "color:#1d4ed8;font-weight:700;", subset=["최저"])
     if "비고" in df.columns:
-        styler = styler.applymap(
+        styler = _style_map(
+            styler,
             lambda v: "color:#f59e0b;font-weight:700;" if "NEW" in str(v).strip() else "",
             subset=["비고"],
         )
