@@ -350,9 +350,14 @@ def add_yoy(df: pd.DataFrame) -> pd.DataFrame:
     def _calc_group(g: pd.DataFrame) -> pd.DataFrame:
         lag = 2 if str(g["prd_se"].iloc[0]).upper() == "H" else 12
         g = g.copy()
-        g["yoy_abs"] = g["value"] - g["value"].shift(lag)
-        prev = g["value"].shift(lag)
-        g["yoy_pct"] = np.where(prev == 0, np.nan, (g["value"] / prev - 1.0) * 100.0)
+        values = pd.to_numeric(g["value"], errors="coerce")
+        prev = values.shift(lag)
+        g["yoy_abs"] = values - prev
+
+        yoy_pct = pd.Series(np.nan, index=g.index, dtype="float64")
+        valid = prev.notna() & (prev != 0)
+        yoy_pct.loc[valid] = (values.loc[valid] / prev.loc[valid] - 1.0) * 100.0
+        g["yoy_pct"] = yoy_pct
         return g
 
     out = out.groupby(group_cols, dropna=False, group_keys=False).apply(_calc_group)
