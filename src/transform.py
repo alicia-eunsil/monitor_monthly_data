@@ -322,6 +322,8 @@ def normalize_records(
         out = pd.concat([direct_city, district_agg], ignore_index=True, sort=False)
         out = out.drop(columns=["_from_district"], errors="ignore")
 
+    # Ensure `.dt` access below is safe even when concat paths produce an empty/object-typed column.
+    out["period"] = pd.to_datetime(out["period"], errors="coerce")
     out = out.dropna(subset=["period", "value"])
     out = out.sort_values(["region_name", "indicator_name", "category_name", "period"])
     out = out.drop_duplicates(
