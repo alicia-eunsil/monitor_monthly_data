@@ -145,7 +145,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-DATA_MODEL_VERSION = "2026-04-02-empty-data-diagnostics-v1"
+DATA_MODEL_VERSION = "2026-04-02-schema-autorecover-v1"
+REQUIRED_SCOPE_COLUMNS = {"dataset_key", "region_name", "indicator_name", "category_name", "period", "value", "prd_se"}
 
 
 def _is_valid_scope_data(scope_data: object) -> bool:
@@ -155,7 +156,7 @@ def _is_valid_scope_data(scope_data: object) -> bool:
         frame = scope_data.get(scope_key)
         if not isinstance(frame, pd.DataFrame):
             return False
-        if not frame.empty and "region_name" not in frame.columns:
+        if not frame.empty and not REQUIRED_SCOPE_COLUMNS.issubset(set(frame.columns)):
             return False
     return True
 
@@ -591,6 +592,7 @@ with st.sidebar:
         st.session_state.pop("_loaded_errors", None)
         st.session_state.pop("_loaded_empty_data_warnings", None)
         st.session_state.pop("_loaded_debug_logs", None)
+        st.session_state.pop("_schema_recovery_attempted", None)
         st.rerun()
     sidebar_status = st.empty()
     sidebar_progress_box = st.empty()
@@ -661,11 +663,27 @@ st.caption(f"조회범위: {scope_label}")
 data = scope_data.get(region_scope, pd.DataFrame())
 
 if data.empty:
+    st.session_state.pop("_schema_recovery_attempted", None)
     st.warning("조회된 데이터가 없습니다. API 파라미터를 확인하세요.")
     st.stop()
-if "region_name" not in data.columns:
-    st.error("데이터 스키마가 올바르지 않습니다. 사이드바에서 '데이터 새로고침'을 눌러주세요.")
+missing_columns = sorted(REQUIRED_SCOPE_COLUMNS - set(data.columns))
+if missing_columns:
+    if not st.session_state.get("_schema_recovery_attempted", False):
+        st.session_state["_schema_recovery_attempted"] = True
+        st.session_state.pop("_loaded_api_key", None)
+        st.session_state.pop("_loaded_data_version", None)
+        st.session_state.pop("_loaded_scope_data", None)
+        st.session_state.pop("_loaded_errors", None)
+        st.session_state.pop("_loaded_empty_data_warnings", None)
+        st.session_state.pop("_loaded_debug_logs", None)
+        st.warning("데이터 스키마 불일치를 감지해 자동으로 데이터를 다시 불러옵니다.")
+        st.rerun()
+    st.error(
+        "데이터 스키마가 올바르지 않습니다. "
+        f"누락 컬럼: {', '.join(missing_columns)}. 사이드바에서 '데이터 새로고침'을 눌러주세요."
+    )
     st.stop()
+st.session_state.pop("_schema_recovery_attempted", None)
 
 region_pool = TARGET_REGIONS if region_scope == "province" else GYEONGGI_SIGUNGU
 default_region = "경기도" if region_scope == "province" else (GYEONGGI_SIGUNGU[0] if GYEONGGI_SIGUNGU else "")
