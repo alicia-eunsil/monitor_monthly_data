@@ -691,6 +691,101 @@ def render_consecutive_change_summary(
         st.markdown("\n".join(streak_lines))
 
 
+def _build_indicator_region_extreme_table(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+
+    group_cols = ["기준월", "데이터셋", "지표", "분류", "구분", "범위"]
+    work = df.copy()
+    work["지역"] = work["지역"].astype(str).str.strip()
+    work["유형"] = work["유형"].astype(str).str.strip()
+
+    def _region_list(series: pd.Series) -> str:
+        regions = sorted({str(x).strip() for x in series if str(x).strip()})
+        return ", ".join(regions) if regions else "-"
+
+    high = (
+        work[work["유형"] == "최고"]
+        .groupby(group_cols, dropna=False)["지역"]
+        .agg(_region_list)
+        .reset_index(name="최고 지역")
+    )
+    low = (
+        work[work["유형"] == "최저"]
+        .groupby(group_cols, dropna=False)["지역"]
+        .agg(_region_list)
+        .reset_index(name="최저 지역")
+    )
+
+    out = high.merge(low, on=group_cols, how="outer")
+    out["분류"] = out["분류"].astype(str).str.strip().replace("", "전체")
+    out["최고 지역"] = out["최고 지역"].fillna("-")
+    out["최저 지역"] = out["최저 지역"].fillna("-")
+
+    return out.sort_values(
+        ["기준월", "데이터셋", "지표", "분류", "구분", "범위"],
+        ascending=[False, True, True, True, True, True],
+    )
+
+
+def _build_indicator_region_period_pivot(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+
+    work = df.copy()
+    work["지역"] = work["지역"].astype(str).str.strip()
+    work["유형"] = work["유형"].astype(str).str.strip()
+    work["구분"] = work["구분"].astype(str).str.strip()
+    work["범위"] = work["범위"].astype(str).str.strip()
+
+    # Keep only level and yoy-rate views for a compact comparison table.
+    work = work[work["구분"].isin(["원자료", "YoY(증감률)"])].copy()
+    if work.empty:
+        return pd.DataFrame()
+
+    index_cols = ["기준월", "데이터셋", "지표", "분류"]
+
+    def _region_list(series: pd.Series) -> str:
+        regions = sorted({str(x).strip() for x in series if str(x).strip()})
+        return ", ".join(regions) if regions else "-"
+
+    grouped = (
+        work.groupby(index_cols + ["구분", "범위", "유형"], dropna=False)["지역"]
+        .agg(_region_list)
+        .reset_index(name="지역목록")
+    )
+    grouped["분류"] = grouped["분류"].astype(str).str.strip().replace("", "전체")
+    grouped["col_key"] = grouped["구분"] + "|" + grouped["범위"] + "|" + grouped["유형"]
+
+    pivot = grouped.pivot_table(
+        index=index_cols,
+        columns="col_key",
+        values="지역목록",
+        aggfunc="first",
+    ).reset_index()
+
+    desired_col_keys = []
+    for metric in ["원자료", "YoY(증감률)"]:
+        for scope in ["전체기간", "최근10년", "최근5년"]:
+            for event_type in ["최고", "최저"]:
+                desired_col_keys.append(f"{metric}|{scope}|{event_type}")
+
+    for key in desired_col_keys:
+        if key not in pivot.columns:
+            pivot[key] = "-"
+
+    keep_cols = index_cols + desired_col_keys
+    pivot = pivot[keep_cols].fillna("-")
+
+    rename_map = {k: k.replace("|", " / ") for k in desired_col_keys}
+    pivot = pivot.rename(columns=rename_map)
+
+    return pivot.sort_values(
+        ["기준월", "데이터셋", "지표", "분류"],
+        ascending=[False, True, True, True],
+    )
+
+
 def render_new_history_tab(events: pd.DataFrame) -> None:
     st.subheader("NEW HISTORY")
     if events.empty:
@@ -749,3 +844,23 @@ def render_new_history_tab(events: pd.DataFrame) -> None:
             f"- **[{row['기준월']}]** {row['데이터셋']} | {row['지역']} | {row['지표']} | {category_text} | {row['구분']} {row['범위']} {row['유형']}"
         )
     st.markdown("\n".join(detail_lines) if detail_lines else "- 표시할 이벤트가 없습니다.")
+
+    by_indicator_source = view.copy()
+    if date_sel != "전체":
+        by_indicator_source = by_indicator_source[by_indicator_source["기준월"].astype(str) == str(date_sel)]
+    by_indicator_df = _build_indicator_region_extreme_table(by_indicator_source)
+
+    st.markdown(f"##### 지표별 최고/최저 지역 (일자: {date_label})")
+    if region_sel != "전체":
+        st.caption("지표별 비교를 위해 이 표에는 지역 필터를 적용하지 않았습니다.")
+    if by_indicator_df.empty:
+        st.info("지표별 최고/최저 지역 데이터가 없습니다.")
+    else:
+        st.dataframe(by_indicator_df, use_container_width=True, hide_index=True)
+
+    period_pivot_df = _build_indicator_region_period_pivot(by_indicator_source)
+    st.markdown(f"##### 기간별 최고/최저 지역 (원자료·증감률, 일자: {date_label})")
+    if period_pivot_df.empty:
+        st.info("기간별 비교용 데이터가 없습니다.")
+    else:
+        st.dataframe(period_pivot_df, use_container_width=True, hide_index=True)
