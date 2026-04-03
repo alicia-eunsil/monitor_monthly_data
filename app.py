@@ -31,6 +31,8 @@ from src.core.formatters import (
 from src.features.insights import render_ai_insights as _render_ai_insights
 from src.features.new_history import (
     collect_new_events as _collect_new_events,
+    get_report_period_options as _get_report_period_options,
+    get_report_region_options as _get_report_region_options,
     render_consecutive_change_summary as _render_consecutive_change_summary,
     render_new_history_tab as _render_new_history_tab,
     render_new_monthly_report as _render_new_monthly_report,
@@ -784,31 +786,93 @@ elif active_page == "⑥ 직종별 취업자수":
 elif active_page == "⑦ 요약":
     st.subheader("요약(간략)")
     if region_scope == "gyeonggi31":
-        summary_scope_options = ["31개 시군"]
+        summary_scope = "31개 시군"
+        sigungu_options = _get_report_region_options(events, summary_scope)
+        if not sigungu_options:
+            sigungu_options = sorted(visible_data["region_name"].dropna().astype(str).str.strip().unique().tolist())
+
+        selected_sigungu = ""
+        selected_report_month = None
+        c1, c2 = st.columns(2)
+        with c1:
+            if sigungu_options:
+                default_sigungu = str(st.session_state.get("summary_sigungu", sigungu_options[0]))
+                if default_sigungu not in sigungu_options:
+                    default_sigungu = sigungu_options[0]
+                selected_sigungu = st.selectbox(
+                    "시군 선택",
+                    sigungu_options,
+                    index=sigungu_options.index(default_sigungu),
+                    key="summary_sigungu",
+                )
+            else:
+                st.selectbox(
+                    "시군 선택",
+                    ["선택 가능한 시군 없음"],
+                    index=0,
+                    key="summary_sigungu_empty",
+                    disabled=True,
+                )
+
+        report_month_options = _get_report_period_options(
+            events,
+            summary_scope,
+            selected_region=selected_sigungu or None,
+        )
+        with c2:
+            if report_month_options:
+                default_month = str(st.session_state.get("report_month", report_month_options[0]))
+                if default_month not in report_month_options:
+                    default_month = report_month_options[0]
+                selected_report_month = st.selectbox(
+                    f"리포트 기준{labels['point']}",
+                    report_month_options,
+                    index=report_month_options.index(default_month),
+                    key="report_month",
+                )
+            else:
+                st.selectbox(
+                    f"리포트 기준{labels['point']}",
+                    ["선택 가능한 기간 없음"],
+                    index=0,
+                    key="report_month_empty",
+                    disabled=True,
+                )
+
+        _render_new_monthly_report(
+            events,
+            report_scope=summary_scope,
+            datasets=active_datasets,
+            source_df=data,
+            compact=True,
+            include_consecutive_summary=False,
+            selected_region=selected_sigungu or None,
+            selected_month=selected_report_month,
+        )
+        _render_consecutive_change_summary(
+            events=events,
+            report_scope=summary_scope,
+            datasets=active_datasets,
+            source_df=data,
+            selected_region=selected_sigungu or None,
+            selected_month=selected_report_month,
+        )
     else:
-        summary_scope_options = ["경기도 전체"]
-    summary_scope = st.radio(
-        "요약 범위",
-        summary_scope_options,
-        index=0,
-        horizontal=True,
-        key="summary_scope",
-    )
-    _render_new_monthly_report(
-        events,
-        report_scope=summary_scope,
-        datasets=active_datasets,
-        source_df=data,
-        compact=True,
-        include_consecutive_summary=False,
-    )
-    _render_consecutive_change_summary(
-        events=events,
-        report_scope=summary_scope,
-        datasets=active_datasets,
-        source_df=data,
-    )
-    if region_scope == "province":
+        summary_scope = "경기도 전체"
+        _render_new_monthly_report(
+            events,
+            report_scope=summary_scope,
+            datasets=active_datasets,
+            source_df=data,
+            compact=True,
+            include_consecutive_summary=False,
+        )
+        _render_consecutive_change_summary(
+            events=events,
+            report_scope=summary_scope,
+            datasets=active_datasets,
+            source_df=data,
+        )
         st.markdown("---")
         _render_ai_insights(visible_data, region_pool, labels, card_fn=_card)
 elif active_page == "⑧ 리포트":

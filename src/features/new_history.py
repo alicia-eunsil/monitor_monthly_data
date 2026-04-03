@@ -321,6 +321,75 @@ def _find_prev_period(periods: List[pd.Timestamp], latest: pd.Timestamp, lag: in
     return pd.Timestamp(sorted_periods[idx - lag])
 
 
+def _build_report_view(
+    events: pd.DataFrame,
+    report_scope: str,
+    selected_region: Optional[str] = None,
+) -> tuple[pd.DataFrame, str]:
+    if events.empty:
+        return events.copy(), str(report_scope or "")
+
+    region_col = "지역" if "지역" in events.columns else ""
+    if not region_col:
+        return events.copy(), str(report_scope or "")
+
+    if "31" in str(report_scope):
+        view = events[events[region_col].isin(GYEONGGI_SIGUNGU)].copy()
+        scope_title = "경기 31개 시군"
+    else:
+        region_text = events[region_col].astype(str)
+        gyeonggi_mask = region_text.str.contains("경기", na=False)
+        view = events[gyeonggi_mask].copy()
+        scope_title = "경기도 전체"
+
+    region_name = str(selected_region or "").strip()
+    if region_name:
+        scoped = view[view[region_col].astype(str).str.strip() == region_name].copy()
+        if not scoped.empty:
+            view = scoped
+            scope_title = region_name
+    return view, scope_title
+
+
+def get_report_region_options(events: pd.DataFrame, report_scope: str) -> List[str]:
+    if events.empty:
+        return []
+    view, _ = _build_report_view(events=events, report_scope=report_scope)
+    if view.empty:
+        return []
+    return sorted(view["지역"].dropna().astype(str).str.strip().unique().tolist())
+
+
+def get_report_period_options(
+    events: pd.DataFrame,
+    report_scope: str,
+    selected_region: Optional[str] = None,
+) -> List[str]:
+    if events.empty:
+        return []
+    view, _ = _build_report_view(
+        events=events,
+        report_scope=report_scope,
+        selected_region=selected_region,
+    )
+    if view.empty:
+        return []
+    if "기준월_ts" in view.columns:
+        view["기준월_dt"] = pd.to_datetime(view["기준월_ts"], errors="coerce")
+    else:
+        view["기준월_dt"] = pd.to_datetime(view["기준월"], errors="coerce")
+    view = view.dropna(subset=["기준월_dt"])
+    if view.empty:
+        return []
+    month_table = (
+        view[["기준월", "기준월_dt"]]
+        .drop_duplicates()
+        .sort_values("기준월_dt", ascending=False)
+        .reset_index(drop=True)
+    )
+    return month_table["기준월"].astype(str).tolist()
+
+
 def render_new_monthly_report(
     events: pd.DataFrame,
     report_scope: str,
@@ -328,17 +397,18 @@ def render_new_monthly_report(
     source_df: pd.DataFrame,
     compact: bool = False,
     include_consecutive_summary: bool = True,
+    selected_region: Optional[str] = None,
+    selected_month: Optional[str] = None,
 ) -> None:
     if events.empty:
         st.info("리포트로 표시할 NEW 이벤트가 없습니다.")
         return
 
-    if report_scope == "경기도 전체":
-        view = events[events["지역"] == "경기도"].copy()
-        scope_title = "경기도 전체"
-    else:
-        view = events[events["지역"].isin(GYEONGGI_SIGUNGU)].copy()
-        scope_title = "경기 31개 시군"
+    view, scope_title = _build_report_view(
+        events=events,
+        report_scope=report_scope,
+        selected_region=selected_region,
+    )
     if view.empty:
         st.info(f"{scope_title} 기준 NEW 이벤트가 없습니다.")
         return
@@ -358,9 +428,16 @@ def render_new_monthly_report(
         .sort_values("기준월_dt", ascending=False)
         .reset_index(drop=True)
     )
+    if month_table.empty:
+        st.info(f"{scope_title} 기준 NEW 이벤트가 없습니다.")
+        return
     month_list = month_table["기준월"].tolist()
     labels = time_labels([str(getattr(cfg, "prd_se", "M")) for cfg in datasets])
-    selected_month = st.selectbox(f"리포트 기준{labels['point']}", month_list, key="report_month")
+    if selected_month is None:
+        selected_month = st.selectbox(f"리포트 기준{labels['point']}", month_list, key="report_month")
+    selected_month = str(selected_month)
+    if selected_month not in month_table["기준월"].astype(str).tolist():
+        selected_month = str(month_table.iloc[0]["기준월"])
     month_df = view[view["기준월"] == selected_month].copy()
     if month_df.empty:
         st.info(f"선택한 기준{labels['point']}의 NEW 이벤트가 없습니다.")
@@ -391,7 +468,11 @@ def render_new_monthly_report(
     activity_df = activity_df.dropna(subset=["period"])
     if (not compact) and not activity_df.empty:
         region_candidates = activity_df["region_name"].dropna().astype(str).str.strip().unique().tolist()
-        summary_region = "경기도" if "경기도" in region_candidates else ""
+        summary_region = str(selected_region or "").strip()
+        if summary_region and summary_region not in region_candidates:
+            summary_region = ""
+        if not summary_region:
+            summary_region = "경기도" if "경기도" in region_candidates else ""
         if not summary_region and report_scope == "31개 시군":
             sigungu_candidates = sorted([r for r in GYEONGGI_SIGUNGU if r in region_candidates])
             summary_region = sigungu_candidates[0] if sigungu_candidates else ""
@@ -470,7 +551,7 @@ def render_new_monthly_report(
     if include_consecutive_summary:
         streak_lines = _build_consecutive_change_lines(
             source_df=source_df,
-            region=_pick_streak_region(source_df, report_scope),
+            region=str(selected_region or "").strip() or _pick_streak_region(source_df, report_scope),
             asof_period=selected_month_dt,
             labels=labels,
         )
@@ -557,13 +638,16 @@ def render_consecutive_change_summary(
     report_scope: str,
     datasets: List[Any],
     source_df: pd.DataFrame,
+    selected_region: Optional[str] = None,
+    selected_month: Optional[str] = None,
 ) -> None:
     if events.empty:
         return
-    if report_scope == "경기도 전체":
-        view = events[events["지역"] == "경기도"].copy()
-    else:
-        view = events[events["지역"].isin(GYEONGGI_SIGUNGU)].copy()
+    view, _ = _build_report_view(
+        events=events,
+        report_scope=report_scope,
+        selected_region=selected_region,
+    )
     if view.empty:
         return
 
@@ -584,7 +668,10 @@ def render_consecutive_change_summary(
     if month_table.empty:
         return
 
-    selected_month = str(st.session_state.get("report_month", month_table.iloc[0]["기준월"]))
+    if selected_month is None:
+        selected_month = str(st.session_state.get("report_month", month_table.iloc[0]["기준월"]))
+    else:
+        selected_month = str(selected_month)
     if selected_month not in month_table["기준월"].astype(str).tolist():
         selected_month = str(month_table.iloc[0]["기준월"])
     selected_rows = month_table[month_table["기준월"].astype(str) == selected_month]
@@ -595,7 +682,7 @@ def render_consecutive_change_summary(
     labels = time_labels([str(getattr(cfg, "prd_se", "M")) for cfg in datasets])
     streak_lines = _build_consecutive_change_lines(
         source_df=source_df,
-        region=_pick_streak_region(source_df, report_scope),
+        region=str(selected_region or "").strip() or _pick_streak_region(source_df, report_scope),
         asof_period=pd.Timestamp(asof_period),
         labels=labels,
     )
