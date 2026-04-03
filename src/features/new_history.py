@@ -798,4 +798,18 @@ def render_new_history_tab(events: pd.DataFrame) -> None:
     if by_indicator_df.empty:
         st.info("지표별 최고/최저 지역 데이터가 없습니다.")
     else:
-        st.dataframe(by_indicator_df, use_container_width=True, hide_index=True)
+        st.dataframe(
+            by_indicator_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "기준월": st.column_config.TextColumn("기준월", width="small"),
+                "데이터셋": st.column_config.TextColumn("데이터셋", width="small"),
+                "지표": st.column_config.TextColumn("지표", width="small"),
+                "분류": st.column_config.TextColumn("분류", width="small"),
+                "구분": st.column_config.TextColumn("구분", width="small"),
+                "범위": st.column_config.TextColumn("범위", width="small"),
+                "최고 지역": st.column_config.TextColumn("최고 지역", width="large"),
+                "최저 지역": st.column_config.TextColumn("최저 지역", width="large"),
+            },
+        )
