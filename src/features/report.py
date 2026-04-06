@@ -14,7 +14,6 @@ from src.core.category_rules import norm_indicator_name, order_categories_like_u
 from src.core.formatters import fmt_num, fmt_period, fmt_triangle_delta
 from src.features.insights import (
     build_activity_snapshot,
-    compute_anomaly_table,
     compute_contribution_table,
     compute_gyeonggi_vs_national_contribution,
     fmt_contrib_items,
@@ -873,29 +872,6 @@ def render_report_template(
                 structure_lines.append(line_new)
                 st.markdown(f"  - {line_new}")
 
-    anomaly_df = compute_anomaly_table(report_df, region=region, lag=lag, lookback_periods=36)
-    if not anomaly_df.empty:
-        anomaly_df = anomaly_df[anomaly_df["기준시점"] == latest_text].copy()
-    if not for_pdf:
-        st.markdown("##### AI 이상탐지 요약")
-        if anomaly_df.empty:
-            st.markdown("- 이상탐지 결과가 없습니다.")
-        else:
-            scores = pd.to_numeric(anomaly_df["이상점수"], errors="coerce")
-            focus = anomaly_df[scores >= 50].copy().sort_values("이상점수", ascending=False)
-            high_cnt = int((scores >= 75).sum())
-            med_cnt = int(((scores >= 50) & (scores < 75)).sum())
-            st.markdown(f"- 우선점검(75점 이상): **{high_cnt}건**")
-            st.markdown(f"- 주의관찰(50-74점): **{med_cnt}건**")
-            if not focus.empty:
-                top3 = focus.head(3)
-                lines = []
-                for _, r in top3.iterrows():
-                    lines.append(
-                        f"  - [{r['기준시점']}] {r['데이터셋']} / {r['분류']}: "
-                        f"{r['이유']} ({float(r['이상점수']):.1f}점)"
-                    )
-                st.markdown("- Top 3 이벤트\n" + "\n".join(lines))
 
     _report_heading(f"[참고] 전국대비 {region} 현황")
     reference_lines: List[str] = []
@@ -1003,9 +979,6 @@ def render_report_template(
                 action_lines.append(f"- 산업 증가 1위({pos.iloc[0]['분류']})의 증가 지속 여부를 다음 {labels['point']}에 점검")
             if not neg.empty:
                 action_lines.append(f"- 산업 감소 1위({neg.iloc[0]['분류']})의 구조적 감소 여부를 원인 점검")
-        if not anomaly_df.empty:
-            high_focus = anomaly_df[pd.to_numeric(anomaly_df["이상점수"], errors="coerce") >= 75]
-            action_lines.append(f"- 이상점수 75점 이상 항목 {len(high_focus):,}건에 대해 우선 확인 코멘트 수집")
         if not action_lines:
             action_lines.append("- 이번 시점은 급격한 이상 신호가 제한적이므로 주요 분류 추세 모니터링 유지")
         st.markdown("\n".join(action_lines))

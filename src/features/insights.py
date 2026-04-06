@@ -238,15 +238,6 @@ def build_ai_contribution_commentary(table: pd.DataFrame, meta: Dict[str, Any], 
     return "\n".join(lines)
 
 
-def _robust_zscore(series: pd.Series) -> pd.Series:
-    x = pd.to_numeric(series, errors="coerce")
-    med = x.median(skipna=True)
-    mad = (x - med).abs().median(skipna=True)
-    if pd.isna(mad) or mad == 0:
-        return pd.Series(np.nan, index=x.index)
-    return 0.6745 * (x - med) / mad
-
-
 def infer_lag_from_df(df: pd.DataFrame) -> int:
     if "prd_se" in df.columns and not df["prd_se"].dropna().empty:
         return 2 if str(df["prd_se"].dropna().iloc[0]).upper() == "H" else 12
@@ -324,105 +315,6 @@ def fmt_contrib_items(table: pd.DataFrame, unit: str, positive: bool, top_n: int
         pct_text = "-" if pd.isna(r.get("기여율(%)")) else f"{float(r['기여율(%)']):,.1f}%"
         items.append(f"{escape_markdown_text(r['분류'])}({fmt_num(r['증감'], unit)}, {pct_text})")
     return ", ".join(items)
-
-
-def compute_anomaly_table(df: pd.DataFrame, region: str, lag: int, lookback_periods: int = 36) -> pd.DataFrame:
-    base = df[df["region_name"] == region].copy()
-    if base.empty:
-        return pd.DataFrame()
-    rows: List[Dict[str, Any]] = []
-    group_cols = ["dataset_key", "dataset_title", "region_name", "indicator_name", "category_name"]
-    for _, g in base.groupby(group_cols, dropna=False):
-        g = g.sort_values("period").copy()
-        if len(g) < max(8, lag + 3):
-            continue
-        rz_value_signed = _robust_zscore(g["value"])
-        rz_yoy_abs_signed = _robust_zscore(g["yoy_abs"])
-        rz_yoy_pct_signed = _robust_zscore(g["yoy_pct"])
-        rz_value = rz_value_signed.abs()
-        rz_yoy_abs = rz_yoy_abs_signed.abs()
-        rz_yoy_pct = rz_yoy_pct_signed.abs()
-        score_raw = pd.concat([rz_value, rz_yoy_abs, rz_yoy_pct], axis=1).max(axis=1, skipna=True)
-        score = (score_raw / 5.0 * 100.0).clip(upper=100)
-        for i, row in g.iterrows():
-            s = score.loc[i]
-            if pd.isna(s):
-                continue
-            component_scores = {
-                "원자료": rz_value.loc[i],
-                "증감": rz_yoy_abs.loc[i],
-                "증감률": rz_yoy_pct.loc[i],
-            }
-            reason_key = max(component_scores, key=lambda k: -1 if pd.isna(component_scores[k]) else component_scores[k])
-            reason_signed_map = {
-                "원자료": rz_value_signed.loc[i],
-                "증감": rz_yoy_abs_signed.loc[i],
-                "증감률": rz_yoy_pct_signed.loc[i],
-            }
-            reason_signed = reason_signed_map.get(reason_key, np.nan)
-            if reason_key == "원자료":
-                reason_text = "원자료 값이 평소보다 크게 높음" if pd.notna(reason_signed) and float(reason_signed) >= 0 else "원자료 값이 평소보다 크게 낮음"
-            elif reason_key == "증감":
-                reason_text = "전년대비 증감폭이 평소보다 크게 증가" if pd.notna(reason_signed) and float(reason_signed) >= 0 else "전년대비 증감폭이 평소보다 크게 감소"
-            else:
-                reason_text = "전년대비 증감률이 평소보다 크게 상승" if pd.notna(reason_signed) and float(reason_signed) >= 0 else "전년대비 증감률이 평소보다 크게 하락"
-            rows.append(
-                {
-                    "period": pd.Timestamp(row["period"]),
-                    "기준시점": fmt_period(row["period"], str(row.get("prd_se", "M"))),
-                    "데이터셋": str(row["dataset_title"]),
-                    "지역": str(row["region_name"]),
-                    "지표": str(row["indicator_name"]),
-                    "분류": str(row["category_name"]) if str(row["category_name"]).strip() else "전체",
-                    "이상점수": float(s),
-                    "이유": reason_text,
-                }
-            )
-    if not rows:
-        return pd.DataFrame()
-    out = pd.DataFrame(rows)
-    latest_p = out["period"].max()
-    unique_p = sorted(out["period"].dropna().unique().tolist())
-    if latest_p in unique_p:
-        idx = unique_p.index(latest_p)
-        start_idx = max(0, idx - lookback_periods + 1)
-        cutoff = pd.Timestamp(unique_p[start_idx])
-        out = out[out["period"] >= cutoff].copy()
-
-    out = out.sort_values(["분류", "period", "이상점수"], ascending=[True, False, False])
-    out = out.drop(columns=["period"], errors="ignore")
-    return out
-
-
-def build_ai_anomaly_commentary(top_df: pd.DataFrame, point_label: str) -> str:
-    if top_df.empty:
-        return "이상 이벤트가 탐지되지 않았습니다."
-    top = top_df.iloc[0]
-    scores = pd.to_numeric(top_df["이상점수"], errors="coerce")
-    high_cnt = int((scores >= 75).sum())
-    med_cnt = int(((scores >= 50) & (scores < 75)).sum())
-    low_cnt = int(((scores >= 30) & (scores < 50)).sum())
-    top_reason = str(top.get("이유", ""))
-    top_score = float(top["이상점수"])
-    score_grade = "높음" if top_score >= 75 else "주의" if top_score >= 50 else "관찰"
-    dominant_indicator = top_df["지표"].value_counts(dropna=False).index[0] if "지표" in top_df.columns and not top_df.empty else ""
-    dominant_category = top_df["분류"].value_counts(dropna=False).index[0] if "분류" in top_df.columns and not top_df.empty else ""
-    same_pair_cnt = int(
-        (
-            (top_df["지표"].astype(str) == str(top.get("지표", "")))
-            & (top_df["분류"].astype(str) == str(top.get("분류", "")))
-        ).sum()
-    )
-
-    lines = [
-        f"- 최우선 이상 영역은 **{top['기준시점']} / {top['지역']} / {top['지표']} / {top['분류']}**이며, 이상점수는 **{top_score:.1f}점({score_grade})**이고 주된 이유는 `{top_reason}`입니다.",
-        f"- 상위 후보 분포는 75점 이상 **{high_cnt}건**, 50-74점 **{med_cnt}건**, 30-49점 **{low_cnt}건**입니다.",
-        f"- 반복 패턴 기준으로 **{top.get('지표', '')}/{top.get('분류', '')}** 조합이 상위 목록에 **{same_pair_cnt}건** 포함됩니다.",
-        f"- 현재 목록에서 가장 자주 나타나는 지표/분류는 **{dominant_indicator} / {dominant_category}**입니다.",
-        f"- 점수는 Robust Z-score 기반이며, 평소 분포 대비 이례성을 의미합니다.",
-        f"- 다음 점검 포인트: 다음 {point_label}에도 동일 지표·분류가 연속 상위에 남는지 확인하세요.",
-    ]
-    return "\n".join(lines)
 
 
 def compute_gyeonggi_vs_national_contribution(
@@ -774,7 +666,7 @@ def render_ai_insights(
     분석 지역
   </div>
   <div style="margin-top:6px; color:#1f2937; font-size:1.02rem; font-weight:700;">
-    아래 모든 AI 분석(영향요인분해, 이상탐지, 인사이트)에 공통 적용됩니다.
+    아래 모든 AI 분석(영향요인분해, 인사이트)에 공통 적용됩니다.
   </div>
 </div>
 """,
@@ -839,40 +731,7 @@ def render_ai_insights(
         )
         st.altair_chart(chart, use_container_width=True)
         st.dataframe(contrib_df, use_container_width=True, hide_index=True)
-    st.markdown("#### AI 이상탐지 (Robust Z-score)")
-    lookback = st.slider(
-        f"이상탐지 최근 구간 수 ({labels.get('point', '월')})",
-        min_value=12,
-        max_value=60,
-        value=36,
-        step=6,
-        key="ai_anomaly_lookback",
-    )
-    focus_df = pd.DataFrame()
-    anomaly_df = compute_anomaly_table(df, region=region, lag=lag, lookback_periods=lookback)
-    if anomaly_df.empty:
-        st.info("이상탐지 결과가 없습니다.")
-    else:
-        score_series = pd.to_numeric(anomaly_df["이상점수"], errors="coerce")
-        focus_df = anomaly_df[score_series >= 50].copy()
-        if focus_df.empty:
-            st.info("이상점수 50점 이상 결과가 없습니다.")
-        else:
-            focus_df = focus_df.sort_values(["분류", "기준시점", "이상점수"], ascending=[True, False, False])
-            st.markdown("##### AI 해설")
-            st.markdown(build_ai_anomaly_commentary(focus_df, labels["point"]))
-            display_df = focus_df.drop(columns=["지표"], errors="ignore")
-            ordered_cols = ["지역", "데이터셋", "분류", "기준시점", "이상점수", "이유"]
-            show_cols = [c for c in ordered_cols if c in display_df.columns]
-            extra_cols = [c for c in display_df.columns if c not in show_cols]
-            display_df = display_df[show_cols + extra_cols]
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
-            st.caption(
-                "참고: 75점 이상=우선 점검(강한 이상), "
-                "50-74점=주의 관찰(중간 이상), "
-                "30-49점=참고 수준(약한 이상), "
-                "30점 미만=보통 변동 범위"
-            )
+    st.markdown("---")
 
     if events is None or source_df is None or not datasets:
         return
@@ -920,16 +779,9 @@ def render_ai_insights(
 
     with st.expander("AI 보조 해석", expanded=True):
         st.markdown("##### OpenAI 설정")
-        model = st.text_input("모델", value=st.session_state.get("ai_openai_model", "gpt-4.1"), key="ai_openai_model")
-        temperature = st.slider("온도", min_value=0.0, max_value=1.0, value=0.3, step=0.05, key="ai_openai_temp")
-        max_output_tokens = st.slider(
-            "최대 출력 토큰",
-            min_value=200,
-            max_value=2000,
-            value=800,
-            step=100,
-            key="ai_openai_max_tokens",
-        )
+        model = st.text_input("모델", value=st.session_state.get("ai_openai_model", "gpt-5.2"), key="ai_openai_model")
+        temperature = 0.5
+        max_output_tokens = 800
         auto_save = st.toggle("생성 후 자동 저장", value=False, key="ai_memory_auto_save")
 
         st.markdown("##### 최신 데이터 요약")
