@@ -1,15 +1,28 @@
 from typing import Any, Callable, Dict, List, Optional
+from uuid import uuid4
 
 import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
+import os
 
 import src.config as app_config
 from src.core.category_rules import ACTIVITY_INDICATOR_ORDER, norm_indicator_name
 from src.core.formatters import escape_markdown_text, fmt_num, fmt_num_bold, fmt_period
+from src.features.new_history import build_ai_insight_context
+from src.services.insight_memory import build_prompt, compute_hash, load_memory, save_memory, select_memory_context
+from src.services.openai_client import create_response_text
 
 TARGET_REGIONS = app_config.TARGET_REGIONS
+
+
+def _seeded_openai_key() -> str:
+    try:
+        secret_value = st.secrets.get("OPENAI_API_KEY", "") or st.secrets.get("openai_api_key", "")
+    except Exception:
+        secret_value = ""
+    return str(secret_value or os.getenv("OPENAI_API_KEY", "") or os.getenv("openai_api_key", ""))
 
 
 def pick_employment_indicator(indicators: List[str]) -> str:
@@ -633,6 +646,10 @@ def render_ai_insights(
     region_pool: List[str],
     labels: Dict[str, str],
     card_fn: Callable[[str, str, str], None],
+    datasets: Optional[List[Any]] = None,
+    events: Optional[pd.DataFrame] = None,
+    report_scope: str = "경기도 전체",
+    source_df: Optional[pd.DataFrame] = None,
 ) -> None:
     st.subheader("AI INSIGHTS")
     st.markdown("#### 영향요인분해(전국 내 경기도 비중)")
@@ -791,3 +808,138 @@ def render_ai_insights(
                 "30-49점=참고 수준(약한 이상), "
                 "30점 미만=보통 변동 범위"
             )
+
+    if events is None or source_df is None or not datasets:
+        return
+
+    st.markdown("---")
+    st.markdown("#### AI 인사이트(메모리)")
+    context = build_ai_insight_context(
+        events=events,
+        report_scope=report_scope,
+        datasets=datasets,
+        source_df=source_df,
+        selected_region=region,
+    )
+    if not context.get("ok"):
+        st.info(str(context.get("message", "인사이트 요약을 만들 수 없습니다.")))
+        return
+
+    context_lines = list(context.get("context_lines", []))
+    focus_lines = list(context.get("focus_lines", []))
+    consecutive_lines = list(context.get("consecutive_lines", []))
+    context_title = str(context.get("context_title", ""))
+
+    context_hash = compute_hash([context_title] + context_lines + focus_lines + consecutive_lines)
+    memory_entries = load_memory(limit=400)
+    selected_entries = select_memory_context(
+        memory_entries,
+        scope_title=str(context.get("scope_title", "")),
+        region=str(region),
+        limit=5,
+        exact_hash=context_hash,
+    )
+    past_summaries: List[str] = []
+    for entry in selected_entries:
+        summary = str(entry.get("summary", "")).strip()
+        if not summary:
+            insight = str(entry.get("insight", "")).strip()
+            summary = (insight[:140] + "...") if len(insight) > 140 else insight
+        if summary:
+            created = str(entry.get("created_at", ""))
+            past_summaries.append(f"- ({created}) {summary}")
+
+    with st.expander("프롬프트/메모리", expanded=True):
+        st.markdown("##### OpenAI 설정")
+        model = st.text_input("모델", value=st.session_state.get("ai_openai_model", "gpt-4.1"), key="ai_openai_model")
+        temperature = st.slider("온도", min_value=0.0, max_value=1.0, value=0.3, step=0.05, key="ai_openai_temp")
+        max_output_tokens = st.slider(
+            "최대 출력 토큰",
+            min_value=200,
+            max_value=2000,
+            value=800,
+            step=100,
+            key="ai_openai_max_tokens",
+        )
+        auto_save = st.toggle("생성 후 자동 저장", value=False, key="ai_memory_auto_save")
+
+        st.markdown("##### 최신 데이터 요약")
+        st.markdown("\n".join(context_lines + focus_lines + consecutive_lines))
+
+        if past_summaries:
+            st.markdown("##### 과거 인사이트 요약(참고)")
+            st.markdown("\n".join(past_summaries))
+
+        user_note = st.text_area("추가 메모", key="ai_memory_note", height=80)
+        prompt = build_prompt(
+            context_title=context_title,
+            context_lines=context_lines,
+            focus_lines=focus_lines,
+            consecutive_lines=consecutive_lines,
+            past_summaries=past_summaries,
+            user_note=user_note,
+        )
+        st.text_area("LLM 프롬프트", value=prompt, height=280, key="ai_memory_prompt")
+
+        st.markdown("##### AI 응답 저장")
+
+        def _save_insight(insight: str, summary: str) -> bool:
+            if not insight.strip():
+                st.warning("AI 응답을 먼저 입력해 주세요.")
+                return False
+            summary_val = summary.strip()
+            if not summary_val:
+                summary_val = insight.strip().split("\n")[0][:200]
+                st.session_state["ai_memory_summary"] = summary_val
+            save_memory(
+                {
+                    "id": str(uuid4()),
+                    "scope_title": str(context.get("scope_title", "")),
+                    "region": str(region),
+                    "selected_month": str(context.get("selected_month", "")),
+                    "context_title": context_title,
+                    "context_hash": context_hash,
+                    "prompt": prompt,
+                    "insight": insight.strip(),
+                    "summary": summary_val,
+                    "stats": context.get("stats", {}),
+                }
+            )
+            st.success("인사이트를 저장했습니다.")
+            return True
+
+        if st.button("OpenAI로 생성", key="ai_memory_generate"):
+            api_key = _seeded_openai_key()
+            if not api_key:
+                st.warning("OPENAI_API_KEY가 설정되지 않았습니다.")
+            else:
+                result = create_response_text(
+                    api_key=api_key,
+                    prompt=prompt,
+                    model=str(model),
+                    temperature=float(temperature),
+                    max_output_tokens=int(max_output_tokens),
+                )
+                if not result.get("ok"):
+                    st.error(str(result.get("error", "OpenAI 호출에 실패했습니다.")))
+                else:
+                    generated = str(result.get("text", "")).strip()
+                    st.session_state["ai_memory_response"] = generated
+                    if not st.session_state.get("ai_memory_summary"):
+                        first_line = generated.split("\n")[0][:200]
+                        st.session_state["ai_memory_summary"] = first_line
+                    if auto_save:
+                        _save_insight(generated, st.session_state.get("ai_memory_summary", ""))
+
+        insight_text = st.text_area("AI 응답", key="ai_memory_response", height=160)
+        summary_text = st.text_area("요약(1~3줄)", key="ai_memory_summary", height=80)
+        if st.button("인사이트 저장", key="ai_memory_save"):
+            _save_insight(insight_text, summary_text)
+
+        if memory_entries:
+            st.markdown("##### 최근 저장된 인사이트")
+            preview = pd.DataFrame(memory_entries[-15:]).copy()
+            keep_cols = ["created_at", "scope_title", "region", "selected_month", "summary"]
+            view_cols = [c for c in keep_cols if c in preview.columns]
+            if view_cols:
+                st.dataframe(preview[view_cols], use_container_width=True, hide_index=True)

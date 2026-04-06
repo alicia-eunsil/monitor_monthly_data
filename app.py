@@ -874,7 +874,16 @@ elif active_page == "⑦ 요약":
             source_df=data,
         )
         st.markdown("---")
-        _render_ai_insights(visible_data, region_pool, labels, card_fn=_card)
+        _render_ai_insights(
+            visible_data,
+            region_pool,
+            labels,
+            card_fn=_card,
+            datasets=active_datasets,
+            events=events,
+            report_scope=summary_scope,
+            source_df=data,
+        )
 elif active_page == "⑧ 리포트":
     st.subheader("리포트(상세/다운로드)")
     _render_report_template(

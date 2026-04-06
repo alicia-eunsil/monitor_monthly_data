@@ -390,6 +390,147 @@ def get_report_period_options(
     return month_table["기준월"].astype(str).tolist()
 
 
+def build_ai_insight_context(
+    events: pd.DataFrame,
+    report_scope: str,
+    datasets: List[Any],
+    source_df: pd.DataFrame,
+    selected_region: Optional[str] = None,
+    selected_month: Optional[str] = None,
+) -> Dict[str, Any]:
+    labels = time_labels([str(getattr(cfg, "prd_se", "M")) for cfg in datasets])
+    if events.empty:
+        return {
+            "ok": False,
+            "message": "NEW 이벤트가 없어 요약을 만들 수 없습니다.",
+            "labels": labels,
+            "scope_title": str(report_scope),
+            "selected_month": "",
+            "context_title": "",
+            "context_lines": [],
+            "focus_lines": [],
+            "consecutive_lines": [],
+            "stats": {},
+        }
+
+    view, scope_title = _build_report_view(
+        events=events,
+        report_scope=report_scope,
+        selected_region=selected_region,
+    )
+    if view.empty:
+        return {
+            "ok": False,
+            "message": f"{scope_title} 기준 NEW 이벤트가 없습니다.",
+            "labels": labels,
+            "scope_title": scope_title,
+            "selected_month": "",
+            "context_title": "",
+            "context_lines": [],
+            "focus_lines": [],
+            "consecutive_lines": [],
+            "stats": {},
+        }
+
+    if "기준월_ts" in view.columns:
+        view["기준월_dt"] = pd.to_datetime(view["기준월_ts"], errors="coerce")
+    else:
+        view["기준월_dt"] = pd.to_datetime(view["기준월"], errors="coerce")
+    view = view.dropna(subset=["기준월_dt"])
+    if view.empty:
+        return {
+            "ok": False,
+            "message": f"{scope_title} 기준 NEW 이벤트가 없습니다.",
+            "labels": labels,
+            "scope_title": scope_title,
+            "selected_month": "",
+            "context_title": "",
+            "context_lines": [],
+            "focus_lines": [],
+            "consecutive_lines": [],
+            "stats": {},
+        }
+
+    month_table = (
+        view[["기준월", "기준월_dt"]]
+        .drop_duplicates()
+        .sort_values("기준월_dt", ascending=False)
+        .reset_index(drop=True)
+    )
+    if month_table.empty:
+        return {
+            "ok": False,
+            "message": f"{scope_title} 기준 NEW 이벤트가 없습니다.",
+            "labels": labels,
+            "scope_title": scope_title,
+            "selected_month": "",
+            "context_title": "",
+            "context_lines": [],
+            "focus_lines": [],
+            "consecutive_lines": [],
+            "stats": {},
+        }
+
+    month_list = month_table["기준월"].astype(str).tolist()
+    if selected_month is None:
+        selected_month = month_list[0]
+    selected_month = str(selected_month)
+    if selected_month not in month_list:
+        selected_month = month_list[0]
+
+    month_df = view[view["기준월"].astype(str) == selected_month].copy()
+    selected_idx_list = month_table.index[month_table["기준월"].astype(str) == selected_month].tolist()
+    prev_month = (
+        month_table.loc[selected_idx_list[0] + 1, "기준월"]
+        if selected_idx_list and (selected_idx_list[0] + 1) < len(month_table)
+        else None
+    )
+    prev_month_df = view[view["기준월"] == prev_month].copy() if prev_month else pd.DataFrame(columns=view.columns)
+
+    context_lines: List[str] = []
+    context_lines.extend(build_new_count_summary_lines(month_df, prev_month_df if prev_month else None, labels))
+    context_lines.extend(build_dataset_count_lines(month_df, prev_month_df if prev_month else None, datasets, top_n=3))
+
+    point_label = str(labels.get("point", "월"))
+    focus_lines = [
+        f"- {build_new_focus_line(month_df, '최고', f'이번 {point_label} NEW 핵심')}",
+        f"- {build_new_focus_line(month_df, '최저', f'이번 {point_label} NEW 리스크')}",
+    ]
+
+    selected_rows = month_table[month_table["기준월"].astype(str) == selected_month]
+    selected_month_dt = (
+        pd.to_datetime(selected_rows["기준월_dt"], errors="coerce").dropna().max() if not selected_rows.empty else pd.NaT
+    )
+    consecutive_lines: List[str] = []
+    if pd.notna(selected_month_dt):
+        consecutive_lines = _build_consecutive_change_lines(
+            source_df=source_df,
+            region=str(selected_region or "").strip() or _pick_streak_region(source_df, report_scope),
+            asof_period=pd.Timestamp(selected_month_dt),
+            labels=labels,
+        )
+
+    stats = {
+        "total_events": int(len(month_df)),
+        "max_events": int((month_df["유형"] == "최고").sum()) if "유형" in month_df.columns else 0,
+        "min_events": int((month_df["유형"] == "최저").sum()) if "유형" in month_df.columns else 0,
+    }
+
+    context_title = f"{selected_month} NEW 리포트 ({scope_title})"
+    return {
+        "ok": True,
+        "message": "",
+        "labels": labels,
+        "scope_title": scope_title,
+        "selected_month": selected_month,
+        "context_title": context_title,
+        "context_lines": context_lines,
+        "focus_lines": focus_lines,
+        "consecutive_lines": consecutive_lines,
+        "stats": stats,
+    }
+
+
 def render_new_monthly_report(
     events: pd.DataFrame,
     report_scope: str,
