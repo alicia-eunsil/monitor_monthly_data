@@ -57,12 +57,34 @@ def _build_rule_based_insights(
     total_events = int(stats.get("total_events", 0))
     max_events = int(stats.get("max_events", 0))
     min_events = int(stats.get("min_events", 0))
+    prev_total = stats.get("prev_total_events")
+    prev_max = stats.get("prev_max_events")
+    prev_min = stats.get("prev_min_events")
     dominant = "최고 NEW" if max_events >= min_events else "최저 NEW"
+    max_share = (max_events / total_events * 100.0) if total_events else 0.0
+    min_share = (min_events / total_events * 100.0) if total_events else 0.0
+
+    def _delta(cur: int, prev: object) -> str:
+        if prev is None:
+            return ""
+        diff = int(cur) - int(prev)
+        if diff > 0:
+            return f" (+{diff:,})"
+        if diff < 0:
+            return f" (-{abs(diff):,})"
+        return " (=)"
 
     if selected_month:
-        lines.append(f"- {selected_month} 기준 {scope_title}({region}) NEW 이벤트는 **{total_events:,}건**입니다.")
+        delta_text = _delta(total_events, prev_total)
+        lines.append(
+            f"- {selected_month} 기준 {scope_title}({region}) NEW 이벤트는 **{total_events:,}건**{delta_text}입니다."
+        )
     if total_events > 0:
-        lines.append(f"- NEW 분포는 최고 **{max_events:,}건**, 최저 **{min_events:,}건**으로 **{dominant} 우세**입니다.")
+        lines.append(
+            f"- NEW 분포는 최고 **{max_events:,}건**({_delta(max_events, prev_max)}), "
+            f"최저 **{min_events:,}건**({_delta(min_events, prev_min)})이며 "
+            f"비중은 최고 {max_share:.1f}%, 최저 {min_share:.1f}%로 **{dominant} 우세**입니다."
+        )
 
     focus_lines = [ln for ln in context.get("focus_lines", []) if str(ln).strip()]
     for ln in focus_lines[:2]:
@@ -71,6 +93,25 @@ def _build_rule_based_insights(
     consecutive = [ln for ln in context.get("consecutive_lines", []) if str(ln).strip()]
     if consecutive:
         lines.append(f"- 연속 변화 신호: {consecutive[0].lstrip('-').strip()}")
+
+    # Risk / next checks
+    risk_lines: List[str] = []
+    if min_events > max_events:
+        risk_lines.append("최저 NEW 비중이 높아 리스크 신호가 상대적으로 우세합니다.")
+    if total_events == 0:
+        risk_lines.append("NEW 이벤트가 없어 뚜렷한 신호가 제한적입니다.")
+    if consecutive:
+        if "감소" in consecutive[0]:
+            risk_lines.append("연속 감소 신호가 포함되어 있어 감소 흐름 지속 여부 점검이 필요합니다.")
+        if "증가" in consecutive[0]:
+            risk_lines.append("연속 증가 신호가 포함되어 상승 흐름 지속 여부 점검이 필요합니다.")
+    if risk_lines:
+        lines.append("- 의미/리스크: " + " ".join(risk_lines))
+
+    lines.append(
+        "- 다음 점검: 최고/최저 NEW 비중 변화, 연속 변화 신호의 지속 여부, "
+        "최근 10년/5년 범위의 NEW 발생 지표가 반복되는지 확인하세요."
+    )
 
     if not lines:
         lines.append("- 규칙 기반 인사이트를 만들 데이터가 부족합니다.")
@@ -779,6 +820,8 @@ def render_ai_insights(
 
     with st.expander("AI 보조 해석", expanded=True):
         st.markdown("##### OpenAI 설정")
+        if st.session_state.get("ai_openai_model") in {None, "", "gpt-4.1"}:
+            st.session_state["ai_openai_model"] = "gpt-5.2"
         model = st.text_input("모델", value=st.session_state.get("ai_openai_model", "gpt-5.2"), key="ai_openai_model")
         temperature = 0.5
         max_output_tokens = 800

@@ -510,10 +510,23 @@ def build_ai_insight_context(
             labels=labels,
         )
 
+    total_events = int(len(month_df))
+    max_events = int((month_df["유형"] == "최고").sum()) if "유형" in month_df.columns else 0
+    min_events = int((month_df["유형"] == "최저").sum()) if "유형" in month_df.columns else 0
+    prev_total = int(len(prev_month_df)) if prev_month is not None else None
+    prev_max = (
+        int((prev_month_df["유형"] == "최고").sum()) if prev_month is not None and "유형" in prev_month_df.columns else None
+    )
+    prev_min = (
+        int((prev_month_df["유형"] == "최저").sum()) if prev_month is not None and "유형" in prev_month_df.columns else None
+    )
     stats = {
-        "total_events": int(len(month_df)),
-        "max_events": int((month_df["유형"] == "최고").sum()) if "유형" in month_df.columns else 0,
-        "min_events": int((month_df["유형"] == "최저").sum()) if "유형" in month_df.columns else 0,
+        "total_events": total_events,
+        "max_events": max_events,
+        "min_events": min_events,
+        "prev_total_events": prev_total,
+        "prev_max_events": prev_max,
+        "prev_min_events": prev_min,
     }
 
     context_title = f"{selected_month} NEW 리포트 ({scope_title})"
