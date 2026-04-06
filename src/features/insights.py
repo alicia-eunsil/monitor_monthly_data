@@ -652,7 +652,10 @@ def render_ai_insights(
     source_df: Optional[pd.DataFrame] = None,
     fixed_region: Optional[str] = None,
     selected_month: Optional[str] = None,
+    show_ai: bool = True,
 ) -> None:
+    if not show_ai:
+        return
     st.subheader("AI INSIGHTS")
     region = ""
     base_region = "전국"

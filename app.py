@@ -7,6 +7,7 @@ import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
+import os
 
 import src.config as app_config
 from src.core.category_rules import (
@@ -149,6 +150,7 @@ st.markdown(
 
 DATA_MODEL_VERSION = "2026-04-02-schema-autorecover-v1"
 REQUIRED_SCOPE_COLUMNS = {"dataset_key", "region_name", "indicator_name", "category_name", "period", "value", "prd_se"}
+SHOW_AI_FEATURES = str(os.getenv("SHOW_AI_FEATURES", "false")).strip().lower() in {"1", "true", "yes", "y"}
 
 
 @st.cache_data(show_spinner=False)
@@ -888,6 +890,7 @@ elif active_page == "⑦ 요약":
             source_df=data,
             fixed_region=selected_sigungu or None,
             selected_month=selected_report_month,
+            show_ai=SHOW_AI_FEATURES,
         )
     else:
         summary_scope = "경기도 전체"
@@ -915,6 +918,7 @@ elif active_page == "⑦ 요약":
             events=events,
             report_scope=summary_scope,
             source_df=data,
+            show_ai=SHOW_AI_FEATURES,
         )
 elif active_page == "⑧ 리포트":
     st.subheader("리포트(상세/다운로드)")
