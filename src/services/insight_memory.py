@@ -94,6 +94,7 @@ def build_prompt(
     focus_lines: List[str],
     consecutive_lines: List[str],
     past_summaries: List[str],
+    fact_lines: List[str],
     user_note: str = "",
 ) -> str:
     sections: List[str] = []
@@ -108,6 +109,8 @@ def build_prompt(
         sections.append("[핵심 NEW 포인트]\n" + "\n".join(focus_lines))
     if consecutive_lines:
         sections.append("[연속 변화 요약]\n" + "\n".join(consecutive_lines))
+    if fact_lines:
+        sections.append("[핵심 팩트(자동 추출)]\n" + "\n".join(fact_lines))
     if past_summaries:
         sections.append("[과거 인사이트 요약(참고용)]\n" + "\n".join(past_summaries))
     if user_note.strip():

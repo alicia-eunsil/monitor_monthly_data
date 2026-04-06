@@ -890,7 +890,7 @@ elif active_page == "⑦ 요약":
             source_df=data,
             fixed_region=selected_sigungu or None,
             selected_month=selected_report_month,
-            show_ai=SHOW_AI_FEATURES,
+            show_ai=True,
         )
     else:
         summary_scope = "경기도 전체"
@@ -918,7 +918,7 @@ elif active_page == "⑦ 요약":
             events=events,
             report_scope=summary_scope,
             source_df=data,
-            show_ai=SHOW_AI_FEATURES,
+            show_ai=True,
         )
 elif active_page == "⑧ 리포트":
     st.subheader("리포트(상세/다운로드)")

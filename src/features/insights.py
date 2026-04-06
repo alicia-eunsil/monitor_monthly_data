@@ -825,9 +825,10 @@ def render_ai_insights(
     context_lines = list(context.get("context_lines", []))
     focus_lines = list(context.get("focus_lines", []))
     consecutive_lines = list(context.get("consecutive_lines", []))
+    fact_lines = list(context.get("fact_lines", []))
     context_title = str(context.get("context_title", ""))
 
-    context_hash = compute_hash([context_title] + context_lines + focus_lines + consecutive_lines)
+    context_hash = compute_hash([context_title] + context_lines + focus_lines + consecutive_lines + fact_lines)
     memory_entries = load_memory(limit=400)
     selected_entries = select_memory_context(
         memory_entries,
@@ -860,7 +861,7 @@ def render_ai_insights(
         auto_save = st.toggle("생성 후 자동 저장", value=False, key="ai_memory_auto_save")
 
         st.markdown("##### 최신 데이터 요약")
-        st.markdown("\n".join(context_lines + focus_lines + consecutive_lines))
+        st.markdown("\n".join(context_lines + focus_lines + consecutive_lines + fact_lines))
 
         if past_summaries:
             st.markdown("##### 과거 인사이트 요약(참고)")
@@ -873,6 +874,7 @@ def render_ai_insights(
             focus_lines=focus_lines,
             consecutive_lines=consecutive_lines,
             past_summaries=past_summaries,
+            fact_lines=fact_lines,
             user_note=user_note,
         )
         st.text_area("LLM 프롬프트", value=prompt, height=260, key="ai_memory_prompt")

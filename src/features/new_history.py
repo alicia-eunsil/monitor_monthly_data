@@ -529,6 +529,30 @@ def build_ai_insight_context(
         "prev_min_events": prev_min,
     }
 
+    fact_lines: List[str] = []
+    if not month_df.empty:
+        ds_order = [str(getattr(cfg, "title", "")).strip() for cfg in datasets]
+        metric_order = {"원자료": 0, "YoY(증감률)": 1, "YoY(절대)": 2}
+        scope_order = {"전체기간": 0, "최근10년": 1, "최근5년": 2}
+        type_order = {"최고": 0, "최저": 1}
+        view = month_df.copy()
+        view["정렬_데이터셋"] = view["데이터셋"].map({name: idx for idx, name in enumerate(ds_order)}).fillna(999)
+        view["정렬_구분"] = view["구분"].map(metric_order).fillna(999)
+        view["정렬_범위"] = view["범위"].map(scope_order).fillna(999)
+        view["정렬_유형"] = view["유형"].map(type_order).fillna(999)
+        view = view.sort_values(["정렬_데이터셋", "정렬_구분", "정렬_범위", "정렬_유형", "지표", "분류"])
+        max_items = 12
+        for _, row in view.head(max_items).iterrows():
+            cat = str(row.get("분류", "")).strip() or "전체"
+            token = (
+                f"- {row.get('데이터셋', '')} {row.get('지표', '')}/{cat} "
+                f"{row.get('구분', '')} {row.get('범위', '')} {row.get('유형', '')}"
+            )
+            fact_lines.append(token)
+        remain = int(len(view) - len(fact_lines))
+        if remain > 0:
+            fact_lines.append(f"- ... 외 {remain:,}건")
+
     context_title = f"{selected_month} NEW 리포트 ({scope_title})"
     return {
         "ok": True,
@@ -540,6 +564,7 @@ def build_ai_insight_context(
         "context_lines": context_lines,
         "focus_lines": focus_lines,
         "consecutive_lines": consecutive_lines,
+        "fact_lines": fact_lines,
         "stats": stats,
     }
 
