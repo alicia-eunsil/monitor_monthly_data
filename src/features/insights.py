@@ -715,10 +715,23 @@ def render_ai_insights(
                 ).encode(y="zero:Q")
                 st.altair_chart(alt.layer(contrib_line, zero).properties(height=280), use_container_width=True)
     st.markdown("---")
+    st.markdown(
+        """
+<div style="border:2px solid #0f172a; border-radius:14px; padding:16px 18px; background:#e0f2fe; margin-bottom:10px;">
+  <div style="font-weight:900; font-size:1.25rem; color:#0f172a; letter-spacing:0.2px;">
+    분석 지역
+  </div>
+  <div style="margin-top:6px; color:#1f2937; font-size:1.02rem; font-weight:700;">
+    아래 모든 AI 분석(영향요인분해, 이상탐지, 인사이트)에 공통 적용됩니다.
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
     gyeonggi_default = TARGET_REGIONS[9] if len(TARGET_REGIONS) >= 10 else (region_pool[0] if region_pool else "")
     region_default = gyeonggi_default if gyeonggi_default in region_pool else (region_pool[0] if region_pool else "")
     region = st.selectbox(
-        "분석 지역",
+        "분석 지역 선택",
         region_pool,
         index=region_pool.index(region_default) if region_default in region_pool else 0,
         key="ai_region",
