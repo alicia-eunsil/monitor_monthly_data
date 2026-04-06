@@ -369,6 +369,7 @@ def compute_gyeonggi_vs_national_contribution(
         "message": "",
         "region_name": str(region_name),
         "base_region": str(base_region),
+        "base_region_derived": False,
         "indicator": "",
         "prd_se": "M",
         "latest_period": pd.NaT,
@@ -417,16 +418,25 @@ def compute_gyeonggi_vs_national_contribution(
     region_names = base["region_name"].dropna().astype(str).str.strip().unique().tolist()
     national_candidate = str(base_region).strip() or (TARGET_REGIONS[0] if len(TARGET_REGIONS) >= 1 else "")
     target_region_candidate = str(region_name).strip()
-    if national_candidate not in region_names or target_region_candidate not in region_names:
-        meta["message"] = f"{national_candidate} 또는 {target_region_candidate} 데이터를 찾지 못했습니다."
+    if target_region_candidate not in region_names:
+        meta["message"] = f"{target_region_candidate} 데이터를 찾지 못했습니다."
         return pd.DataFrame(), meta
 
-    nat = (
-        base[base["region_name"] == national_candidate]
-        .groupby("period", as_index=False)
-        .agg({"value": "sum", "yoy_abs": "sum"})
-        .rename(columns={"value": "value_nat", "yoy_abs": "yoy_abs_nat"})
-    )
+    if national_candidate in region_names:
+        nat = (
+            base[base["region_name"] == national_candidate]
+            .groupby("period", as_index=False)
+            .agg({"value": "sum", "yoy_abs": "sum"})
+            .rename(columns={"value": "value_nat", "yoy_abs": "yoy_abs_nat"})
+        )
+    else:
+        # Derive base totals from all regions in the provided scope.
+        nat = (
+            base.groupby("period", as_index=False)
+            .agg({"value": "sum", "yoy_abs": "sum"})
+            .rename(columns={"value": "value_nat", "yoy_abs": "yoy_abs_nat"})
+        )
+        meta["base_region_derived"] = True
     gg = (
         base[base["region_name"] == target_region_candidate]
         .groupby("period", as_index=False)
@@ -664,8 +674,8 @@ def render_ai_insights(
         c1, c2 = st.columns(2)
         with c1:
             share_sub = (
-                f"경기도 {fmt_num(gy_meta.get('latest_gg_value'), str(gy_meta.get('unit', '')))} / "
-                f"전국 {fmt_num(gy_meta.get('latest_nat_value'), str(gy_meta.get('unit', '')))}"
+                f"{region} {fmt_num(gy_meta.get('latest_gg_value'), str(gy_meta.get('unit', '')))} / "
+                f"{base_region} {fmt_num(gy_meta.get('latest_nat_value'), str(gy_meta.get('unit', '')))}"
             )
             card_fn(
                 f"{base_region} 대비 {region} 비중",
@@ -674,8 +684,8 @@ def render_ai_insights(
             )
         with c2:
             contrib_sub = (
-                f"경기 증감 {fmt_num(gy_meta.get('latest_gg_yoy_abs'), str(gy_meta.get('unit', '')))} / "
-                f"전국 증감 {fmt_num(gy_meta.get('latest_nat_yoy_abs'), str(gy_meta.get('unit', '')))}"
+                f"{region} 증감 {fmt_num(gy_meta.get('latest_gg_yoy_abs'), str(gy_meta.get('unit', '')))} / "
+                f"{base_region} 증감 {fmt_num(gy_meta.get('latest_nat_yoy_abs'), str(gy_meta.get('unit', '')))}"
             )
             card_fn(
                 f"{base_region} 증감 기여율({labels.get('yoy', '전년동월')}대비)",
