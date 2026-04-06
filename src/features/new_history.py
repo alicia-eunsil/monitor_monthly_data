@@ -8,6 +8,7 @@ import streamlit as st
 import src.config as app_config
 from src.core.category_rules import ACTIVITY_INDICATOR_ORDER, norm_indicator_name
 from src.core.formatters import escape_markdown_text, fmt_num, fmt_period, time_labels
+from src.transform import build_stats
 from src.features.new_event_summary import (
     build_dataset_count_lines,
     build_new_count_summary_lines,
@@ -552,6 +553,73 @@ def build_ai_insight_context(
         remain = int(len(view) - len(fact_lines))
         if remain > 0:
             fact_lines.append(f"- ... 외 {remain:,}건")
+
+    # Add extreme facts (max/min by window) for the selected period
+    if selected_region and pd.notna(selected_month_dt):
+        region_df = source_df[source_df["region_name"].astype(str) == str(selected_region)].copy()
+        if not region_df.empty:
+            region_df["period"] = pd.to_datetime(region_df["period"], errors="coerce")
+            region_df = region_df.dropna(subset=["period"])
+            region_df = region_df[region_df["period"] <= pd.Timestamp(selected_month_dt)].copy()
+        if not region_df.empty:
+            metric_labels = {"level": "원자료", "yoy_abs": "YoY(절대)", "yoy_pct": "YoY(증감률)"}
+            scope_labels = {
+                "all": "전체기간",
+                "10y": "최근10년",
+                "5y": "최근5년",
+            }
+
+            def _display_unit(prefix: str, unit_text: str) -> str:
+                if prefix == "level":
+                    return unit_text
+                if prefix == "yoy_abs":
+                    return "%p" if "%" in unit_text else unit_text
+                return "%"
+
+            fact_extremes: List[str] = []
+            group_cols = ["dataset_key", "indicator_name", "category_name"]
+            for (ds_key, ind, cat), g in region_df.groupby(group_cols, dropna=False):
+                g = g.sort_values("period")
+                if g.empty:
+                    continue
+                latest_p = pd.Timestamp(g["period"].iloc[-1])
+                if latest_p != pd.Timestamp(selected_month_dt):
+                    continue
+                stats_detail = build_stats(g)
+                unit = str(g["unit"].dropna().iloc[-1]) if "unit" in g.columns and not g["unit"].dropna().empty else ""
+                dataset_title = str(g["dataset_title"].iloc[0]) if "dataset_title" in g.columns else str(ds_key)
+                indicator = str(ind).strip()
+                category = str(cat).strip() or "전체"
+                prd_se = (
+                    str(g["prd_se"].dropna().iloc[-1]).upper()
+                    if "prd_se" in g.columns and not g["prd_se"].dropna().empty
+                    else "M"
+                )
+
+                for prefix in ["level", "yoy_abs", "yoy_pct"]:
+                    metric_label = metric_labels[prefix]
+                    for scope_key, scope_label in scope_labels.items():
+                        if stats_detail.get(f"{prefix}_is_new_max_{scope_key}"):
+                            value = stats_detail.get(f"{prefix}_max_{scope_key}_value")
+                            period = stats_detail.get(f"{prefix}_max_{scope_key}_period")
+                            disp_unit = _display_unit(prefix, unit)
+                            fact_extremes.append(
+                                f"- {dataset_title} {indicator}/{category} {metric_label} {scope_label} 최고: "
+                                f"{fmt_num(value, disp_unit)} ({fmt_period(period, prd_se)})"
+                            )
+                        if stats_detail.get(f"{prefix}_is_new_min_{scope_key}"):
+                            value = stats_detail.get(f"{prefix}_min_{scope_key}_value")
+                            period = stats_detail.get(f"{prefix}_min_{scope_key}_period")
+                            disp_unit = _display_unit(prefix, unit)
+                            fact_extremes.append(
+                                f"- {dataset_title} {indicator}/{category} {metric_label} {scope_label} 최저: "
+                                f"{fmt_num(value, disp_unit)} ({fmt_period(period, prd_se)})"
+                            )
+                if len(fact_extremes) >= 20:
+                    break
+
+            if fact_extremes:
+                fact_lines.extend(fact_extremes[:20])
 
     context_title = f"{selected_month} NEW 리포트 ({scope_title})"
     return {
