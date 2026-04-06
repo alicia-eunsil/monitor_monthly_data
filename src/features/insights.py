@@ -654,8 +654,6 @@ def render_ai_insights(
     selected_month: Optional[str] = None,
     show_ai: bool = True,
 ) -> None:
-    if not show_ai:
-        return
     st.subheader("AI INSIGHTS")
     region = ""
     base_region = "전국"
@@ -807,7 +805,7 @@ def render_ai_insights(
         st.dataframe(contrib_df, use_container_width=True, hide_index=True)
     st.markdown("---")
 
-    if events is None or source_df is None or not datasets:
+    if not show_ai or events is None or source_df is None or not datasets:
         return
 
     st.markdown("---")
