@@ -644,9 +644,12 @@ def render_ai_insights(
     selected_month: Optional[str] = None,
 ) -> None:
     st.subheader("AI INSIGHTS")
+    region = ""
     base_region = "전국"
-    if fixed_region and str(fixed_region) in GYEONGGI_SIGUNGU:
-        base_region = "경기도"
+    if fixed_region:
+        region = str(fixed_region)
+        if region in GYEONGGI_SIGUNGU:
+            base_region = "경기도"
     st.markdown(f"#### 영향요인분해({base_region} 내 {region or '지역'} 비중)")
     gy_trend, gy_meta = compute_gyeonggi_vs_national_contribution(
         df,
@@ -727,9 +730,7 @@ def render_ai_insights(
 """,
         unsafe_allow_html=True,
     )
-    region = ""
     if fixed_region:
-        region = str(fixed_region)
         st.caption(f"현재 선택된 시군 기준으로 분석합니다: **{region}**")
     else:
         gyeonggi_default = TARGET_REGIONS[9] if len(TARGET_REGIONS) >= 10 else (region_pool[0] if region_pool else "")
