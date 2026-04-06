@@ -151,6 +151,17 @@ DATA_MODEL_VERSION = "2026-04-02-schema-autorecover-v1"
 REQUIRED_SCOPE_COLUMNS = {"dataset_key", "region_name", "indicator_name", "category_name", "period", "value", "prd_se"}
 
 
+@st.cache_data(show_spinner=False)
+def _load_scope_data_cached(api_key: str, data_model_version: str) -> tuple[dict, list, list, list]:
+    return load_all_data_with_progress(
+        api_key=api_key,
+        status_box=None,
+        progress_box=None,
+        main_status_box=None,
+        main_progress_box=None,
+    )
+
+
 def _is_valid_scope_data(scope_data: object) -> bool:
     if not isinstance(scope_data, dict):
         return False
@@ -598,6 +609,7 @@ st.title("경제활동인구 모니터링")
 with st.sidebar:
     st.subheader("데이터 제어")
     if st.button("데이터 새로고침"):
+        st.cache_data.clear()
         st.session_state.pop("_loaded_api_key", None)
         st.session_state.pop("_loaded_data_version", None)
         st.session_state.pop("_loaded_scope_data", None)
@@ -630,13 +642,19 @@ try:
         empty_data_warnings = st.session_state.get("_loaded_empty_data_warnings", [])
         debug_logs = st.session_state.get("_loaded_debug_logs", [])
     else:
-        scope_data, load_errors, debug_logs, empty_data_warnings = load_all_data_with_progress(
-            api_key=api_key,
-            status_box=sidebar_status,
-            progress_box=sidebar_progress_box,
-            main_status_box=loading_notice,
-            main_progress_box=loading_progress,
-        )
+        try:
+            scope_data, load_errors, debug_logs, empty_data_warnings = _load_scope_data_cached(
+                api_key=api_key,
+                data_model_version=DATA_MODEL_VERSION,
+            )
+        except Exception:
+            scope_data, load_errors, debug_logs, empty_data_warnings = load_all_data_with_progress(
+                api_key=api_key,
+                status_box=sidebar_status,
+                progress_box=sidebar_progress_box,
+                main_status_box=loading_notice,
+                main_progress_box=loading_progress,
+            )
         st.session_state["_loaded_api_key"] = api_key
         st.session_state["_loaded_data_version"] = DATA_MODEL_VERSION
         st.session_state["_loaded_scope_data"] = scope_data
@@ -682,6 +700,7 @@ missing_columns = sorted(REQUIRED_SCOPE_COLUMNS - set(data.columns))
 if missing_columns:
     if not st.session_state.get("_schema_recovery_attempted", False):
         st.session_state["_schema_recovery_attempted"] = True
+        st.cache_data.clear()
         st.session_state.pop("_loaded_api_key", None)
         st.session_state.pop("_loaded_data_version", None)
         st.session_state.pop("_loaded_scope_data", None)

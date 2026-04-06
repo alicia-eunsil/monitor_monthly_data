@@ -896,9 +896,6 @@ def render_ai_insights(
                         _save_insight(generated, st.session_state.get("ai_memory_summary", ""))
 
         insight_text = st.text_area("AI 응답", key="ai_memory_response", height=360)
-        if st.button("요약 다시 만들기", key="ai_memory_resummarize"):
-            source_text = str(st.session_state.get("ai_memory_response", "")).strip()
-            st.session_state["ai_memory_summary"] = _auto_summary_from_insight(source_text)
         summary_text = st.text_area("요약(1~3줄)", key="ai_memory_summary", height=80)
         if st.button("인사이트 저장", key="ai_memory_save"):
             _save_insight(insight_text, summary_text)
