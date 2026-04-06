@@ -38,10 +38,43 @@ def _auto_summary_from_insight(text: str, max_lines: int = 3) -> str:
         cleaned = lines
     if not cleaned:
         return ""
+    # Strip leading markdown markers if present.
+    cleaned = [ln.lstrip("#").strip() for ln in cleaned if ln.lstrip("#").strip()]
     bullets = [ln for ln in cleaned if ln.startswith("-")]
     if bullets:
         return "\n".join(bullets[: max_lines])
     return " ".join(cleaned[: max_lines])[:240]
+
+
+def _build_rule_based_insights(
+    context: Dict[str, Any],
+    region: str,
+) -> List[str]:
+    lines: List[str] = []
+    scope_title = str(context.get("scope_title", "")).strip()
+    selected_month = str(context.get("selected_month", "")).strip()
+    stats = context.get("stats", {}) or {}
+    total_events = int(stats.get("total_events", 0))
+    max_events = int(stats.get("max_events", 0))
+    min_events = int(stats.get("min_events", 0))
+    dominant = "최고 NEW" if max_events >= min_events else "최저 NEW"
+
+    if selected_month:
+        lines.append(f"- {selected_month} 기준 {scope_title}({region}) NEW 이벤트는 **{total_events:,}건**입니다.")
+    if total_events > 0:
+        lines.append(f"- NEW 분포는 최고 **{max_events:,}건**, 최저 **{min_events:,}건**으로 **{dominant} 우세**입니다.")
+
+    focus_lines = [ln for ln in context.get("focus_lines", []) if str(ln).strip()]
+    for ln in focus_lines[:2]:
+        lines.append(f"- {str(ln).lstrip('-').strip()}")
+
+    consecutive = [ln for ln in context.get("consecutive_lines", []) if str(ln).strip()]
+    if consecutive:
+        lines.append(f"- 연속 변화 신호: {consecutive[0].lstrip('-').strip()}")
+
+    if not lines:
+        lines.append("- 규칙 기반 인사이트를 만들 데이터가 부족합니다.")
+    return lines
 
 
 def pick_employment_indicator(indicators: List[str]) -> str:
@@ -845,7 +878,7 @@ def render_ai_insights(
         return
 
     st.markdown("---")
-    st.markdown("#### AI 인사이트(메모리)")
+    st.markdown("#### 규칙 기반 인사이트 + AI 보조")
     context = build_ai_insight_context(
         events=events,
         report_scope=report_scope,
@@ -881,7 +914,11 @@ def render_ai_insights(
             created = str(entry.get("created_at", ""))
             past_summaries.append(f"- ({created}) {summary}")
 
-    with st.expander("프롬프트/메모리", expanded=True):
+    st.markdown("##### 규칙 기반 핵심 요약")
+    rule_lines = _build_rule_based_insights(context=context, region=str(region))
+    st.markdown("\n".join(rule_lines))
+
+    with st.expander("AI 보조 해석", expanded=True):
         st.markdown("##### OpenAI 설정")
         model = st.text_input("모델", value=st.session_state.get("ai_openai_model", "gpt-4.1"), key="ai_openai_model")
         temperature = st.slider("온도", min_value=0.0, max_value=1.0, value=0.3, step=0.05, key="ai_openai_temp")
@@ -911,7 +948,7 @@ def render_ai_insights(
             past_summaries=past_summaries,
             user_note=user_note,
         )
-        st.text_area("LLM 프롬프트", value=prompt, height=280, key="ai_memory_prompt")
+        st.text_area("LLM 프롬프트", value=prompt, height=260, key="ai_memory_prompt")
 
         st.markdown("##### AI 응답 저장")
 
@@ -920,7 +957,7 @@ def render_ai_insights(
                 st.warning("AI 응답을 먼저 입력해 주세요.")
                 return False
             summary_val = summary.strip()
-            if not summary_val:
+            if not summary_val or summary_val.startswith("#"):
                 summary_val = _auto_summary_from_insight(insight)
                 st.session_state["ai_memory_summary"] = summary_val
             save_memory(
@@ -957,13 +994,16 @@ def render_ai_insights(
                 else:
                     generated = str(result.get("text", "")).strip()
                     st.session_state["ai_memory_response"] = generated
-                    if not st.session_state.get("ai_memory_summary"):
+                    current_summary = str(st.session_state.get("ai_memory_summary", "")).strip()
+                    if not current_summary or current_summary.startswith("#"):
                         st.session_state["ai_memory_summary"] = _auto_summary_from_insight(generated)
                     if auto_save:
                         _save_insight(generated, st.session_state.get("ai_memory_summary", ""))
 
         insight_text = st.text_area("AI 응답", key="ai_memory_response", height=360)
         summary_text = st.text_area("요약(1~3줄)", key="ai_memory_summary", height=80)
+        if st.button("요약 다시 만들기", key="ai_memory_resummarize"):
+            st.session_state["ai_memory_summary"] = _auto_summary_from_insight(insight_text)
         if st.button("인사이트 저장", key="ai_memory_save"):
             _save_insight(insight_text, summary_text)
 
