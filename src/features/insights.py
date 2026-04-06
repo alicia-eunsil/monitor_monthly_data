@@ -15,6 +15,7 @@ from src.services.insight_memory import build_prompt, compute_hash, load_memory,
 from src.services.openai_client import create_response_text
 
 TARGET_REGIONS = app_config.TARGET_REGIONS
+GYEONGGI_SIGUNGU = getattr(app_config, "GYEONGGI_SIGUNGU", [])
 
 
 def _seeded_openai_key() -> str:
@@ -361,11 +362,13 @@ def fmt_contrib_items(table: pd.DataFrame, unit: str, positive: bool, top_n: int
 def compute_gyeonggi_vs_national_contribution(
     df: pd.DataFrame,
     region_name: str = "경기도",
+    base_region: str = "전국",
 ) -> tuple[pd.DataFrame, Dict[str, Any]]:
     meta: Dict[str, Any] = {
         "ok": False,
         "message": "",
         "region_name": str(region_name),
+        "base_region": str(base_region),
         "indicator": "",
         "prd_se": "M",
         "latest_period": pd.NaT,
@@ -412,10 +415,10 @@ def compute_gyeonggi_vs_national_contribution(
         return pd.DataFrame(), meta
 
     region_names = base["region_name"].dropna().astype(str).str.strip().unique().tolist()
-    national_candidate = TARGET_REGIONS[0] if len(TARGET_REGIONS) >= 1 else ""
+    national_candidate = str(base_region).strip() or (TARGET_REGIONS[0] if len(TARGET_REGIONS) >= 1 else "")
     target_region_candidate = str(region_name).strip()
     if national_candidate not in region_names or target_region_candidate not in region_names:
-        meta["message"] = f"전국 또는 {target_region_candidate} 데이터를 찾지 못했습니다."
+        meta["message"] = f"{national_candidate} 또는 {target_region_candidate} 데이터를 찾지 못했습니다."
         return pd.DataFrame(), meta
 
     nat = (
@@ -432,7 +435,7 @@ def compute_gyeonggi_vs_national_contribution(
     )
     trend = nat.merge(gg, on="period", how="inner").sort_values("period")
     if trend.empty:
-        meta["message"] = f"전국/{target_region_candidate} 공통 시계열 구간이 없습니다."
+        meta["message"] = f"{national_candidate}/{target_region_candidate} 공통 시계열 구간이 없습니다."
         return pd.DataFrame(), meta
 
     prd_se = "M"
@@ -542,6 +545,8 @@ def build_ai_gyeonggi_contribution_commentary(meta: Dict[str, Any], labels: Dict
     if not meta.get("ok"):
         return str(meta.get("message", "전국 대비 경기도 기여도를 계산할 수 없습니다."))
 
+    base_region = str(meta.get("base_region", "전국"))
+    region_name = str(meta.get("region_name", "경기도"))
     point = labels.get("point", "월")
     yoy = labels.get("yoy", "전년동월")
     prd_se = str(meta.get("prd_se", "M")).upper()
@@ -588,31 +593,31 @@ def build_ai_gyeonggi_contribution_commentary(meta: Dict[str, Any], labels: Dict
 
     lines = [
         (
-            f"- **이번 {point} 기준** 경기도 취업자는 {fmt_num_bold(latest_gg_value, unit)}, "
-            f"전국 취업자는 {fmt_num_bold(latest_nat_value, unit)}이며, "
-            f"경기도 비중은 **{float(share):,.2f}%**입니다."
+            f"- **이번 {point} 기준** {region_name} 취업자는 {fmt_num_bold(latest_gg_value, unit)}, "
+            f"{base_region} 취업자는 {fmt_num_bold(latest_nat_value, unit)}이며, "
+            f"{region_name} 비중은 **{float(share):,.2f}%**입니다."
             if pd.notna(share)
             else f"- {latest} 기준 비중 계산값이 없습니다."
         ),
         (
-            f"- **전년동월 비교**: 경기도 취업자 {prev_period_text} {fmt_num_bold(prev_gg_value, unit)} → "
+            f"- **전년동월 비교**: {region_name} 취업자 {prev_period_text} {fmt_num_bold(prev_gg_value, unit)} → "
             f"{latest} {fmt_num_bold(latest_gg_value, unit)}, "
-            f"전국 취업자 {prev_period_text} {fmt_num_bold(prev_nat_value, unit)} → "
+            f"{base_region} 취업자 {prev_period_text} {fmt_num_bold(prev_nat_value, unit)} → "
             f"{latest} {fmt_num_bold(latest_nat_value, unit)}. "
             f"비중은 {prev_period_text} **{float(prev_share):,.2f}%** → "
             f"{latest} 비중 **{float(share):,.2f}%** (**{share_yoy_text}**). "
             f"기여율은 {prev_period_text} **{'-' if pd.isna(prev_contrib) else f'{float(prev_contrib):,.1f}%'}** → "
             f"{latest} **{contrib_text}** "
-            f"(경기 증감 {fmt_num(gg_delta, unit)} / 전국 증감 {fmt_num(nat_delta, unit)}, "
+            f"({region_name} 증감 {fmt_num(gg_delta, unit)} / {base_region} 증감 {fmt_num(nat_delta, unit)}, "
             f"{contrib_yoy_text})."
             if pd.notna(prev_share)
             else f"- 전년동월({yoy}) 기준 비교 데이터가 부족합니다."
         ),
         (
-            f"- {latest}의 {yoy} 대비 증감은 전국 {fmt_num_bold(nat_delta, unit)}, "
-            f"경기도 {fmt_num_bold(gg_delta, unit)}이며, "
-            f"전국 {nat_flow} 중 경기도 기여율은 **{contrib_text}**이며, "
-            f"취업자수 기준으로 경기 {fmt_num_bold(gg_delta, unit)} / 전국 {fmt_num_bold(nat_delta, unit)}입니다."
+            f"- {latest}의 {yoy} 대비 증감은 {base_region} {fmt_num_bold(nat_delta, unit)}, "
+            f"{region_name} {fmt_num_bold(gg_delta, unit)}이며, "
+            f"{base_region} {nat_flow} 중 {region_name} 기여율은 **{contrib_text}**이며, "
+            f"취업자수 기준으로 {region_name} {fmt_num_bold(gg_delta, unit)} / {base_region} {fmt_num_bold(nat_delta, unit)}입니다."
         ),
         (
             f"- **최근 12개월 비중 변화**: {recent_start_text} **{'-' if pd.isna(recent_start_share) else f'{float(recent_start_share):,.2f}%'}** → "
@@ -639,8 +644,15 @@ def render_ai_insights(
     selected_month: Optional[str] = None,
 ) -> None:
     st.subheader("AI INSIGHTS")
-    st.markdown("#### 영향요인분해(전국 내 경기도 비중)")
-    gy_trend, gy_meta = compute_gyeonggi_vs_national_contribution(df)
+    base_region = "전국"
+    if fixed_region and str(fixed_region) in GYEONGGI_SIGUNGU:
+        base_region = "경기도"
+    st.markdown(f"#### 영향요인분해({base_region} 내 {region or '지역'} 비중)")
+    gy_trend, gy_meta = compute_gyeonggi_vs_national_contribution(
+        df,
+        region_name=str(region) if region else "경기도",
+        base_region=base_region,
+    )
     if not gy_meta.get("ok"):
         st.info(str(gy_meta.get("message", "전국 대비 경기도 기여도 계산이 불가능합니다.")))
     else:
@@ -653,7 +665,7 @@ def render_ai_insights(
                 f"전국 {fmt_num(gy_meta.get('latest_nat_value'), str(gy_meta.get('unit', '')))}"
             )
             card_fn(
-                "전국 대비 경기도 비중",
+                f"{base_region} 대비 {region} 비중",
                 "-" if pd.isna(gy_meta.get("latest_share_pct")) else f"{float(gy_meta.get('latest_share_pct')):,.2f}%",
                 share_sub,
             )
@@ -663,7 +675,7 @@ def render_ai_insights(
                 f"전국 증감 {fmt_num(gy_meta.get('latest_nat_yoy_abs'), str(gy_meta.get('unit', '')))}"
             )
             card_fn(
-                f"전국 증감 기여율({labels.get('yoy', '전년동월')}대비)",
+                f"{base_region} 증감 기여율({labels.get('yoy', '전년동월')}대비)",
                 "-" if pd.isna(gy_meta.get("latest_contrib_pct")) else f"{float(gy_meta.get('latest_contrib_pct')):,.1f}%",
                 contrib_sub,
             )
@@ -831,7 +843,7 @@ def render_ai_insights(
         if st.session_state.get("ai_openai_model") in {None, "", "gpt-4.1"}:
             st.session_state["ai_openai_model"] = "gpt-5.2"
         model = st.text_input("모델", value=st.session_state.get("ai_openai_model", "gpt-5.2"), key="ai_openai_model")
-        temperature = 0.5
+        temperature = 0.4
         max_output_tokens = 800
         auto_save = st.toggle("생성 후 자동 저장", value=False, key="ai_memory_auto_save")
 
