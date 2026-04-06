@@ -25,6 +25,25 @@ def _seeded_openai_key() -> str:
     return str(secret_value or os.getenv("OPENAI_API_KEY", "") or os.getenv("openai_api_key", ""))
 
 
+def _auto_summary_from_insight(text: str, max_lines: int = 3) -> str:
+    if not text:
+        return ""
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    cleaned: List[str] = []
+    for ln in lines:
+        if ln.startswith("#"):
+            continue
+        cleaned.append(ln)
+    if not cleaned:
+        cleaned = lines
+    if not cleaned:
+        return ""
+    bullets = [ln for ln in cleaned if ln.startswith("-")]
+    if bullets:
+        return "\n".join(bullets[: max_lines])
+    return " ".join(cleaned[: max_lines])[:240]
+
+
 def pick_employment_indicator(indicators: List[str]) -> str:
     if not indicators:
         return ""
@@ -902,7 +921,7 @@ def render_ai_insights(
                 return False
             summary_val = summary.strip()
             if not summary_val:
-                summary_val = insight.strip().split("\n")[0][:200]
+                summary_val = _auto_summary_from_insight(insight)
                 st.session_state["ai_memory_summary"] = summary_val
             save_memory(
                 {
@@ -939,12 +958,11 @@ def render_ai_insights(
                     generated = str(result.get("text", "")).strip()
                     st.session_state["ai_memory_response"] = generated
                     if not st.session_state.get("ai_memory_summary"):
-                        first_line = generated.split("\n")[0][:200]
-                        st.session_state["ai_memory_summary"] = first_line
+                        st.session_state["ai_memory_summary"] = _auto_summary_from_insight(generated)
                     if auto_save:
                         _save_insight(generated, st.session_state.get("ai_memory_summary", ""))
 
-        insight_text = st.text_area("AI 응답", key="ai_memory_response", height=160)
+        insight_text = st.text_area("AI 응답", key="ai_memory_response", height=360)
         summary_text = st.text_area("요약(1~3줄)", key="ai_memory_summary", height=80)
         if st.button("인사이트 저장", key="ai_memory_save"):
             _save_insight(insight_text, summary_text)
