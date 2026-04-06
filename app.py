@@ -876,6 +876,19 @@ elif active_page == "⑦ 요약":
             selected_region=selected_sigungu or None,
             selected_month=selected_report_month,
         )
+        st.markdown("---")
+        _render_ai_insights(
+            visible_data,
+            sigungu_options if sigungu_options else region_pool,
+            labels,
+            card_fn=_card,
+            datasets=active_datasets,
+            events=events,
+            report_scope=summary_scope,
+            source_df=data,
+            fixed_region=selected_sigungu or None,
+            selected_month=selected_report_month,
+        )
     else:
         summary_scope = "경기도 전체"
         _render_new_monthly_report(

@@ -635,6 +635,8 @@ def render_ai_insights(
     events: Optional[pd.DataFrame] = None,
     report_scope: str = "경기도 전체",
     source_df: Optional[pd.DataFrame] = None,
+    fixed_region: Optional[str] = None,
+    selected_month: Optional[str] = None,
 ) -> None:
     st.subheader("AI INSIGHTS")
     st.markdown("#### 영향요인분해(전국 내 경기도 비중)")
@@ -713,14 +715,19 @@ def render_ai_insights(
 """,
         unsafe_allow_html=True,
     )
-    gyeonggi_default = TARGET_REGIONS[9] if len(TARGET_REGIONS) >= 10 else (region_pool[0] if region_pool else "")
-    region_default = gyeonggi_default if gyeonggi_default in region_pool else (region_pool[0] if region_pool else "")
-    region = st.selectbox(
-        "분석 지역 선택",
-        region_pool,
-        index=region_pool.index(region_default) if region_default in region_pool else 0,
-        key="ai_region",
-    )
+    region = ""
+    if fixed_region:
+        region = str(fixed_region)
+        st.caption(f"현재 선택된 시군 기준으로 분석합니다: **{region}**")
+    else:
+        gyeonggi_default = TARGET_REGIONS[9] if len(TARGET_REGIONS) >= 10 else (region_pool[0] if region_pool else "")
+        region_default = gyeonggi_default if gyeonggi_default in region_pool else (region_pool[0] if region_pool else "")
+        region = st.selectbox(
+            "분석 지역 선택",
+            region_pool,
+            index=region_pool.index(region_default) if region_default in region_pool else 0,
+            key="ai_region",
+        )
     lag = 12
     if "prd_se" in df.columns and not df["prd_se"].dropna().empty:
         lag = 2 if str(df["prd_se"].dropna().iloc[0]).upper() == "H" else 12
@@ -785,6 +792,7 @@ def render_ai_insights(
         datasets=datasets,
         source_df=source_df,
         selected_region=region,
+        selected_month=selected_month,
     )
     if not context.get("ok"):
         st.info(str(context.get("message", "인사이트 요약을 만들 수 없습니다.")))
