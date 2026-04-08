@@ -541,11 +541,10 @@ def _render_dataset(
                 value_class,
             )
 
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-    st.markdown("**데이터 기간**")
-    st.markdown(f"#### {labels['trend']} 추이")
     chart_df = series_df
     window_options = ["전체", "최근 10년", "최근 5년"]
+    st.markdown("<hr style='margin:10px 0 6px 0; border:0; border-top:1px solid #e5e7eb;'>", unsafe_allow_html=True)
+    st.markdown("**데이터 기간**")
     window_sel = st.radio(
         "데이터 기간",
         window_options,
@@ -553,6 +552,7 @@ def _render_dataset(
         key=f"{state_prefix}_chart_window",
         label_visibility="collapsed",
     )
+    st.markdown(f"#### {labels['trend']} 추이")
     if window_sel != "전체":
         years = 10 if "10" in window_sel else 5
         latest_ts = stats.get("latest_period")
