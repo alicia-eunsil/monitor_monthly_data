@@ -543,7 +543,7 @@ def _render_dataset(
 
     chart_df = series_df
     window_options = ["전체", "최근 10년", "최근 5년"]
-    st.markdown("<hr style='margin:10px 0 6px 0; border:0; border-top:1px solid #e5e7eb;'>", unsafe_allow_html=True)
+    st.markdown("<hr style='margin:18px 0 8px 0; border:0; border-top:1px solid #e5e7eb;'>", unsafe_allow_html=True)
     st.markdown("**데이터 기간**")
     window_sel = st.radio(
         "데이터 기간",
