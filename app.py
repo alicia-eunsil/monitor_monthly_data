@@ -541,8 +541,24 @@ def _render_dataset(
                 value_class,
             )
 
+    chart_df = series_df
+    if dataset_key == "activity":
+        window_options = ["전체", "최근 10년", "최근 5년"]
+        window_sel = st.radio(
+            "그래프 기간",
+            window_options,
+            horizontal=True,
+            key=f"{state_prefix}_chart_window",
+        )
+        if window_sel != "전체":
+            years = 10 if "10" in window_sel else 5
+            latest_ts = stats.get("latest_period")
+            if pd.notna(latest_ts):
+                cutoff = pd.Timestamp(latest_ts) - pd.DateOffset(years=years)
+                chart_df = series_df[series_df["period"] >= cutoff].copy()
+
     st.markdown(f"#### {labels['trend']} 추이")
-    level_df = series_df[["period", "value"]].dropna(subset=["value"]).copy()
+    level_df = chart_df[["period", "value"]].dropna(subset=["value"]).copy()
     if level_df.empty:
         st.info(f"{labels['trend']} 추이 데이터가 없습니다.")
     else:
@@ -564,7 +580,7 @@ def _render_dataset(
         st.altair_chart(level_chart, use_container_width=True)
 
     st.markdown(f"#### {labels['yoy']}대비 증감(막대) / 증감률(선)")
-    yoy_df = series_df[["period", "yoy_abs", "yoy_pct"]].dropna(
+    yoy_df = chart_df[["period", "yoy_abs", "yoy_pct"]].dropna(
         subset=["yoy_abs", "yoy_pct"],
         how="all",
     )
