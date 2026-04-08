@@ -853,9 +853,13 @@ def render_ai_insights(
 
     with st.expander("AI 보조 해석", expanded=True):
         st.markdown("##### OpenAI 설정")
-        if st.session_state.get("ai_openai_model") in {None, "", "gpt-4.1"}:
-            st.session_state["ai_openai_model"] = "gpt-5.2"
-        model = st.text_input("모델", value=st.session_state.get("ai_openai_model", "gpt-5.2"), key="ai_openai_model")
+        if st.session_state.get("ai_openai_model") in {None, "", "gpt-4.1", "gpt-5.2"}:
+            st.session_state["ai_openai_model"] = "gpt-5.4-mini"
+        model = st.text_input(
+            "모델",
+            value=st.session_state.get("ai_openai_model", "gpt-5.4-mini"),
+            key="ai_openai_model",
+        )
         temperature = 0.3
         max_output_tokens = 800
         auto_save = st.toggle("생성 후 자동 저장", value=False, key="ai_memory_auto_save")
