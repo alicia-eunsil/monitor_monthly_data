@@ -17,6 +17,7 @@ from src.features.new_event_summary import (
 from src.features.streak_utils import current_streak_length as _current_streak_length
 
 GYEONGGI_SIGUNGU = getattr(app_config, "GYEONGGI_SIGUNGU", [])
+TARGET_REGIONS = getattr(app_config, "TARGET_REGIONS", [])
 
 
 def _build_consecutive_change_lines(
@@ -48,7 +49,13 @@ def _build_consecutive_change_lines(
         end_txt = fmt_period(cand["end"], str(cand.get("prd_se", "M")))
         # Escape markdown-sensitive characters (notably "~") to avoid strikethrough rendering.
         range_txt = f"{escape_markdown_text(start_txt)}\\~{escape_markdown_text(end_txt)}"
-        label_txt = escape_markdown_text(cand["label"])
+        indicator_txt = escape_markdown_text(cand.get("indicator", ""))
+        label_txt = escape_markdown_text(cand.get("label", ""))
+        if indicator_txt:
+            if label_txt and label_txt != indicator_txt:
+                label_txt = f"{indicator_txt} / {label_txt}"
+            else:
+                label_txt = indicator_txt
         if include_label:
             return f"{label_txt} {range_txt} {cand['len']}{unit_text} 연속 {direction}"
         return f"{range_txt}, {cand['len']}{unit_text} 연속 {direction}"
@@ -91,7 +98,7 @@ def _build_consecutive_change_lines(
             latest_yoy = float(yoy_values.iloc[-1])
             cat = str(g["category_name"].iloc[0]).strip()
             ind = str(g["indicator_name"].iloc[0]).strip()
-            label = cat if cat else (ind if ind else "전체")
+            label = cat if cat else "전체"
             prd_se = str(g["prd_se"].dropna().iloc[0]).upper() if "prd_se" in g.columns and not g["prd_se"].dropna().empty else "M"
 
             up_len = _current_streak_length(yoy_values, positive=True)
@@ -100,6 +107,7 @@ def _build_consecutive_change_lines(
                 up_items.append(
                     {
                     "label": label,
+                    "indicator": ind,
                     "len": int(up_len),
                     "start": start_p,
                     "end": latest_period,
@@ -114,6 +122,7 @@ def _build_consecutive_change_lines(
                 down_items.append(
                     {
                     "label": label,
+                    "indicator": ind,
                     "len": int(down_len),
                     "start": start_p,
                     "end": latest_period,
@@ -135,7 +144,7 @@ def _build_consecutive_change_lines(
         if not down_show and down_items:
             down_show = [down_items[0]]
 
-        include_label = ds_key != "activity"
+        include_label = True
         segs: List[str] = []
         if up_show:
             segs.extend([_format_item(x, increase=True, include_label=include_label) for x in up_show])
@@ -338,17 +347,21 @@ def _build_report_view(
         view = events[events[region_col].isin(GYEONGGI_SIGUNGU)].copy()
         scope_title = "경기 31개 시군"
     else:
-        region_text = events[region_col].astype(str)
-        gyeonggi_mask = region_text.str.contains("경기", na=False)
-        view = events[gyeonggi_mask].copy()
-        scope_title = "경기도 전체"
+        province_candidates = [str(region).strip() for region in TARGET_REGIONS if str(region).strip()]
+        if province_candidates:
+            view = events[events[region_col].astype(str).str.strip().isin(province_candidates)].copy()
+        else:
+            view = events.copy()
+        scope_title = "전국 17개 시도"
 
     region_name = str(selected_region or "").strip()
-    if region_name:
+    if region_name and region_name != "전국":
         scoped = view[view[region_col].astype(str).str.strip() == region_name].copy()
         if not scoped.empty:
             view = scoped
             scope_title = region_name
+    elif region_name == "전국":
+        scope_title = "전국"
     return view, scope_title
 
 

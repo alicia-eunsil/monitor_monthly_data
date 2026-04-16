@@ -910,7 +910,67 @@ elif active_page == "⑦ 요약":
             show_ai=SHOW_AI_FEATURES,
         )
     else:
-        summary_scope = "경기도 전체"
+        summary_scope = "17개 시도"
+        province_options = _get_report_region_options(events, summary_scope)
+        fallback_provinces = [
+            region
+            for region in region_pool
+            if region == "전국" or region in visible_data["region_name"].dropna().astype(str).str.strip().unique().tolist()
+        ]
+        if not province_options:
+            province_options = fallback_provinces
+        else:
+            province_options = [region for region in province_options if region != "전국"]
+            province_options = ["전국"] + province_options
+
+        selected_province = "전국"
+        selected_report_month = None
+        c1, c2 = st.columns(2)
+        with c1:
+            if province_options:
+                default_province = str(st.session_state.get("summary_province", "전국"))
+                if default_province not in province_options:
+                    default_province = province_options[0]
+                selected_province = st.selectbox(
+                    "시도 선택",
+                    province_options,
+                    index=province_options.index(default_province),
+                    key="summary_province",
+                )
+            else:
+                st.selectbox(
+                    "시도 선택",
+                    ["선택 가능한 시도 없음"],
+                    index=0,
+                    key="summary_province_empty",
+                    disabled=True,
+                )
+
+        report_month_options = _get_report_period_options(
+            events,
+            summary_scope,
+            selected_region=selected_province,
+        )
+        with c2:
+            if report_month_options:
+                default_month = str(st.session_state.get("report_month_province", report_month_options[0]))
+                if default_month not in report_month_options:
+                    default_month = report_month_options[0]
+                selected_report_month = st.selectbox(
+                    f"리포트 기준{labels['point']}",
+                    report_month_options,
+                    index=report_month_options.index(default_month),
+                    key="report_month_province",
+                )
+            else:
+                st.selectbox(
+                    f"리포트 기준{labels['point']}",
+                    ["선택 가능한 기간 없음"],
+                    index=0,
+                    key="report_month_province_empty",
+                    disabled=True,
+                )
+
         _render_new_monthly_report(
             events,
             report_scope=summary_scope,
@@ -918,23 +978,29 @@ elif active_page == "⑦ 요약":
             source_df=data,
             compact=True,
             include_consecutive_summary=False,
+            selected_region=selected_province,
+            selected_month=selected_report_month,
         )
         _render_consecutive_change_summary(
             events=events,
             report_scope=summary_scope,
             datasets=active_datasets,
             source_df=data,
+            selected_region=selected_province,
+            selected_month=selected_report_month,
         )
         st.markdown("---")
         _render_ai_insights(
             visible_data,
-            region_pool,
+            province_options if province_options else region_pool,
             labels,
             card_fn=_card,
             datasets=active_datasets,
             events=events,
             report_scope=summary_scope,
             source_df=data,
+            fixed_region=None if selected_province == "전국" else selected_province,
+            selected_month=selected_report_month,
             show_ai=SHOW_AI_FEATURES,
         )
 elif active_page == "⑧ 리포트":
