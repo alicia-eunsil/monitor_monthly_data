@@ -1,7 +1,9 @@
 ﻿from __future__ import annotations
 
 import os
+import re
 from typing import Any, Dict, List
+from urllib.parse import parse_qs, urlparse
 
 import altair as alt
 import numpy as np
@@ -215,6 +217,49 @@ def _require_access_gate() -> None:
 
 def _time_labels(datasets: List[DatasetConfig]) -> Dict[str, str]:
     return time_labels([str(cfg.prd_se) for cfg in datasets])
+
+
+def _normalize_youtube_url(raw_url: str) -> str:
+    url = str(raw_url or "").strip()
+    if not url:
+        return ""
+
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    path = parsed.path.strip("/")
+
+    if "youtube.com" in host:
+        query = parse_qs(parsed.query)
+        video_id = (query.get("v") or [""])[0].strip()
+        if video_id:
+            return f"https://www.youtube.com/watch?v={video_id}"
+        if path.startswith("shorts/"):
+            short_id = path.split("/", 1)[1].strip()
+            if short_id:
+                return f"https://www.youtube.com/watch?v={short_id}"
+    elif "youtu.be" in host and path:
+        short_id = path.split("/", 1)[0].strip()
+        if short_id:
+            return f"https://www.youtube.com/watch?v={short_id}"
+
+    direct_id = re.fullmatch(r"[A-Za-z0-9_-]{11}", url)
+    if direct_id:
+        return f"https://www.youtube.com/watch?v={url}"
+    return ""
+
+
+def _render_youtube_display_content() -> None:
+    st.caption("유튜브 URL 또는 영상 ID를 입력하면 화면에서 바로 재생됩니다.")
+    input_url = st.text_input(
+        "YouTube URL",
+        key="youtube_popup_input_url",
+        placeholder="예: https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    )
+    normalized_url = _normalize_youtube_url(input_url)
+    if input_url and not normalized_url:
+        st.warning("유효한 YouTube URL(또는 11자리 영상 ID)을 입력해 주세요.")
+    elif normalized_url:
+        st.video(normalized_url)
 
 
 def _card(title: str, value: str, sub: str, is_new: bool = False, value_class: str = "") -> None:
@@ -623,7 +668,25 @@ def _render_dataset(
 
 _require_access_gate()
 
-st.title("경제활동인구 모니터링")
+if hasattr(st, "dialog"):
+    @st.dialog("경제활동인구 모니터링")
+    def _open_youtube_dialog() -> None:
+        _render_youtube_display_content()
+else:
+    def _open_youtube_dialog() -> None:
+        pass
+
+title_col, button_col = st.columns([0.94, 0.06])
+with title_col:
+    st.title("경제활동인구 모니터링")
+with button_col:
+    if st.button("Y", key="open_youtube_dialog_btn", use_container_width=True, help="유튜브 디스플레이 열기"):
+        st.session_state["_show_youtube_fallback"] = True
+        _open_youtube_dialog()
+
+if not hasattr(st, "dialog") and st.session_state.get("_show_youtube_fallback", False):
+    with st.expander("경제활동인구 모니터링", expanded=True):
+        _render_youtube_display_content()
 
 with st.sidebar:
     st.subheader("데이터 제어")
