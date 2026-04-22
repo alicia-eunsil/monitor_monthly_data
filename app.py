@@ -260,6 +260,9 @@ def _render_youtube_display_content() -> None:
         st.warning("유효한 YouTube URL(또는 11자리 영상 ID)을 입력해 주세요.")
     elif normalized_url:
         st.video(normalized_url)
+    if st.button("닫기", key="youtube_popup_close_btn"):
+        st.session_state["_show_youtube_popup"] = False
+        st.rerun()
 
 
 def _card(title: str, value: str, sub: str, is_new: bool = False, value_class: str = "") -> None:
@@ -668,6 +671,9 @@ def _render_dataset(
 
 _require_access_gate()
 
+if "_show_youtube_popup" not in st.session_state:
+    st.session_state["_show_youtube_popup"] = False
+
 if hasattr(st, "dialog"):
     @st.dialog("경제활동인구 모니터링")
     def _open_youtube_dialog() -> None:
@@ -681,10 +687,11 @@ with title_col:
     st.title("경제활동인구 모니터링")
 with button_col:
     if st.button("Y", key="open_youtube_dialog_btn", use_container_width=True, help="유튜브 디스플레이 열기"):
-        st.session_state["_show_youtube_fallback"] = True
-        _open_youtube_dialog()
+        st.session_state["_show_youtube_popup"] = True
 
-if not hasattr(st, "dialog") and st.session_state.get("_show_youtube_fallback", False):
+if hasattr(st, "dialog") and st.session_state.get("_show_youtube_popup", False):
+    _open_youtube_dialog()
+elif not hasattr(st, "dialog") and st.session_state.get("_show_youtube_popup", False):
     with st.expander("경제활동인구 모니터링", expanded=True):
         _render_youtube_display_content()
 
