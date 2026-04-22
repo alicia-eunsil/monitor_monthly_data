@@ -219,7 +219,7 @@ def _time_labels(datasets: List[DatasetConfig]) -> Dict[str, str]:
     return time_labels([str(cfg.prd_se) for cfg in datasets])
 
 
-def _normalize_youtube_url(raw_url: str) -> str:
+def _extract_youtube_video_id(raw_url: str) -> str:
     url = str(raw_url or "").strip()
     if not url:
         return ""
@@ -232,23 +232,27 @@ def _normalize_youtube_url(raw_url: str) -> str:
         query = parse_qs(parsed.query)
         video_id = (query.get("v") or [""])[0].strip()
         if video_id:
-            return f"https://www.youtube.com/watch?v={video_id}"
+            return video_id
         if path.startswith("live/"):
             live_id = path.split("/", 1)[1].strip()
             if live_id:
-                return f"https://www.youtube.com/watch?v={live_id}"
+                return live_id
         if path.startswith("shorts/"):
             short_id = path.split("/", 1)[1].strip()
             if short_id:
-                return f"https://www.youtube.com/watch?v={short_id}"
+                return short_id
+        if path.startswith("embed/"):
+            embed_id = path.split("/", 1)[1].strip()
+            if embed_id:
+                return embed_id
     elif "youtu.be" in host and path:
         short_id = path.split("/", 1)[0].strip()
         if short_id:
-            return f"https://www.youtube.com/watch?v={short_id}"
+            return short_id
 
     direct_id = re.fullmatch(r"[A-Za-z0-9_-]{11}", url)
     if direct_id:
-        return f"https://www.youtube.com/watch?v={url}"
+        return url
     return ""
 
 
@@ -259,11 +263,13 @@ def _render_youtube_display_content() -> None:
         key="youtube_popup_input_url",
         placeholder="예: https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     )
-    normalized_url = _normalize_youtube_url(input_url)
-    if input_url and not normalized_url:
+    video_id = _extract_youtube_video_id(input_url)
+    if input_url and not video_id:
         st.warning("유효한 YouTube URL(또는 11자리 영상 ID)을 입력해 주세요.")
-    elif normalized_url:
-        st.video(normalized_url)
+    elif video_id:
+        embed_url = f"https://www.youtube.com/embed/{video_id}?autoplay=1"
+        st.components.v1.iframe(embed_url, height=420, scrolling=False)
+        st.caption(f"영상 ID: {video_id}")
     if st.button("닫기", key="youtube_popup_close_btn"):
         st.session_state["_show_youtube_popup"] = False
         st.rerun()
