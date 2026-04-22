@@ -233,6 +233,10 @@ def _normalize_youtube_url(raw_url: str) -> str:
         video_id = (query.get("v") or [""])[0].strip()
         if video_id:
             return f"https://www.youtube.com/watch?v={video_id}"
+        if path.startswith("live/"):
+            live_id = path.split("/", 1)[1].strip()
+            if live_id:
+                return f"https://www.youtube.com/watch?v={live_id}"
         if path.startswith("shorts/"):
             short_id = path.split("/", 1)[1].strip()
             if short_id:
