@@ -269,10 +269,17 @@ def _render_youtube_display_content() -> None:
         st.warning("유효한 YouTube URL(또는 11자리 영상 ID)을 입력해 주세요.")
     elif video_id:
         embed_url = f"https://www.youtube.com/embed/{video_id}?autoplay=1"
-        iframe_height = 1 if audio_only_mode else 420
-        st.components.v1.iframe(embed_url, height=iframe_height, scrolling=False)
         if audio_only_mode:
+            hidden_player_html = (
+                f'<iframe src="{embed_url}" '
+                'allow="autoplay; encrypted-media" '
+                'style="position:absolute; left:-99999px; width:1px; height:1px; border:0;" '
+                'title="youtube-audio-only"></iframe>'
+            )
+            st.components.v1.html(hidden_player_html, height=0)
             st.caption("오디오 전용 모드: 화면은 숨기고 소리만 재생 중입니다.")
+        else:
+            st.components.v1.iframe(embed_url, height=420, scrolling=False)
         st.caption(f"영상 ID: {video_id}")
     if st.button("닫기", key="youtube_popup_close_btn"):
         st.session_state["_show_youtube_popup"] = False
