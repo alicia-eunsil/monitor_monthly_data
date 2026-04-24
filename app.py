@@ -82,6 +82,12 @@ st.markdown(
 .stApp div[data-baseweb="tab"] button {
   font-size: 1.0rem;
 }
+.stApp [data-testid="stDialog"] [role="dialog"] {
+  width: min(1200px, 96vw) !important;
+}
+.stApp [data-testid="stDialog"] iframe {
+  width: 100% !important;
+}
 .stApp div[role="radiogroup"][aria-label="메뉴"] {
   display: flex;
   flex-wrap: wrap;
@@ -256,8 +262,11 @@ def _extract_youtube_video_id(raw_url: str) -> str:
     return ""
 
 
-def _render_youtube_player(video_id: str, audio_only_mode: bool) -> None:
-    embed_url = f"https://www.youtube.com/embed/{video_id}?autoplay=1&rel=0&playsinline=1"
+def _render_youtube_player(video_id: str, audio_only_mode: bool, player_nonce: int = 0) -> None:
+    embed_url = (
+        f"https://www.youtube.com/embed/{video_id}"
+        f"?autoplay=1&rel=0&playsinline=1&enablejsapi=1&nonce={int(player_nonce)}"
+    )
     if audio_only_mode:
         hidden_player_html = (
             f'<iframe src="{embed_url}" '
@@ -276,6 +285,8 @@ def _render_youtube_display_content() -> None:
         st.session_state["_youtube_active_video_id"] = ""
     if "_youtube_last_input" not in st.session_state:
         st.session_state["_youtube_last_input"] = ""
+    if "_youtube_player_nonce" not in st.session_state:
+        st.session_state["_youtube_player_nonce"] = 0
 
     input_url = st.text_input(
         "YouTube URL",
@@ -290,14 +301,17 @@ def _render_youtube_display_content() -> None:
     # Enter 입력으로 rerun되는 경우와 재생 버튼 클릭 모두 즉시 반영
     if parsed_video_id and (play_clicked or input_changed):
         st.session_state["_youtube_active_video_id"] = parsed_video_id
+        st.session_state["_youtube_player_nonce"] = int(st.session_state.get("_youtube_player_nonce", 0)) + 1
+        st.rerun()
     elif play_clicked and not parsed_video_id:
         st.session_state["_youtube_active_video_id"] = ""
         st.warning("유효한 YouTube URL(또는 11자리 영상 ID)을 입력해 주세요.")
 
     audio_only_mode = st.toggle("오디오 전용(화면 숨김)", key="youtube_audio_only_mode", value=False)
     active_video_id = str(st.session_state.get("_youtube_active_video_id", "")).strip()
+    player_nonce = int(st.session_state.get("_youtube_player_nonce", 0))
     if active_video_id:
-        _render_youtube_player(video_id=active_video_id, audio_only_mode=audio_only_mode)
+        _render_youtube_player(video_id=active_video_id, audio_only_mode=audio_only_mode, player_nonce=player_nonce)
         if audio_only_mode:
             st.caption("오디오 전용 모드: 화면은 숨기고 소리만 재생 중입니다.")
         st.caption(f"영상 ID: {active_video_id}")
