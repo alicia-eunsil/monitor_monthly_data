@@ -274,22 +274,25 @@ def _render_youtube_display_content() -> None:
     st.caption("유튜브 URL 또는 영상 ID를 입력하면 재생됩니다.")
     if "_youtube_active_video_id" not in st.session_state:
         st.session_state["_youtube_active_video_id"] = ""
+    if "_youtube_last_input" not in st.session_state:
+        st.session_state["_youtube_last_input"] = ""
 
-    with st.form("youtube_play_form", clear_on_submit=False):
-        input_url = st.text_input(
-            "YouTube URL",
-            key="youtube_popup_input_url",
-            placeholder="예: https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        )
-        play_submitted = st.form_submit_button("재생")
+    input_url = st.text_input(
+        "YouTube URL",
+        key="youtube_popup_input_url",
+        placeholder="예: https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    )
+    play_clicked = st.button("재생", key="youtube_play_btn", use_container_width=True)
+    parsed_video_id = _extract_youtube_video_id(input_url)
+    input_changed = input_url != str(st.session_state.get("_youtube_last_input", ""))
+    st.session_state["_youtube_last_input"] = input_url
 
-    if play_submitted:
-        parsed_video_id = _extract_youtube_video_id(input_url)
-        if not parsed_video_id:
-            st.session_state["_youtube_active_video_id"] = ""
-            st.warning("유효한 YouTube URL(또는 11자리 영상 ID)을 입력해 주세요.")
-        else:
-            st.session_state["_youtube_active_video_id"] = parsed_video_id
+    # Enter 입력으로 rerun되는 경우와 재생 버튼 클릭 모두 즉시 반영
+    if parsed_video_id and (play_clicked or input_changed):
+        st.session_state["_youtube_active_video_id"] = parsed_video_id
+    elif play_clicked and not parsed_video_id:
+        st.session_state["_youtube_active_video_id"] = ""
+        st.warning("유효한 YouTube URL(또는 11자리 영상 ID)을 입력해 주세요.")
 
     audio_only_mode = st.toggle("오디오 전용(화면 숨김)", key="youtube_audio_only_mode", value=False)
     active_video_id = str(st.session_state.get("_youtube_active_video_id", "")).strip()
