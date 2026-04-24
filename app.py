@@ -256,6 +256,95 @@ def _extract_youtube_video_id(raw_url: str) -> str:
     return ""
 
 
+def _render_youtube_player(video_id: str, audio_only_mode: bool) -> None:
+    container_style = (
+        "position:relative;width:100%;height:420px;"
+        if not audio_only_mode
+        else "position:absolute;left:-99999px;width:1px;height:1px;overflow:hidden;"
+    )
+    component_height = 440 if not audio_only_mode else 1
+    player_html = """
+<div id="yt-wrap-__VID__" style="__STYLE__"><div id="yt-player-__VID__"></div></div>
+<script>
+(function() {
+  const videoId = "__VID__";
+  const playerId = "yt-player-" + videoId;
+  const posKey = "yt_pos_" + videoId;
+  const audioOnly = __AUDIO__;
+  let player = null;
+  let saveTimer = null;
+
+  function savePos() {
+    try {
+      if (player && typeof player.getCurrentTime === "function") {
+        const t = player.getCurrentTime();
+        if (!Number.isNaN(t)) sessionStorage.setItem(posKey, String(t));
+      }
+    } catch (e) {}
+  }
+
+  function createPlayer() {
+    if (player || !(window.YT && window.YT.Player)) return false;
+    const saved = parseFloat(sessionStorage.getItem(posKey) || "0") || 0;
+    player = new YT.Player(playerId, {
+      width: "100%",
+      height: "100%",
+      videoId: videoId,
+      playerVars: {
+        autoplay: 1,
+        controls: audioOnly ? 0 : 1,
+        rel: 0,
+        playsinline: 1,
+        start: Math.max(0, Math.floor(saved))
+      },
+      events: {
+        onReady: function(event) {
+          if (saved > 0) event.target.seekTo(saved, true);
+        },
+        onStateChange: function() { savePos(); }
+      }
+    });
+    if (!saveTimer) saveTimer = setInterval(savePos, 1000);
+    return true;
+  }
+
+  function ensureApiAndBoot() {
+    if (createPlayer()) return;
+    if (!document.getElementById("yt-iframe-api")) {
+      const prevReady = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = function() {
+        if (typeof prevReady === "function") prevReady();
+        createPlayer();
+      };
+      const tag = document.createElement("script");
+      tag.id = "yt-iframe-api";
+      tag.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(tag);
+    }
+    let tries = 0;
+    const poll = setInterval(function() {
+      tries += 1;
+      if (createPlayer() || tries > 80) clearInterval(poll);
+    }, 100);
+  }
+
+  ensureApiAndBoot();
+
+  window.addEventListener("beforeunload", function() {
+    savePos();
+    if (saveTimer) clearInterval(saveTimer);
+  });
+})();
+</script>
+"""
+    player_html = (
+        player_html.replace("__VID__", video_id)
+        .replace("__STYLE__", container_style)
+        .replace("__AUDIO__", "true" if audio_only_mode else "false")
+    )
+    st.components.v1.html(player_html, height=component_height, scrolling=False)
+
+
 def _render_youtube_display_content() -> None:
     st.caption("유튜브 URL 또는 영상 ID를 입력하면 재생됩니다.")
     input_url = st.text_input(
@@ -268,18 +357,9 @@ def _render_youtube_display_content() -> None:
     if input_url and not video_id:
         st.warning("유효한 YouTube URL(또는 11자리 영상 ID)을 입력해 주세요.")
     elif video_id:
-        embed_url = f"https://www.youtube.com/embed/{video_id}?autoplay=1"
+        _render_youtube_player(video_id=video_id, audio_only_mode=audio_only_mode)
         if audio_only_mode:
-            hidden_player_html = (
-                f'<iframe src="{embed_url}" '
-                'allow="autoplay; encrypted-media" '
-                'style="position:absolute; left:-99999px; width:1px; height:1px; border:0;" '
-                'title="youtube-audio-only"></iframe>'
-            )
-            st.components.v1.html(hidden_player_html, height=0)
             st.caption("오디오 전용 모드: 화면은 숨기고 소리만 재생 중입니다.")
-        else:
-            st.components.v1.iframe(embed_url, height=420, scrolling=False)
         st.caption(f"영상 ID: {video_id}")
     if st.button("닫기", key="youtube_popup_close_btn"):
         st.session_state["_show_youtube_popup"] = False
