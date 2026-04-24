@@ -82,8 +82,11 @@ st.markdown(
 .stApp div[data-baseweb="tab"] button {
   font-size: 1.0rem;
 }
-.stApp [data-testid="stDialog"] [role="dialog"] {
+.stApp [data-testid="stDialog"] [role="dialog"],
+.stApp [data-testid="stDialog"] > div,
+.stApp div[role="dialog"] {
   width: min(1200px, 96vw) !important;
+  max-width: min(1200px, 96vw) !important;
 }
 .stApp [data-testid="stDialog"] iframe {
   width: 100% !important;
@@ -276,7 +279,7 @@ def _render_youtube_player(video_id: str, audio_only_mode: bool, player_nonce: i
         )
         st.components.v1.html(hidden_player_html, height=1, scrolling=False)
     else:
-        st.components.v1.iframe(embed_url, height=560, scrolling=False)
+        st.components.v1.iframe(embed_url, width=1100, height=560, scrolling=False)
 
 
 def _render_youtube_display_content() -> None:
