@@ -697,50 +697,43 @@ def render_ai_insights(
         if not plot_df.empty:
             plot_df["period"] = pd.to_datetime(plot_df["period"], errors="coerce")
             plot_df = plot_df.dropna(subset=["period"]).sort_values("period").copy()
-            share_plot_df = plot_df.copy()
-            contrib_plot_df = plot_df.copy()
             period_options = plot_df["period"].drop_duplicates().tolist()
-            if period_options:
-                chart_prd = "M"
-                if "prd_se" in df.columns and not df["prd_se"].dropna().empty:
-                    chart_prd = "H" if str(df["prd_se"].dropna().iloc[0]).upper() == "H" else "M"
-                period_labels = [fmt_period(p, chart_prd) for p in period_options]
-                default_window = (period_labels[0], period_labels[-1])
-
-                selected_share_window = st.select_slider(
-                    "전국대비 비중 기간",
-                    options=period_labels,
-                    value=default_window,
-                    key=f"ai_share_period_{(region or 'all').strip()}",
-                )
-                share_start_idx = period_labels.index(selected_share_window[0])
-                share_end_idx = period_labels.index(selected_share_window[1])
-                if share_start_idx > share_end_idx:
-                    share_start_idx, share_end_idx = share_end_idx, share_start_idx
-                share_periods = set(period_options[share_start_idx : share_end_idx + 1])
-                share_plot_df = share_plot_df[share_plot_df["period"].isin(share_periods)].copy()
-
-                selected_contrib_window = st.select_slider(
-                    "전국대비 증감 기여율 기간",
-                    options=period_labels,
-                    value=default_window,
-                    key=f"ai_contrib_period_{(region or 'all').strip()}",
-                )
-                contrib_start_idx = period_labels.index(selected_contrib_window[0])
-                contrib_end_idx = period_labels.index(selected_contrib_window[1])
-                if contrib_start_idx > contrib_end_idx:
-                    contrib_start_idx, contrib_end_idx = contrib_end_idx, contrib_start_idx
-                contrib_periods = set(period_options[contrib_start_idx : contrib_end_idx + 1])
-                contrib_plot_df = contrib_plot_df[contrib_plot_df["period"].isin(contrib_periods)].copy()
+            chart_prd = "M"
+            if "prd_se" in df.columns and not df["prd_se"].dropna().empty:
+                chart_prd = "H" if str(df["prd_se"].dropna().iloc[0]).upper() == "H" else "M"
+            period_labels = [fmt_period(p, chart_prd) for p in period_options] if period_options else []
+            default_window = (period_labels[0], period_labels[-1]) if period_labels else None
 
             col_l, col_r = st.columns(2)
             with col_l:
+                share_plot_df = plot_df.copy()
+                if period_labels and default_window:
+                    selected_share_window = st.select_slider(
+                        "전국대비 비중 기간",
+                        options=period_labels,
+                        value=default_window,
+                        key=f"ai_share_period_{(region or 'all').strip()}",
+                    )
+                    share_start_idx = period_labels.index(selected_share_window[0])
+                    share_end_idx = period_labels.index(selected_share_window[1])
+                    if share_start_idx > share_end_idx:
+                        share_start_idx, share_end_idx = share_end_idx, share_start_idx
+                    share_periods = set(period_options[share_start_idx : share_end_idx + 1])
+                    share_plot_df = share_plot_df[share_plot_df["period"].isin(share_periods)].copy()
+                share_vals = pd.to_numeric(share_plot_df["share_pct"], errors="coerce").dropna()
+                share_domain = None
+                if not share_vals.empty:
+                    share_min = float(share_vals.min())
+                    share_max = float(share_vals.max())
+                    share_span = max(share_max - share_min, 0.5)
+                    share_pad = share_span * 0.15
+                    share_domain = [share_min - share_pad, share_max + share_pad]
                 share_chart = (
                     alt.Chart(share_plot_df)
                     .mark_line(color="#2563eb", point=True)
                     .encode(
                         x=alt.X("period:T", title=labels.get("point", "월")),
-                        y=alt.Y("share_pct:Q", title="전국 대비 경기도 비중(%)"),
+                        y=alt.Y("share_pct:Q", title="전국 대비 경기도 비중(%)", scale=alt.Scale(domain=share_domain)),
                         tooltip=[
                             alt.Tooltip("yearmonth(period):T", title=labels.get("point", "월")),
                             alt.Tooltip("share_pct:Q", title="비중(%)", format=".2f"),
@@ -750,6 +743,28 @@ def render_ai_insights(
                 )
                 st.altair_chart(share_chart, use_container_width=True)
             with col_r:
+                contrib_plot_df = plot_df.copy()
+                if period_labels and default_window:
+                    selected_contrib_window = st.select_slider(
+                        "전국대비 증감 기여율 기간",
+                        options=period_labels,
+                        value=default_window,
+                        key=f"ai_contrib_period_{(region or 'all').strip()}",
+                    )
+                    contrib_start_idx = period_labels.index(selected_contrib_window[0])
+                    contrib_end_idx = period_labels.index(selected_contrib_window[1])
+                    if contrib_start_idx > contrib_end_idx:
+                        contrib_start_idx, contrib_end_idx = contrib_end_idx, contrib_start_idx
+                    contrib_periods = set(period_options[contrib_start_idx : contrib_end_idx + 1])
+                    contrib_plot_df = contrib_plot_df[contrib_plot_df["period"].isin(contrib_periods)].copy()
+                contrib_vals = pd.to_numeric(contrib_plot_df["contrib_pct"], errors="coerce").dropna()
+                contrib_domain = None
+                if not contrib_vals.empty:
+                    contrib_min = float(contrib_vals.min())
+                    contrib_max = float(contrib_vals.max())
+                    contrib_span = max(contrib_max - contrib_min, 1.0)
+                    contrib_pad = contrib_span * 0.15
+                    contrib_domain = [contrib_min - contrib_pad, contrib_max + contrib_pad]
                 base = alt.Chart(contrib_plot_df).encode(
                     x=alt.X("period:T", title=labels.get("point", "월")),
                     tooltip=[
@@ -758,7 +773,7 @@ def render_ai_insights(
                     ],
                 )
                 contrib_line = base.mark_line(color="#dc2626", point=True).encode(
-                    y=alt.Y("contrib_pct:Q", title="전국 증감 기여율(%)")
+                    y=alt.Y("contrib_pct:Q", title="전국 증감 기여율(%)", scale=alt.Scale(domain=contrib_domain))
                 )
                 zero = alt.Chart(pd.DataFrame({"zero": [0]})).mark_rule(
                     color="#9CA3AF",
