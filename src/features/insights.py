@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Optional
+﻿from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
 import altair as alt
@@ -695,10 +695,48 @@ def render_ai_insights(
             )
         plot_df = gy_trend[["period", "share_pct", "contrib_pct"]].dropna(subset=["period"], how="any").copy()
         if not plot_df.empty:
+            plot_df["period"] = pd.to_datetime(plot_df["period"], errors="coerce")
+            plot_df = plot_df.dropna(subset=["period"]).sort_values("period").copy()
+            share_plot_df = plot_df.copy()
+            contrib_plot_df = plot_df.copy()
+            period_options = plot_df["period"].drop_duplicates().tolist()
+            if period_options:
+                chart_prd = "M"
+                if "prd_se" in df.columns and not df["prd_se"].dropna().empty:
+                    chart_prd = "H" if str(df["prd_se"].dropna().iloc[0]).upper() == "H" else "M"
+                period_labels = [fmt_period(p, chart_prd) for p in period_options]
+                default_window = (period_labels[0], period_labels[-1])
+
+                selected_share_window = st.select_slider(
+                    "전국대비 비중 기간",
+                    options=period_labels,
+                    value=default_window,
+                    key=f"ai_share_period_{(region or 'all').strip()}",
+                )
+                share_start_idx = period_labels.index(selected_share_window[0])
+                share_end_idx = period_labels.index(selected_share_window[1])
+                if share_start_idx > share_end_idx:
+                    share_start_idx, share_end_idx = share_end_idx, share_start_idx
+                share_periods = set(period_options[share_start_idx : share_end_idx + 1])
+                share_plot_df = share_plot_df[share_plot_df["period"].isin(share_periods)].copy()
+
+                selected_contrib_window = st.select_slider(
+                    "전국대비 증감 기여율 기간",
+                    options=period_labels,
+                    value=default_window,
+                    key=f"ai_contrib_period_{(region or 'all').strip()}",
+                )
+                contrib_start_idx = period_labels.index(selected_contrib_window[0])
+                contrib_end_idx = period_labels.index(selected_contrib_window[1])
+                if contrib_start_idx > contrib_end_idx:
+                    contrib_start_idx, contrib_end_idx = contrib_end_idx, contrib_start_idx
+                contrib_periods = set(period_options[contrib_start_idx : contrib_end_idx + 1])
+                contrib_plot_df = contrib_plot_df[contrib_plot_df["period"].isin(contrib_periods)].copy()
+
             col_l, col_r = st.columns(2)
             with col_l:
                 share_chart = (
-                    alt.Chart(plot_df)
+                    alt.Chart(share_plot_df)
                     .mark_line(color="#2563eb", point=True)
                     .encode(
                         x=alt.X("period:T", title=labels.get("point", "월")),
@@ -712,7 +750,7 @@ def render_ai_insights(
                 )
                 st.altair_chart(share_chart, use_container_width=True)
             with col_r:
-                base = alt.Chart(plot_df).encode(
+                base = alt.Chart(contrib_plot_df).encode(
                     x=alt.X("period:T", title=labels.get("point", "월")),
                     tooltip=[
                         alt.Tooltip("yearmonth(period):T", title=labels.get("point", "월")),
