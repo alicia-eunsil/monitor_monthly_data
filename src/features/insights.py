@@ -150,11 +150,19 @@ def _build_extreme_summary_table(
         min_idx = scoped[value_col].idxmin()
         max_row = scoped.loc[max_idx]
         min_row = scoped.loc[min_idx]
+        max_is_new = pd.Timestamp(max_row[period_col]) == pd.Timestamp(latest)
+        min_is_new = pd.Timestamp(min_row[period_col]) == pd.Timestamp(latest)
+        max_period_text = fmt_period(max_row[period_col], period_prd)
+        min_period_text = fmt_period(min_row[period_col], period_prd)
+        if max_is_new:
+            max_period_text = f"{max_period_text} NEW"
+        if min_is_new:
+            min_period_text = f"{min_period_text} NEW"
         rows.append(
             {
                 "구간": label,
-                "최고": f"{float(max_row[value_col]):,.2f}% ({fmt_period(max_row[period_col], period_prd)})",
-                "최저": f"{float(min_row[value_col]):,.2f}% ({fmt_period(min_row[period_col], period_prd)})",
+                "최고": f"{float(max_row[value_col]):,.2f}% ({max_period_text})",
+                "최저": f"{float(min_row[value_col]):,.2f}% ({min_period_text})",
             }
         )
     return pd.DataFrame(rows)
@@ -714,8 +722,10 @@ def render_ai_insights(
         st.markdown("##### AI 해설")
         st.markdown(build_ai_gyeonggi_contribution_commentary(gy_meta, labels), unsafe_allow_html=True)
         c1, c2 = st.columns(2)
+        latest_period_text = fmt_period(gy_meta.get("latest_period"), str(gy_meta.get("prd_se", "M")))
         with c1:
             share_sub = (
+                f"기준: {latest_period_text} | "
                 f"{region} {fmt_num(gy_meta.get('latest_gg_value'), str(gy_meta.get('unit', '')))} / "
                 f"{base_region} {fmt_num(gy_meta.get('latest_nat_value'), str(gy_meta.get('unit', '')))}"
             )
@@ -726,6 +736,7 @@ def render_ai_insights(
             )
         with c2:
             contrib_sub = (
+                f"기준: {latest_period_text} | "
                 f"{region} 증감 {fmt_num(gy_meta.get('latest_gg_yoy_abs'), str(gy_meta.get('unit', '')))} / "
                 f"{base_region} 증감 {fmt_num(gy_meta.get('latest_nat_yoy_abs'), str(gy_meta.get('unit', '')))}"
             )
