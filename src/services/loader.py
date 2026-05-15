@@ -1,4 +1,5 @@
 ﻿from typing import Any, Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 
@@ -109,12 +110,15 @@ def load_all_data_with_progress(
         status.success(message)
 
     for scope_key, scope_title, datasets in scope_defs:
-        _set_info(f"{scope_title} 데이터셋 준비 중... ({step}/{total_steps})")
+        _set_info(f"{scope_title} ???? ?? ?... ({step}/{total_steps})")
         step += 1
         _set_progress(min(100, int(step * 100 / total_steps)))
-        for cfg in datasets:
-            _set_info(f"[{scope_title}] 데이터 불러오는 중: {cfg.title} ({step}/{total_steps})")
-            try:
+
+        fetch_outputs: Dict[str, Dict[str, Any]] = {}
+        max_workers = max(1, min(4, len(datasets)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {}
+            for cfg in datasets:
                 end_period = default_end_period_by_prd_se(cfg.prd_se)
                 config_signature = "|".join(
                     [
@@ -129,39 +133,52 @@ def load_all_data_with_progress(
                         scope_key,
                     ]
                 )
-                result = fetch_records_live(
+                future = executor.submit(
+                    fetch_records_live,
                     api_key=api_key,
                     dataset_key=cfg.key,
                     end_period=end_period,
                     config_signature=config_signature,
                     datasets=datasets,
                 )
-                records = result.get("records", [])
-                for line in result.get("debug_logs", []):
-                    debug_logs.append(f"[{scope_key}:{cfg.key}] {line}")
-                if records:
-                    sample = records[0]
-                    debug_logs.append(f"[{scope_key}:{cfg.key}] sample_keys={list(sample.keys())[:12]}")
-                    debug_logs.append(
-                        f"[{scope_key}:{cfg.key}] sample_PRD_DE={sample.get('PRD_DE')} sample_DT={sample.get('DT')}"
-                    )
-            except Exception as exc:  # noqa: BLE001
-                records = []
-                errors.append(f"{scope_title} - {cfg.title}: {exc}")
-                debug_logs.append(f"[{scope_key}:{cfg.key}] ERROR: {exc}")
-            step += 1
-            _set_progress(min(100, int(step * 100 / total_steps)))
+                future_map[future] = (cfg, end_period)
 
-            _set_info(f"[{scope_title}] 파싱 중: {cfg.title} ({step}/{total_steps})")
+            for future in as_completed(future_map):
+                cfg, end_period = future_map[future]
+                _set_info(f"[{scope_title}] ??? ???? ?: {cfg.title} ({step}/{total_steps})")
+                try:
+                    result = future.result()
+                    records = result.get("records", [])
+                    fetch_outputs[cfg.key] = {"records": records, "end_period": end_period}
+                    for line in result.get("debug_logs", []):
+                        debug_logs.append(f"[{scope_key}:{cfg.key}] {line}")
+                    if records:
+                        sample = records[0]
+                        debug_logs.append(f"[{scope_key}:{cfg.key}] sample_keys={list(sample.keys())[:12]}")
+                        debug_logs.append(
+                            f"[{scope_key}:{cfg.key}] sample_PRD_DE={sample.get('PRD_DE')} sample_DT={sample.get('DT')}"
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    fetch_outputs[cfg.key] = {"records": [], "end_period": end_period}
+                    errors.append(f"{scope_title} - {cfg.title}: {exc}")
+                    debug_logs.append(f"[{scope_key}:{cfg.key}] ERROR: {exc}")
+                step += 1
+                _set_progress(min(100, int(step * 100 / total_steps)))
+
+        for cfg in datasets:
+            fetch_meta = fetch_outputs.get(cfg.key, {})
+            records = fetch_meta.get("records", [])
+            end_period = fetch_meta.get("end_period", default_end_period_by_prd_se(cfg.prd_se))
+            _set_info(f"[{scope_title}] ?? ?: {cfg.title} ({step}/{total_steps})")
             parsed = normalize_records(cfg, records, region_scope=scope_key)
             debug_logs.append(f"[{scope_key}:{cfg.key}] parsed_rows={len(parsed)} raw_rows={len(records)}")
             if len(records) == 0:
                 empty_data_warnings.append(
-                    f"{scope_title} - {cfg.title}: API 응답이 비어 있습니다 (end={end_period}, prd_se={cfg.prd_se})."
+                    f"{scope_title} - {cfg.title}: API ??? ?? ???? (end={end_period}, prd_se={cfg.prd_se})."
                 )
             elif parsed.empty:
                 empty_data_warnings.append(
-                    f"{scope_title} - {cfg.title}: API 원본 {len(records)}건 수신했지만 파싱 후 0건입니다."
+                    f"{scope_title} - {cfg.title}: API ?? {len(records)}? ????? ?? ? 0????."
                 )
             if not parsed.empty:
                 frames_by_scope[scope_key].append(parsed)
