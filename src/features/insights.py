@@ -168,12 +168,12 @@ def _build_extreme_summary_table(
     return pd.DataFrame(rows)
 
 
-def _style_new_in_extreme_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
+def _style_new_in_extreme_table(df: pd.DataFrame):
     def _style_map(
-        base: pd.io.formats.style.Styler,
+        base: Any,
         func: Any,
         subset: List[str],
-    ) -> pd.io.formats.style.Styler:
+    ) -> Any:
         if hasattr(base, "map"):
             return base.map(func, subset=subset)
         return base.applymap(func, subset=subset)
