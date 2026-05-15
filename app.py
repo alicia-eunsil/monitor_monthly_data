@@ -165,20 +165,21 @@ SHOW_AI_FEATURES = str(os.getenv("SHOW_AI_FEATURES", "false")).strip().lower() i
 
 
 @st.cache_data(show_spinner=False)
-def _load_scope_data_cached(api_key: str, data_model_version: str) -> tuple[dict, list, list, list]:
+def _load_scope_data_cached(api_key: str, data_model_version: str, scopes: tuple[str, ...]) -> tuple[dict, list, list, list]:
     return load_all_data_with_progress(
         api_key=api_key,
         status_box=None,
         progress_box=None,
         main_status_box=None,
         main_progress_box=None,
+        scopes=list(scopes),
     )
 
 
-def _is_valid_scope_data(scope_data: object) -> bool:
+def _is_valid_scope_data(scope_data: object, required_scopes: List[str]) -> bool:
     if not isinstance(scope_data, dict):
         return False
-    for scope_key in ["province", "gyeonggi31"]:
+    for scope_key in required_scopes:
         frame = scope_data.get(scope_key)
         if not isinstance(frame, pd.DataFrame):
             return False
@@ -775,25 +776,58 @@ if not api_key:
     st.warning("API key is not set.")
     st.stop()
 
+is_sido_mode_default = bool(st.session_state.get("scope_toggle", True))
+requested_scopes = ["province"] if is_sido_mode_default else ["province", "gyeonggi31"]
+
 loading_notice = st.empty()
-loading_notice.info("데이터 불러오는 중... (약 10분 소요예정)")
+loading_notice.info("데이터 불러오는 중... (기본: 시도, 시군은 필요 시 추가 로딩)")
 loading_progress = st.empty()
 try:
     cached_scope_data = st.session_state.get("_loaded_scope_data")
     if (
         st.session_state.get("_loaded_api_key") == api_key
         and st.session_state.get("_loaded_data_version") == DATA_MODEL_VERSION
-        and _is_valid_scope_data(cached_scope_data)
+        and isinstance(cached_scope_data, dict)
     ):
-        scope_data = cached_scope_data
+        scope_data = {
+            "province": cached_scope_data.get("province", pd.DataFrame()),
+            "gyeonggi31": cached_scope_data.get("gyeonggi31", pd.DataFrame()),
+        }
         load_errors = st.session_state.get("_loaded_errors", [])
         empty_data_warnings = st.session_state.get("_loaded_empty_data_warnings", [])
         debug_logs = st.session_state.get("_loaded_debug_logs", [])
+        missing_scopes = [scope for scope in requested_scopes if not _is_valid_scope_data(scope_data, [scope])]
+        if missing_scopes:
+            loading_notice.info(
+                "데이터 추가 불러오는 중... "
+                + ("경기 31개 시군" if "gyeonggi31" in missing_scopes else "전국 17개 시도")
+            )
+            try:
+                new_scope_data, add_errors, add_debug_logs, add_warnings = _load_scope_data_cached(
+                    api_key=api_key,
+                    data_model_version=DATA_MODEL_VERSION,
+                    scopes=tuple(missing_scopes),
+                )
+            except Exception:
+                new_scope_data, add_errors, add_debug_logs, add_warnings = load_all_data_with_progress(
+                    api_key=api_key,
+                    status_box=sidebar_status,
+                    progress_box=sidebar_progress_box,
+                    main_status_box=loading_notice,
+                    main_progress_box=loading_progress,
+                    scopes=missing_scopes,
+                )
+            for scope in missing_scopes:
+                scope_data[scope] = new_scope_data.get(scope, pd.DataFrame())
+            load_errors = [*load_errors, *add_errors]
+            empty_data_warnings = [*empty_data_warnings, *add_warnings]
+            debug_logs = [*debug_logs, *add_debug_logs]
     else:
         try:
             scope_data, load_errors, debug_logs, empty_data_warnings = _load_scope_data_cached(
                 api_key=api_key,
                 data_model_version=DATA_MODEL_VERSION,
+                scopes=tuple(requested_scopes),
             )
         except Exception:
             scope_data, load_errors, debug_logs, empty_data_warnings = load_all_data_with_progress(
@@ -802,13 +836,24 @@ try:
                 progress_box=sidebar_progress_box,
                 main_status_box=loading_notice,
                 main_progress_box=loading_progress,
+                scopes=requested_scopes,
             )
+        scope_data = {
+            "province": scope_data.get("province", pd.DataFrame()),
+            "gyeonggi31": scope_data.get("gyeonggi31", pd.DataFrame()),
+        }
         st.session_state["_loaded_api_key"] = api_key
         st.session_state["_loaded_data_version"] = DATA_MODEL_VERSION
         st.session_state["_loaded_scope_data"] = scope_data
         st.session_state["_loaded_errors"] = load_errors
         st.session_state["_loaded_empty_data_warnings"] = empty_data_warnings
         st.session_state["_loaded_debug_logs"] = debug_logs
+    if not _is_valid_scope_data(scope_data, requested_scopes):
+        raise RuntimeError("필수 조회 범위 데이터 로딩에 실패했습니다.")
+    st.session_state["_loaded_scope_data"] = scope_data
+    st.session_state["_loaded_errors"] = load_errors
+    st.session_state["_loaded_empty_data_warnings"] = empty_data_warnings
+    st.session_state["_loaded_debug_logs"] = debug_logs
 finally:
     loading_notice.empty()
     loading_progress.empty()
@@ -829,7 +874,7 @@ if debug_logs:
 
 is_sido_mode = st.toggle(
     "시도",
-    value=True,
+    value=is_sido_mode_default,
     key="scope_toggle",
 )
 scope_label = "전국 17개 시도" if is_sido_mode else "경기 31개 시군"
