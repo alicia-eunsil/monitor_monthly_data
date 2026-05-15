@@ -361,11 +361,12 @@ def _style_extreme_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         styler = _style_map(styler, lambda _: "color:#b91c1c;font-weight:700;", subset=["최고"])
     if "최저" in df.columns:
         styler = _style_map(styler, lambda _: "color:#1d4ed8;font-weight:700;", subset=["최저"])
-    if "비고" in df.columns:
+    new_cols = [col for col in ["최고 시점", "최저 시점", "비고"] if col in df.columns]
+    if new_cols:
         styler = _style_map(
             styler,
             lambda v: "color:#f59e0b;font-weight:700;" if "NEW" in str(v).strip() else "",
-            subset=["비고"],
+            subset=new_cols,
         )
     return styler
 
