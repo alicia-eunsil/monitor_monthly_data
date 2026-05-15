@@ -803,42 +803,28 @@ try:
                 "데이터 추가 불러오는 중... "
                 + ("경기 31개 시군" if "gyeonggi31" in missing_scopes else "전국 17개 시도")
             )
-            try:
-                new_scope_data, add_errors, add_debug_logs, add_warnings = _load_scope_data_cached(
-                    api_key=api_key,
-                    data_model_version=DATA_MODEL_VERSION,
-                    scopes=tuple(missing_scopes),
-                )
-            except Exception:
-                new_scope_data, add_errors, add_debug_logs, add_warnings = load_all_data_with_progress(
-                    api_key=api_key,
-                    status_box=sidebar_status,
-                    progress_box=sidebar_progress_box,
-                    main_status_box=loading_notice,
-                    main_progress_box=loading_progress,
-                    scopes=missing_scopes,
-                )
+            new_scope_data, add_errors, add_debug_logs, add_warnings = load_all_data_with_progress(
+                api_key=api_key,
+                status_box=sidebar_status,
+                progress_box=sidebar_progress_box,
+                main_status_box=loading_notice,
+                main_progress_box=loading_progress,
+                scopes=missing_scopes,
+            )
             for scope in missing_scopes:
                 scope_data[scope] = new_scope_data.get(scope, pd.DataFrame())
             load_errors = [*load_errors, *add_errors]
             empty_data_warnings = [*empty_data_warnings, *add_warnings]
             debug_logs = [*debug_logs, *add_debug_logs]
     else:
-        try:
-            scope_data, load_errors, debug_logs, empty_data_warnings = _load_scope_data_cached(
-                api_key=api_key,
-                data_model_version=DATA_MODEL_VERSION,
-                scopes=tuple(requested_scopes),
-            )
-        except Exception:
-            scope_data, load_errors, debug_logs, empty_data_warnings = load_all_data_with_progress(
-                api_key=api_key,
-                status_box=sidebar_status,
-                progress_box=sidebar_progress_box,
-                main_status_box=loading_notice,
-                main_progress_box=loading_progress,
-                scopes=requested_scopes,
-            )
+        scope_data, load_errors, debug_logs, empty_data_warnings = load_all_data_with_progress(
+            api_key=api_key,
+            status_box=sidebar_status,
+            progress_box=sidebar_progress_box,
+            main_status_box=loading_notice,
+            main_progress_box=loading_progress,
+            scopes=requested_scopes,
+        )
         scope_data = {
             "province": scope_data.get("province", pd.DataFrame()),
             "gyeonggi31": scope_data.get("gyeonggi31", pd.DataFrame()),
