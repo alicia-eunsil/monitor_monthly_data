@@ -119,6 +119,47 @@ def _build_rule_based_insights(
     return lines
 
 
+def _build_extreme_summary_table(
+    df: pd.DataFrame,
+    value_col: str,
+    period_col: str,
+    period_prd: str,
+) -> pd.DataFrame:
+    if df.empty or value_col not in df.columns or period_col not in df.columns:
+        return pd.DataFrame()
+    work = df[[period_col, value_col]].copy()
+    work[period_col] = pd.to_datetime(work[period_col], errors="coerce")
+    work[value_col] = pd.to_numeric(work[value_col], errors="coerce")
+    work = work.dropna(subset=[period_col, value_col]).sort_values(period_col)
+    if work.empty:
+        return pd.DataFrame()
+
+    latest = work[period_col].max()
+    windows = [
+        ("전체기간", None),
+        ("최근 10년", latest - pd.DateOffset(years=10)),
+        ("최근 5년", latest - pd.DateOffset(years=5)),
+    ]
+    rows = []
+    for label, cutoff in windows:
+        scoped = work if cutoff is None else work[work[period_col] >= cutoff]
+        if scoped.empty:
+            rows.append({"구간": label, "최고": "-", "최저": "-"})
+            continue
+        max_idx = scoped[value_col].idxmax()
+        min_idx = scoped[value_col].idxmin()
+        max_row = scoped.loc[max_idx]
+        min_row = scoped.loc[min_idx]
+        rows.append(
+            {
+                "구간": label,
+                "최고": f"{float(max_row[value_col]):,.2f}% ({fmt_period(max_row[period_col], period_prd)})",
+                "최저": f"{float(min_row[value_col]):,.2f}% ({fmt_period(min_row[period_col], period_prd)})",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def pick_employment_indicator(indicators: List[str]) -> str:
     if not indicators:
         return ""
@@ -742,6 +783,15 @@ def render_ai_insights(
                     .properties(height=280)
                 )
                 st.altair_chart(share_chart, use_container_width=True)
+                share_table = _build_extreme_summary_table(
+                    share_plot_df,
+                    value_col="share_pct",
+                    period_col="period",
+                    period_prd=chart_prd,
+                )
+                if not share_table.empty:
+                    st.caption("전국대비 비중 최고·최저")
+                    st.dataframe(share_table, use_container_width=True, hide_index=True)
             with col_r:
                 contrib_plot_df = plot_df.copy()
                 if period_labels and default_window:
@@ -780,6 +830,15 @@ def render_ai_insights(
                     strokeDash=[4, 4],
                 ).encode(y="zero:Q")
                 st.altair_chart(alt.layer(contrib_line, zero).properties(height=280), use_container_width=True)
+                contrib_table = _build_extreme_summary_table(
+                    contrib_plot_df,
+                    value_col="contrib_pct",
+                    period_col="period",
+                    period_prd=chart_prd,
+                )
+                if not contrib_table.empty:
+                    st.caption("증감 기여율 최고·최저")
+                    st.dataframe(contrib_table, use_container_width=True, hide_index=True)
     st.markdown("---")
     st.markdown(
         """
