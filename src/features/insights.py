@@ -168,6 +168,27 @@ def _build_extreme_summary_table(
     return pd.DataFrame(rows)
 
 
+def _style_new_in_extreme_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
+    def _style_map(
+        base: pd.io.formats.style.Styler,
+        func: Any,
+        subset: List[str],
+    ) -> pd.io.formats.style.Styler:
+        if hasattr(base, "map"):
+            return base.map(func, subset=subset)
+        return base.applymap(func, subset=subset)
+
+    styler = df.style.set_properties(**{"text-align": "center"})
+    target_cols = [col for col in ["최고", "최저"] if col in df.columns]
+    if target_cols:
+        styler = _style_map(
+            styler,
+            lambda v: "color:#f59e0b;font-weight:700;" if "NEW" in str(v).strip() else "",
+            subset=target_cols,
+        )
+    return styler
+
+
 def pick_employment_indicator(indicators: List[str]) -> str:
     if not indicators:
         return ""
@@ -802,7 +823,7 @@ def render_ai_insights(
                 )
                 if not share_table.empty:
                     st.caption("전국대비 비중 최고·최저")
-                    st.dataframe(share_table, use_container_width=True, hide_index=True)
+                    st.dataframe(_style_new_in_extreme_table(share_table), use_container_width=True, hide_index=True)
             with col_r:
                 contrib_plot_df = plot_df.copy()
                 if period_labels and default_window:
@@ -849,7 +870,7 @@ def render_ai_insights(
                 )
                 if not contrib_table.empty:
                     st.caption("증감 기여율 최고·최저")
-                    st.dataframe(contrib_table, use_container_width=True, hide_index=True)
+                    st.dataframe(_style_new_in_extreme_table(contrib_table), use_container_width=True, hide_index=True)
     st.markdown("---")
     st.markdown(
         """
