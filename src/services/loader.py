@@ -54,8 +54,8 @@ def load_all_data_with_progress(
     scopes: Optional[List[str]] = None,
 ) -> tuple[Dict[str, pd.DataFrame], List[str], List[str], List[str]]:
     all_scope_defs = [
-        ("province", "?꾧뎅쨌17媛??쒕룄", datasets_for_scope("province")),
-        ("gyeonggi31", "寃쎄린 31媛??쒓뎔", datasets_for_scope("gyeonggi31")),
+        ("province", "전국·17개 시도", datasets_for_scope("province")),
+        ("gyeonggi31", "경기 31개 시군", datasets_for_scope("gyeonggi31")),
     ]
     requested_scopes = set(scopes or ["province", "gyeonggi31"])
     scope_defs = [scope_def for scope_def in all_scope_defs if scope_def[0] in requested_scopes]
@@ -69,10 +69,24 @@ def load_all_data_with_progress(
     debug_logs: List[str] = []
     empty_data_warnings: List[str] = []
 
-    progress = progress_box.progress(0)
+    class _NoopProgress:
+        def progress(self, _value: int) -> None:
+            return None
+
+    class _NoopStatus:
+        def info(self, _message: str) -> None:
+            return None
+
+        def error(self, _message: str) -> None:
+            return None
+
+        def success(self, _message: str) -> None:
+            return None
+
+    status = status_box if status_box is not None else _NoopStatus()
+    main_status = main_status_box if main_status_box is not None else None
+    progress = progress_box.progress(0) if progress_box is not None else _NoopProgress()
     main_progress = main_progress_box.progress(0) if main_progress_box is not None else None
-    status = status_box
-    main_status = main_status_box
     last_progress = -1
 
     def _set_progress(value: int) -> None:
@@ -95,11 +109,11 @@ def load_all_data_with_progress(
         status.success(message)
 
     for scope_key, scope_title, datasets in scope_defs:
-        _set_info(f"{scope_title} ?곗씠?곗뀑 以鍮?以?.. ({step}/{total_steps})")
+        _set_info(f"{scope_title} 데이터셋 준비 중... ({step}/{total_steps})")
         step += 1
         _set_progress(min(100, int(step * 100 / total_steps)))
         for cfg in datasets:
-            _set_info(f"[{scope_title}] ?곗씠??遺덈윭?ㅻ뒗 以? {cfg.title} ({step}/{total_steps})")
+            _set_info(f"[{scope_title}] 데이터 불러오는 중: {cfg.title} ({step}/{total_steps})")
             try:
                 end_period = default_end_period_by_prd_se(cfg.prd_se)
                 config_signature = "|".join(
@@ -138,23 +152,23 @@ def load_all_data_with_progress(
             step += 1
             _set_progress(min(100, int(step * 100 / total_steps)))
 
-            _set_info(f"[{scope_title}] ?뚯떛 以? {cfg.title} ({step}/{total_steps})")
+            _set_info(f"[{scope_title}] 파싱 중: {cfg.title} ({step}/{total_steps})")
             parsed = normalize_records(cfg, records, region_scope=scope_key)
             debug_logs.append(f"[{scope_key}:{cfg.key}] parsed_rows={len(parsed)} raw_rows={len(records)}")
             if len(records) == 0:
                 empty_data_warnings.append(
-                    f"{scope_title} - {cfg.title}: API ?묐떟??鍮꾩뼱 ?덉뒿?덈떎 (end={end_period}, prd_se={cfg.prd_se})."
+                    f"{scope_title} - {cfg.title}: API 응답이 비어 있습니다 (end={end_period}, prd_se={cfg.prd_se})."
                 )
             elif parsed.empty:
                 empty_data_warnings.append(
-                    f"{scope_title} - {cfg.title}: API ?먮낯 {len(records)}嫄??섏떊?덉?留??뚯떛 ??0嫄댁엯?덈떎."
+                    f"{scope_title} - {cfg.title}: API 원본 {len(records)}건 수신했지만 파싱 후 0건입니다."
                 )
             if not parsed.empty:
                 frames_by_scope[scope_key].append(parsed)
             step += 1
             _set_progress(min(100, int(step * 100 / total_steps)))
 
-    _set_info("吏??怨꾩궛 諛??듯빀 以?..")
+    _set_info("지표 계산 및 통합 중...")
     data_by_scope: Dict[str, pd.DataFrame] = {}
     for scope_key, _, _ in scope_defs:
         frames = frames_by_scope.get(scope_key, [])
@@ -164,7 +178,7 @@ def load_all_data_with_progress(
             debug_logs.append(f"[{scope_key}:all] combined_cols={list(combined.columns)}")
             if missing_required:
                 errors.append(
-                    f"{scope_title_map.get(scope_key, scope_key)} - ?듯빀 ?곗씠???ㅽ궎留??꾨씫: {', '.join(missing_required)}"
+                    f"{scope_title_map.get(scope_key, scope_key)} - 통합 데이터 스키마 누락: {', '.join(missing_required)}"
                 )
                 debug_logs.append(f"[{scope_key}:all] missing_required_cols={missing_required}")
                 data_by_scope[scope_key] = pd.DataFrame()
@@ -186,10 +200,10 @@ def load_all_data_with_progress(
 
     if all(df.empty for df in data_by_scope.values()):
         _set_progress(100)
-        _set_error("?곗씠??濡쒕뵫 ?ㅽ뙣")
+        _set_error("데이터 로딩 실패")
         return data_by_scope, errors, debug_logs, empty_data_warnings
 
     _set_progress(100)
-    _set_success("濡쒕뵫 ?꾨즺")
+    _set_success("로딩 완료")
     return data_by_scope, errors, debug_logs, empty_data_warnings
 
