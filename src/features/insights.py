@@ -621,6 +621,209 @@ def compute_gyeonggi_vs_national_contribution(
     return trend, meta
 
 
+def _direction_label(base_delta: float, region_delta: float) -> str:
+    if pd.isna(base_delta) or pd.isna(region_delta):
+        return "비교 불가"
+    if base_delta > 0 and region_delta > 0:
+        return "동반 증가"
+    if base_delta < 0 and region_delta < 0:
+        return "동반 감소"
+    if base_delta > 0 and region_delta < 0:
+        return "전국 증가 · 지역 감소"
+    if base_delta < 0 and region_delta > 0:
+        return "전국 감소 · 지역 증가"
+    if base_delta == 0 and region_delta == 0:
+        return "동반 보합"
+    if base_delta == 0:
+        return "전국 보합 · 지역 변동"
+    return "전국 변동 · 지역 보합"
+
+
+def compute_industry_comparison_breakdown(
+    df: pd.DataFrame,
+    region_name: str,
+    base_region: str = "전국",
+) -> tuple[pd.DataFrame, Dict[str, Any]]:
+    meta: Dict[str, Any] = {
+        "ok": False,
+        "message": "",
+        "latest_period": pd.NaT,
+        "base_total_delta": np.nan,
+        "region_total_delta": np.nan,
+        "direction": "",
+        "unit": "",
+    }
+    base = df[df["dataset_key"] == "industry"].copy()
+    if base.empty:
+        meta["message"] = "산업별 취업자수 데이터가 없습니다."
+        return pd.DataFrame(), meta
+
+    indicators = sorted(base["indicator_name"].dropna().unique().tolist())
+    indicator = pick_employment_indicator(indicators)
+    base = base[base["indicator_name"] == indicator].copy()
+    if base.empty:
+        meta["message"] = "산업별 취업자수 지표를 찾지 못했습니다."
+        return pd.DataFrame(), meta
+
+    drop_labels = {"시도별", "산업별", "산업명", "직업별", "직종별"}
+    base["category_name"] = base["category_name"].astype(str).str.strip()
+    base = base[(base["category_name"] != "") & (~base["category_name"].isin(drop_labels))].copy()
+    if base.empty:
+        meta["message"] = "산업 분류 데이터가 없습니다."
+        return pd.DataFrame(), meta
+
+    regions = base["region_name"].dropna().astype(str).str.strip().unique().tolist()
+    if region_name not in regions:
+        meta["message"] = f"{region_name} 산업별 데이터를 찾지 못했습니다."
+        return pd.DataFrame(), meta
+
+    if base_region in regions:
+        base_rows = base[base["region_name"] == base_region].copy()
+    else:
+        base_rows = base.copy()
+
+    region_rows = base[base["region_name"] == region_name].copy()
+    if region_rows.empty:
+        meta["message"] = f"{region_name} 산업별 데이터를 찾지 못했습니다."
+        return pd.DataFrame(), meta
+
+    grp_cols = ["period", "category_name"]
+    nat = base_rows.groupby(grp_cols, as_index=False).agg({"yoy_abs": "sum"})
+    reg = region_rows.groupby(grp_cols, as_index=False).agg({"yoy_abs": "sum"})
+    merged = nat.merge(reg, on=grp_cols, how="inner", suffixes=("_nat", "_reg"))
+    if merged.empty:
+        meta["message"] = "산업별 공통 비교 구간이 없습니다."
+        return pd.DataFrame(), meta
+
+    latest_period = pd.to_datetime(merged["period"], errors="coerce").max()
+    view = merged[pd.to_datetime(merged["period"], errors="coerce") == latest_period].copy()
+    if view.empty:
+        meta["message"] = "최신 시점 산업별 데이터가 없습니다."
+        return pd.DataFrame(), meta
+
+    base_total_delta = float(view["yoy_abs_nat"].sum())
+    region_total_delta = float(view["yoy_abs_reg"].sum())
+    view["방향"] = view.apply(lambda r: _direction_label(float(r["yoy_abs_nat"]), float(r["yoy_abs_reg"])), axis=1)
+    view["전국 산업 기여율(%)"] = np.where(
+        base_total_delta == 0,
+        np.nan,
+        view["yoy_abs_nat"] / base_total_delta * 100.0,
+    )
+    view["지역 산업 기여율(%)"] = np.where(
+        region_total_delta == 0,
+        np.nan,
+        view["yoy_abs_reg"] / region_total_delta * 100.0,
+    )
+    view["전국 증감 대비 지역 기여율(%)"] = np.where(
+        base_total_delta == 0,
+        np.nan,
+        view["yoy_abs_reg"] / base_total_delta * 100.0,
+    )
+    out = view.rename(
+        columns={
+            "category_name": "산업",
+            "yoy_abs_nat": "전국 증감",
+            "yoy_abs_reg": "지역 증감",
+        }
+    )[
+        [
+            "산업",
+            "전국 증감",
+            "지역 증감",
+            "방향",
+            "전국 산업 기여율(%)",
+            "지역 산업 기여율(%)",
+            "전국 증감 대비 지역 기여율(%)",
+        ]
+    ].sort_values("전국 증감 대비 지역 기여율(%)", ascending=False)
+
+    unit = ""
+    unit_series = base["unit"].dropna()
+    if not unit_series.empty:
+        unit = str(unit_series.iloc[0])
+
+    meta.update(
+        {
+            "ok": True,
+            "latest_period": pd.Timestamp(latest_period),
+            "base_total_delta": base_total_delta,
+            "region_total_delta": region_total_delta,
+            "direction": _direction_label(base_total_delta, region_total_delta),
+            "unit": unit,
+        }
+    )
+    return out, meta
+
+
+def compute_industry_comparison_trend(
+    df: pd.DataFrame,
+    region_name: str,
+    base_region: str = "전국",
+) -> tuple[pd.DataFrame, Dict[str, Any]]:
+    meta: Dict[str, Any] = {"ok": False, "message": "", "prd_se": "M", "unit": ""}
+    base = df[df["dataset_key"] == "industry"].copy()
+    if base.empty:
+        meta["message"] = "산업별 취업자수 데이터가 없습니다."
+        return pd.DataFrame(), meta
+
+    indicators = sorted(base["indicator_name"].dropna().unique().tolist())
+    indicator = pick_employment_indicator(indicators)
+    base = base[base["indicator_name"] == indicator].copy()
+    if base.empty:
+        meta["message"] = "산업별 취업자수 지표를 찾지 못했습니다."
+        return pd.DataFrame(), meta
+
+    prd_se = "M"
+    if "prd_se" in base.columns and not base["prd_se"].dropna().empty:
+        prd_se = str(base["prd_se"].dropna().iloc[0]).upper()
+
+    drop_labels = {"시도별", "산업별", "산업명", "직업별", "직종별"}
+    base["category_name"] = base["category_name"].astype(str).str.strip()
+    base = base[(base["category_name"] != "") & (~base["category_name"].isin(drop_labels))].copy()
+    if base.empty:
+        meta["message"] = "산업 분류 데이터가 없습니다."
+        return pd.DataFrame(), meta
+
+    regions = base["region_name"].dropna().astype(str).str.strip().unique().tolist()
+    if region_name not in regions:
+        meta["message"] = f"{region_name} 산업별 데이터를 찾지 못했습니다."
+        return pd.DataFrame(), meta
+
+    if base_region in regions:
+        base_rows = base[base["region_name"] == base_region].copy()
+    else:
+        base_rows = base.copy()
+    region_rows = base[base["region_name"] == region_name].copy()
+
+    grp_cols = ["period", "category_name"]
+    nat = base_rows.groupby(grp_cols, as_index=False).agg({"yoy_abs": "sum"}).rename(columns={"yoy_abs": "yoy_abs_nat"})
+    reg = region_rows.groupby(grp_cols, as_index=False).agg({"yoy_abs": "sum"}).rename(columns={"yoy_abs": "yoy_abs_reg"})
+    merged = nat.merge(reg, on=grp_cols, how="inner")
+    if merged.empty:
+        meta["message"] = "산업별 추이 데이터가 없습니다."
+        return pd.DataFrame(), meta
+
+    totals = merged.groupby("period", as_index=False).agg({"yoy_abs_nat": "sum", "yoy_abs_reg": "sum"})
+    merged = merged.merge(totals, on="period", suffixes=("", "_total"))
+    merged["region_contrib_to_nat_pct"] = np.where(
+        merged["yoy_abs_nat_total"] == 0,
+        np.nan,
+        merged["yoy_abs_reg"] / merged["yoy_abs_nat_total"] * 100.0,
+    )
+    merged["direction_match"] = np.where(
+        np.sign(merged["yoy_abs_nat"]) == np.sign(merged["yoy_abs_reg"]),
+        1,
+        0,
+    )
+
+    unit = ""
+    unit_series = base["unit"].dropna()
+    if not unit_series.empty:
+        unit = str(unit_series.iloc[0])
+    meta.update({"ok": True, "prd_se": prd_se, "unit": unit})
+    return merged, meta
+
+
 def build_ai_gyeonggi_contribution_commentary(meta: Dict[str, Any], labels: Dict[str, str]) -> str:
     if not meta.get("ok"):
         return str(meta.get("message", "전국 대비 경기도 기여도를 계산할 수 없습니다."))
@@ -740,32 +943,165 @@ def render_ai_insights(
     if not gy_meta.get("ok"):
         st.info(str(gy_meta.get("message", "전국 대비 경기도 기여도 계산이 불가능합니다.")))
     else:
-        st.markdown("##### AI 해설")
-        st.markdown(build_ai_gyeonggi_contribution_commentary(gy_meta, labels), unsafe_allow_html=True)
+        analysis_region = str(region) if str(region).strip() else "경기도"
+        st.markdown("##### 총량 방향 비교")
         c1, c2 = st.columns(2)
         latest_period_text = fmt_period(gy_meta.get("latest_period"), str(gy_meta.get("prd_se", "M")))
+        unit = str(gy_meta.get("unit", ""))
+        direction_text = _direction_label(
+            float(gy_meta.get("latest_nat_yoy_abs")) if pd.notna(gy_meta.get("latest_nat_yoy_abs")) else np.nan,
+            float(gy_meta.get("latest_gg_yoy_abs")) if pd.notna(gy_meta.get("latest_gg_yoy_abs")) else np.nan,
+        )
         with c1:
-            share_sub = (
-                f"기준: {latest_period_text} | "
-                f"{region} {fmt_num(gy_meta.get('latest_gg_value'), str(gy_meta.get('unit', '')))} / "
-                f"{base_region} {fmt_num(gy_meta.get('latest_nat_value'), str(gy_meta.get('unit', '')))}"
-            )
             card_fn(
-                f"{base_region} 대비 {region} 비중",
-                "-" if pd.isna(gy_meta.get("latest_share_pct")) else f"{float(gy_meta.get('latest_share_pct')):,.2f}%",
-                share_sub,
+                f"{base_region} 증감({labels.get('yoy', '전년동월')}대비)",
+                fmt_num(gy_meta.get("latest_nat_yoy_abs"), unit),
+                f"기준: {latest_period_text}",
             )
         with c2:
-            contrib_sub = (
-                f"기준: {latest_period_text} | "
-                f"{region} 증감 {fmt_num(gy_meta.get('latest_gg_yoy_abs'), str(gy_meta.get('unit', '')))} / "
-                f"{base_region} 증감 {fmt_num(gy_meta.get('latest_nat_yoy_abs'), str(gy_meta.get('unit', '')))}"
-            )
             card_fn(
-                f"{base_region} 증감 기여율({labels.get('yoy', '전년동월')}대비)",
-                "-" if pd.isna(gy_meta.get("latest_contrib_pct")) else f"{float(gy_meta.get('latest_contrib_pct')):,.1f}%",
-                contrib_sub,
+                f"{analysis_region} 증감({labels.get('yoy', '전년동월')}대비)",
+                fmt_num(gy_meta.get("latest_gg_yoy_abs"), unit),
+                f"방향: {direction_text}",
             )
+        st.markdown(
+            f"- **{latest_period_text} 기준** {labels.get('yoy', '전년동월')} 대비 증감 방향은 **{direction_text}**입니다. "
+            f"({base_region} {fmt_num(gy_meta.get('latest_nat_yoy_abs'), unit)} / "
+            f"{analysis_region} {fmt_num(gy_meta.get('latest_gg_yoy_abs'), unit)})"
+        )
+
+        st.markdown("##### 산업별 비교 및 기여도")
+        industry_df, industry_meta = compute_industry_comparison_breakdown(
+            df,
+            region_name=analysis_region,
+            base_region=base_region,
+        )
+        if not industry_meta.get("ok"):
+            st.info(str(industry_meta.get("message", "산업별 비교 데이터를 계산할 수 없습니다.")))
+        else:
+            i_unit = str(industry_meta.get("unit", ""))
+            i_latest = fmt_period(industry_meta.get("latest_period"), str(gy_meta.get("prd_se", "M")))
+            st.caption(
+                f"기준: {i_latest} | 총증감 방향: {industry_meta.get('direction', '-')} "
+                f"({base_region} {fmt_num(industry_meta.get('base_total_delta'), i_unit)} / "
+                f"{analysis_region} {fmt_num(industry_meta.get('region_total_delta'), i_unit)})"
+            )
+            fmt_df = industry_df.copy()
+            for col in ["전국 증감", "지역 증감"]:
+                fmt_df[col] = fmt_df[col].apply(lambda v: fmt_num(v, i_unit))
+            for col in ["전국 산업 기여율(%)", "지역 산업 기여율(%)", "전국 증감 대비 지역 기여율(%)"]:
+                fmt_df[col] = fmt_df[col].apply(lambda v: "-" if pd.isna(v) else f"{float(v):,.1f}%")
+            st.dataframe(fmt_df, use_container_width=True, hide_index=True)
+
+            chart_df = industry_df.copy()
+            top_df = chart_df.nlargest(10, "전국 증감 대비 지역 기여율(%)")
+            bar = (
+                alt.Chart(top_df)
+                .mark_bar()
+                .encode(
+                    x=alt.X("전국 증감 대비 지역 기여율(%):Q", title="전국 증감 대비 지역 기여율(%)"),
+                    y=alt.Y("산업:N", sort="-x", title="산업"),
+                    color=alt.condition("datum['전국 증감 대비 지역 기여율(%)'] >= 0", alt.value("#2563eb"), alt.value("#dc2626")),
+                    tooltip=[
+                        alt.Tooltip("산업:N", title="산업"),
+                        alt.Tooltip("전국 증감:Q", title="전국 증감", format=",.1f"),
+                        alt.Tooltip("지역 증감:Q", title="지역 증감", format=",.1f"),
+                        alt.Tooltip("전국 증감 대비 지역 기여율(%):Q", title="지역 기여율(%)", format=".1f"),
+                    ],
+                )
+                .properties(height=320)
+            )
+            st.altair_chart(bar, use_container_width=True)
+
+            st.markdown("##### 산업별 추이 진단")
+            trend_df, trend_meta = compute_industry_comparison_trend(
+                df,
+                region_name=analysis_region,
+                base_region=base_region,
+            )
+            if not trend_meta.get("ok"):
+                st.info(str(trend_meta.get("message", "산업별 추이를 계산할 수 없습니다.")))
+            else:
+                period_col = pd.to_datetime(trend_df["period"], errors="coerce")
+                trend_df = trend_df.assign(period=period_col).dropna(subset=["period"]).sort_values("period").copy()
+                period_options = trend_df["period"].drop_duplicates().tolist()
+                trend_prd = str(trend_meta.get("prd_se", "M"))
+                labels_opts = [fmt_period(p, trend_prd) for p in period_options]
+                if not labels_opts:
+                    st.info("선택 가능한 산업별 추이 기간이 없습니다.")
+                else:
+                    default_window = (labels_opts[max(0, len(labels_opts) - (6 if trend_prd == "H" else 12))], labels_opts[-1])
+                    selected_window = st.select_slider(
+                        "산업별 추이 기간",
+                        options=labels_opts,
+                        value=default_window,
+                        key=f"ai_industry_trend_period_{analysis_region}",
+                    )
+                    s_idx = labels_opts.index(selected_window[0])
+                    e_idx = labels_opts.index(selected_window[1])
+                    if s_idx > e_idx:
+                        s_idx, e_idx = e_idx, s_idx
+                    selected_periods = set(period_options[s_idx : e_idx + 1])
+                    trend_view = trend_df[trend_df["period"].isin(selected_periods)].copy()
+
+                    dir_match_rate = float(trend_view["direction_match"].mean() * 100.0) if not trend_view.empty else np.nan
+                    agg_by_cat = (
+                        trend_view.groupby("category_name", as_index=False)
+                        .agg(
+                            avg_contrib=("region_contrib_to_nat_pct", "mean"),
+                            latest_contrib=("region_contrib_to_nat_pct", "last"),
+                            pos_count=("region_contrib_to_nat_pct", lambda x: int((pd.to_numeric(x, errors="coerce") > 0).sum())),
+                            neg_count=("region_contrib_to_nat_pct", lambda x: int((pd.to_numeric(x, errors="coerce") < 0).sum())),
+                        )
+                    )
+                    if not agg_by_cat.empty:
+                        agg_by_cat["latest_vs_avg_pp"] = agg_by_cat["latest_contrib"] - agg_by_cat["avg_contrib"]
+                        top_pos = agg_by_cat.sort_values("pos_count", ascending=False).head(1)
+                        top_dev = agg_by_cat.reindex(agg_by_cat["latest_vs_avg_pp"].abs().sort_values(ascending=False).index).head(1)
+                    else:
+                        top_pos = pd.DataFrame()
+                        top_dev = pd.DataFrame()
+
+                    k1, k2, k3 = st.columns(3)
+                    with k1:
+                        card_fn("방향 일치율", "-" if pd.isna(dir_match_rate) else f"{dir_match_rate:,.1f}%", "산업 기준")
+                    with k2:
+                        pos_text = "-" if top_pos.empty else f"{str(top_pos.iloc[0]['category_name'])} ({int(top_pos.iloc[0]['pos_count'])}회)"
+                        card_fn("연속 +기여 우세", pos_text, "선택 기간 기준")
+                    with k3:
+                        dev_text = "-"
+                        if not top_dev.empty and pd.notna(top_dev.iloc[0]["latest_vs_avg_pp"]):
+                            dev_text = f"{str(top_dev.iloc[0]['category_name'])} ({float(top_dev.iloc[0]['latest_vs_avg_pp']):+,.1f}%p)"
+                        card_fn("최신-평균 편차", dev_text, "절대값 기준 최대")
+
+                    top_cats = (
+                        trend_view.groupby("category_name", as_index=False)["region_contrib_to_nat_pct"]
+                        .mean()
+                        .reindex(columns=["category_name", "region_contrib_to_nat_pct"])
+                        .sort_values("region_contrib_to_nat_pct", ascending=False)
+                        .head(5)["category_name"]
+                        .tolist()
+                    )
+                    plot_view = trend_view[trend_view["category_name"].isin(top_cats)].copy()
+                    if not plot_view.empty:
+                        trend_chart = (
+                            alt.Chart(plot_view)
+                            .mark_line(point=True)
+                            .encode(
+                                x=alt.X("period:T", title=labels.get("point", "월")),
+                                y=alt.Y("region_contrib_to_nat_pct:Q", title="전국 증감 대비 지역 기여율(%)"),
+                                color=alt.Color("category_name:N", title="산업"),
+                                tooltip=[
+                                    alt.Tooltip("yearmonth(period):T", title=labels.get("point", "월")),
+                                    alt.Tooltip("category_name:N", title="산업"),
+                                    alt.Tooltip("region_contrib_to_nat_pct:Q", title="기여율(%)", format=".1f"),
+                                ],
+                            )
+                            .properties(height=280)
+                        )
+                        st.altair_chart(trend_chart, use_container_width=True)
+
+        st.markdown("##### 전국대비 추이(참고)")
         plot_df = gy_trend[["period", "share_pct", "contrib_pct"]].dropna(subset=["period"], how="any").copy()
         if not plot_df.empty:
             plot_df["period"] = pd.to_datetime(plot_df["period"], errors="coerce")
