@@ -3,6 +3,7 @@
 import os
 import re
 import subprocess
+from datetime import datetime
 from typing import Any, Dict, List
 from urllib.parse import parse_qs, urlparse
 
@@ -206,7 +207,13 @@ def _latest_git_commit_meta() -> Dict[str, str]:
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-        return {"sha": sha, "committed_at": committed_at}
+        committed_at_display = committed_at
+        try:
+            dt = datetime.fromisoformat(committed_at)
+            committed_at_display = dt.strftime("%Y-%m-%d %H:%M:%S (KST)")
+        except Exception:
+            committed_at_display = committed_at
+        return {"sha": sha, "committed_at": committed_at_display}
     except Exception:
         return {"sha": "-", "committed_at": "-"}
 
@@ -757,7 +764,15 @@ with right_col:
     meta_col, button_col = st.columns([0.78, 0.22])
     with meta_col:
         git_meta = _latest_git_commit_meta()
-        st.caption(f"커밋: {git_meta.get('sha', '-')} | {git_meta.get('committed_at', '-')}")
+        st.markdown(
+            (
+                "<p style='margin:0.35rem 0 0 0; font-size:0.78rem; color:#6b7280; "
+                "white-space:nowrap;'>"
+                f"커밋: {git_meta.get('sha', '-')} | {git_meta.get('committed_at', '-')}"
+                "</p>"
+            ),
+            unsafe_allow_html=True,
+        )
     with button_col:
         if st.button("Y", key="open_youtube_dialog_btn", use_container_width=True, help="유튜브 디스플레이 열기"):
             st.session_state["_show_youtube_popup"] = True
