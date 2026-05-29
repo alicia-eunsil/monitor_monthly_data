@@ -42,7 +42,7 @@ from src.features.new_history import (
 )
 from src.features.report import render_report_template as _render_report_template
 from src.features.sigungu_typology import render_sigungu_typology_tab as _render_sigungu_typology_tab
-from src.services.loader import load_all_data_with_progress
+from src.services.loader import load_all_data_with_progress, load_data_with_local_cache
 from src.transform import build_stats, series_filter
 
 # Keep runtime resilient even if a deployment temporarily mixes app/config versions.
@@ -162,18 +162,6 @@ st.markdown(
 DATA_MODEL_VERSION = "2026-04-02-schema-autorecover-v1"
 REQUIRED_SCOPE_COLUMNS = {"dataset_key", "region_name", "indicator_name", "category_name", "period", "value", "prd_se"}
 SHOW_AI_FEATURES = str(os.getenv("SHOW_AI_FEATURES", "false")).strip().lower() in {"1", "true", "yes", "y"}
-
-
-@st.cache_data(show_spinner=False)
-def _load_scope_data_cached(api_key: str, data_model_version: str, scopes: tuple[str, ...]) -> tuple[dict, list, list, list]:
-    return load_all_data_with_progress(
-        api_key=api_key,
-        status_box=None,
-        progress_box=None,
-        main_status_box=None,
-        main_progress_box=None,
-        scopes=list(scopes),
-    )
 
 
 def _is_valid_scope_data(scope_data: object, required_scopes: List[str]) -> bool:
@@ -752,14 +740,18 @@ with button_col:
 
 if hasattr(st, "dialog") and st.session_state.get("_show_youtube_popup", False):
     _open_youtube_dialog()
+    # Open request is one-shot; avoid reopening on unrelated reruns (tab switch, data load, etc.)
+    st.session_state["_show_youtube_popup"] = False
 elif not hasattr(st, "dialog") and st.session_state.get("_show_youtube_popup", False):
     with st.expander("경제활동인구 모니터링", expanded=True):
         _render_youtube_display_content()
+    st.session_state["_show_youtube_popup"] = False
 
 with st.sidebar:
     st.subheader("데이터 제어")
     if st.button("데이터 새로고침"):
         st.cache_data.clear()
+        st.session_state["_force_data_refresh"] = True
         st.session_state.pop("_loaded_api_key", None)
         st.session_state.pop("_loaded_data_version", None)
         st.session_state.pop("_loaded_scope_data", None)
@@ -784,8 +776,11 @@ loading_notice = st.empty()
 loading_notice.info("데이터 불러오는 중... (기본: 시도, 시군은 필요 시 추가 로딩)")
 loading_progress = st.empty()
 try:
+    force_data_refresh = bool(st.session_state.pop("_force_data_refresh", False))
     cached_scope_data = st.session_state.get("_loaded_scope_data")
     if (
+        not force_data_refresh
+        and
         st.session_state.get("_loaded_api_key") == api_key
         and st.session_state.get("_loaded_data_version") == DATA_MODEL_VERSION
         and isinstance(cached_scope_data, dict)
@@ -817,13 +812,16 @@ try:
             empty_data_warnings = [*empty_data_warnings, *add_warnings]
             debug_logs = [*debug_logs, *add_debug_logs]
     else:
-        scope_data, load_errors, debug_logs, empty_data_warnings = load_all_data_with_progress(
+        scope_data, load_errors, debug_logs, empty_data_warnings = load_data_with_local_cache(
             api_key=api_key,
+            data_model_version=DATA_MODEL_VERSION,
             status_box=sidebar_status,
             progress_box=sidebar_progress_box,
             main_status_box=loading_notice,
             main_progress_box=loading_progress,
             scopes=requested_scopes,
+            force_refresh=force_data_refresh,
+            check_interval_hours=24,
         )
         scope_data = {
             "province": scope_data.get("province", pd.DataFrame()),

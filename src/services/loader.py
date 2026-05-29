@@ -1,5 +1,8 @@
 ﻿from typing import Any, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import json
 
 import pandas as pd
 
@@ -29,6 +32,9 @@ default_end_period_by_prd_se = getattr(
     "default_end_period_by_prd_se",
     lambda _prd_se: app_config.default_end_period(),
 )
+
+CACHE_ROOT = Path("data/cache")
+MANIFEST_PATH = CACHE_ROOT / "manifest.json"
 
 
 def fetch_records_live(
@@ -223,4 +229,223 @@ def load_all_data_with_progress(
     _set_progress(100)
     _set_success("로딩 완료")
     return data_by_scope, errors, debug_logs, empty_data_warnings
+
+
+def _now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _parse_utc_iso(value: str) -> Optional[datetime]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _scope_cache_path(scope_key: str) -> Path:
+    return CACHE_ROOT / scope_key / "all.parquet"
+
+
+def _default_manifest() -> Dict[str, Any]:
+    return {
+        "schema_version": "",
+        "last_check_at_utc": "",
+        "last_refresh_at_utc": "",
+        "scopes": {},
+    }
+
+
+def _read_manifest() -> Dict[str, Any]:
+    if not MANIFEST_PATH.exists():
+        return _default_manifest()
+    try:
+        payload = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            out = _default_manifest()
+            out.update(payload)
+            if not isinstance(out.get("scopes"), dict):
+                out["scopes"] = {}
+            return out
+    except Exception:
+        pass
+    return _default_manifest()
+
+
+def _write_manifest_atomic(manifest: Dict[str, Any]) -> None:
+    CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+    tmp_path = MANIFEST_PATH.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(MANIFEST_PATH)
+
+
+def _is_valid_scope_frame(frame: object) -> bool:
+    if not isinstance(frame, pd.DataFrame):
+        return False
+    if frame.empty:
+        return False
+    return REQUIRED_SCOPE_COLUMNS.issubset(set(frame.columns))
+
+
+def _read_scope_cache(scope_key: str) -> pd.DataFrame:
+    path = _scope_cache_path(scope_key)
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        frame = pd.read_parquet(path)
+        if not _is_valid_scope_frame(frame):
+            return pd.DataFrame()
+        return frame
+    except Exception:
+        return pd.DataFrame()
+
+
+def _write_scope_cache_atomic(scope_key: str, frame: pd.DataFrame) -> None:
+    path = _scope_cache_path(scope_key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(".tmp.parquet")
+    frame.to_parquet(tmp_path, index=False)
+    tmp_path.replace(path)
+
+
+def _latest_period_text(frame: pd.DataFrame) -> str:
+    if not isinstance(frame, pd.DataFrame) or frame.empty or "period" not in frame.columns:
+        return ""
+    latest = pd.to_datetime(frame["period"], errors="coerce").max()
+    if pd.isna(latest):
+        return ""
+    return pd.Timestamp(latest).strftime("%Y-%m-%d")
+
+
+def _probe_scope_latest_period(
+    api_key: str,
+    scope_key: str,
+) -> tuple[str, List[str]]:
+    debug_logs: List[str] = []
+    datasets = datasets_for_scope(scope_key)
+    activity_cfg = next((x for x in datasets if str(getattr(x, "key", "")) == "activity"), None)
+    if activity_cfg is None:
+        return "", debug_logs
+    end_period = default_end_period_by_prd_se(activity_cfg.prd_se)
+    config_signature = "|".join(
+        [
+            activity_cfg.tbl_id,
+            activity_cfg.itm_id,
+            activity_cfg.obj_l1,
+            activity_cfg.obj_l2,
+            activity_cfg.output_fields,
+            activity_cfg.start_prd_de,
+            activity_cfg.prd_se,
+            end_period,
+            scope_key,
+        ]
+    )
+    result = fetch_records_live(
+        api_key=api_key,
+        dataset_key="activity",
+        end_period=end_period,
+        config_signature=config_signature,
+        datasets=datasets,
+    )
+    records = result.get("records", [])
+    for line in result.get("debug_logs", []):
+        debug_logs.append(f"[probe:{scope_key}:activity] {line}")
+    parsed = normalize_records(activity_cfg, records, region_scope=scope_key)
+    if parsed.empty or "period" not in parsed.columns:
+        return "", debug_logs
+    latest = pd.to_datetime(parsed["period"], errors="coerce").max()
+    if pd.isna(latest):
+        return "", debug_logs
+    return pd.Timestamp(latest).strftime("%Y-%m-%d"), debug_logs
+
+
+def load_data_with_local_cache(
+    api_key: str,
+    data_model_version: str,
+    status_box: Any,
+    progress_box: Any,
+    main_status_box: Optional[Any] = None,
+    main_progress_box: Optional[Any] = None,
+    scopes: Optional[List[str]] = None,
+    force_refresh: bool = False,
+    check_interval_hours: int = 24,
+) -> tuple[Dict[str, pd.DataFrame], List[str], List[str], List[str]]:
+    requested_scopes = list(scopes or ["province", "gyeonggi31"])
+    manifest = _read_manifest()
+    errors: List[str] = []
+    debug_logs: List[str] = []
+    warnings: List[str] = []
+
+    scope_data: Dict[str, pd.DataFrame] = {scope: _read_scope_cache(scope) for scope in requested_scopes}
+    missing_scopes = [scope for scope in requested_scopes if not _is_valid_scope_frame(scope_data.get(scope))]
+
+    schema_mismatch = str(manifest.get("schema_version", "")) != str(data_model_version)
+    last_check_at = _parse_utc_iso(str(manifest.get("last_check_at_utc", "")))
+    now_utc = datetime.now(timezone.utc)
+    check_due = last_check_at is None or (now_utc - last_check_at) >= timedelta(hours=max(1, int(check_interval_hours)))
+
+    scopes_to_refresh: List[str] = []
+    if force_refresh or schema_mismatch:
+        scopes_to_refresh = requested_scopes
+    elif missing_scopes:
+        scopes_to_refresh = missing_scopes
+    elif check_due:
+        for scope in requested_scopes:
+            try:
+                remote_latest, probe_logs = _probe_scope_latest_period(api_key=api_key, scope_key=scope)
+                debug_logs.extend(probe_logs)
+                local_latest = str((manifest.get("scopes", {}) or {}).get(scope, {}).get("latest_period", ""))
+                if remote_latest and (not local_latest or remote_latest > local_latest):
+                    scopes_to_refresh.append(scope)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{scope} 업데이트 확인 실패: {exc}")
+        manifest["last_check_at_utc"] = _now_utc_iso()
+
+    if scopes_to_refresh:
+        fetched, fetch_errors, fetch_logs, fetch_warnings = load_all_data_with_progress(
+            api_key=api_key,
+            status_box=status_box,
+            progress_box=progress_box,
+            main_status_box=main_status_box,
+            main_progress_box=main_progress_box,
+            scopes=scopes_to_refresh,
+        )
+        errors.extend(fetch_errors)
+        debug_logs.extend(fetch_logs)
+        warnings.extend(fetch_warnings)
+
+        for scope in scopes_to_refresh:
+            new_df = fetched.get(scope, pd.DataFrame())
+            if _is_valid_scope_frame(new_df):
+                dedup_cols = ["dataset_key", "region_name", "indicator_name", "category_name", "period"]
+                dedup_df = new_df.drop_duplicates(subset=[c for c in dedup_cols if c in new_df.columns], keep="last").copy()
+                _write_scope_cache_atomic(scope, dedup_df)
+                scope_data[scope] = dedup_df
+                scope_meta = (manifest.get("scopes", {}) or {}).get(scope, {})
+                scope_meta.update(
+                    {
+                        "latest_period": _latest_period_text(dedup_df),
+                        "rows": int(len(dedup_df)),
+                        "updated_at_utc": _now_utc_iso(),
+                        "path": str(_scope_cache_path(scope)),
+                    }
+                )
+                manifest.setdefault("scopes", {})[scope] = scope_meta
+            else:
+                errors.append(f"{scope} 저장 건너뜀: 유효한 데이터가 없어 기존 캐시를 유지합니다.")
+
+        manifest["schema_version"] = str(data_model_version)
+        manifest["last_refresh_at_utc"] = _now_utc_iso()
+        manifest["last_check_at_utc"] = _now_utc_iso()
+        _write_manifest_atomic(manifest)
+    elif check_due:
+        manifest["schema_version"] = str(data_model_version)
+        _write_manifest_atomic(manifest)
+
+    return scope_data, errors, debug_logs, warnings
 
