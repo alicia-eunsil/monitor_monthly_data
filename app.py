@@ -194,7 +194,6 @@ def _seeded_access_code() -> str:
     return str(secret_value or os.getenv("access_code", "") or os.getenv("ACCESS_CODE", ""))
 
 
-@st.cache_data(show_spinner=False)
 def _latest_git_commit_meta() -> Dict[str, str]:
     try:
         sha = subprocess.check_output(
