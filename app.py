@@ -757,25 +757,21 @@ else:
     def _open_youtube_dialog() -> None:
         pass
 
-title_col, right_col = st.columns([0.86, 0.14])
+title_col, button_col = st.columns([0.94, 0.06])
 with title_col:
-    st.title("경제활동인구 모니터링")
-with right_col:
-    meta_col, button_col = st.columns([0.78, 0.22])
-    with meta_col:
-        git_meta = _latest_git_commit_meta()
-        st.markdown(
-            (
-                "<p style='margin:0.35rem 0 0 0; font-size:0.78rem; color:#6b7280; "
-                "white-space:nowrap;'>"
-                f"커밋: {git_meta.get('sha', '-')} | {git_meta.get('committed_at', '-')}"
-                "</p>"
-            ),
-            unsafe_allow_html=True,
-        )
-    with button_col:
-        if st.button("Y", key="open_youtube_dialog_btn", use_container_width=True, help="유튜브 디스플레이 열기"):
-            st.session_state["_show_youtube_popup"] = True
+    git_meta = _latest_git_commit_meta()
+    st.markdown(
+        (
+            "<h1 style='margin:0;'>경제활동인구 모니터링 "
+            f"<span style='font-size:0.55em; font-weight:500; color:#6b7280;'>"
+            f"(커밋: {git_meta.get('sha', '-')} | {git_meta.get('committed_at', '-')})"
+            "</span></h1>"
+        ),
+        unsafe_allow_html=True,
+    )
+with button_col:
+    if st.button("Y", key="open_youtube_dialog_btn", use_container_width=True, help="유튜브 디스플레이 열기"):
+        st.session_state["_show_youtube_popup"] = True
 
 if hasattr(st, "dialog") and st.session_state.get("_show_youtube_popup", False):
     _open_youtube_dialog()
