@@ -763,8 +763,8 @@ with title_col:
     st.markdown(
         (
             "<h1 style='margin:0;'>경제활동인구 모니터링 "
-            f"<span style='font-size:0.55em; font-weight:500; color:#6b7280;'>"
-            f"(커밋: {git_meta.get('sha', '-')} | {git_meta.get('committed_at', '-')})"
+            f"<span style='font-size:0.50em; font-weight:500; color:#9ca3af;'>"
+            f"(Commit: {git_meta.get('sha', '-')} | {git_meta.get('committed_at', '-')})"
             "</span></h1>"
         ),
         unsafe_allow_html=True,
