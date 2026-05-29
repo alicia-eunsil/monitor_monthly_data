@@ -178,6 +178,61 @@ def _is_valid_scope_data(scope_data: object, required_scopes: List[str]) -> bool
     return True
 
 
+def _frame_signature(df: pd.DataFrame) -> str:
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return "empty"
+    latest = pd.to_datetime(df["period"], errors="coerce").max() if "period" in df.columns else pd.NaT
+    latest_text = "" if pd.isna(latest) else pd.Timestamp(latest).strftime("%Y-%m-%d")
+    return f"{len(df)}|{latest_text}"
+
+
+def _get_cached_dataset_subset(df: pd.DataFrame, scope_tag: str, dataset_key: str) -> pd.DataFrame:
+    cache = st.session_state.setdefault("_dataset_subset_cache", {})
+    sig = _frame_signature(df)
+    key = (scope_tag, dataset_key, sig)
+    if key in cache:
+        return cache[key]
+    subset = df[df["dataset_key"] == dataset_key].copy()
+    cache[key] = subset
+    return subset
+
+
+def _get_cached_series_and_stats(
+    subset: pd.DataFrame,
+    scope_tag: str,
+    dataset_key: str,
+    region_name: str,
+    indicator_name: str,
+    category_name: str,
+) -> tuple[pd.DataFrame, Dict[str, object]]:
+    cache = st.session_state.setdefault("_series_stats_cache", {})
+    sig = _frame_signature(subset)
+    key = (scope_tag, dataset_key, region_name, indicator_name, category_name, sig)
+    if key in cache:
+        return cache[key]
+    series_df = series_filter(
+        df=subset,
+        dataset_key=dataset_key,
+        region_name=region_name,
+        indicator_name=indicator_name,
+        category_name=category_name,
+    )
+    stats = build_stats(series_df) if not series_df.empty else {}
+    cache[key] = (series_df, stats)
+    return series_df, stats
+
+
+def _get_cached_events(event_source: pd.DataFrame, scope_tag: str) -> pd.DataFrame:
+    cache = st.session_state.setdefault("_events_cache", {})
+    sig = _frame_signature(event_source)
+    key = (scope_tag, sig)
+    if key in cache:
+        return cache[key]
+    events = _collect_new_events(event_source)
+    cache[key] = events
+    return events
+
+
 def _seeded_api_key() -> str:
     try:
         secret_value = st.secrets.get("api_key", "") or st.secrets.get("API_KEY", "")
@@ -460,7 +515,7 @@ def _render_dataset(
     scope_tag: str,
 ) -> None:
     cfg = next(x for x in datasets if x.key == dataset_key)
-    subset = df[df["dataset_key"] == dataset_key].copy()
+    subset = _get_cached_dataset_subset(df, scope_tag=scope_tag, dataset_key=dataset_key)
     st.subheader(cfg.title)
     if subset.empty:
         st.warning("해당 데이터가 없습니다.")
@@ -625,8 +680,9 @@ def _render_dataset(
     if dataset_key in {"industry", "occupation", "age", "status"} and indicator:
         st.caption(f"지표: {indicator}")
 
-    series_df = series_filter(
-        df=subset,
+    series_df, stats = _get_cached_series_and_stats(
+        subset=subset,
+        scope_tag=scope_tag,
         dataset_key=dataset_key,
         region_name=region,
         indicator_name=indicator,
@@ -636,7 +692,6 @@ def _render_dataset(
         st.info("선택한 조건의 시계열 데이터가 없습니다.")
         return
 
-    stats = build_stats(series_df)
     prd_se = str(series_df["prd_se"].iloc[-1]).upper() if "prd_se" in series_df.columns else "M"
     labels = _time_labels(datasets)
     latest_period = _fmt_period(stats.get("latest_period"), prd_se)
@@ -793,6 +848,9 @@ with st.sidebar:
         st.session_state.pop("_loaded_empty_data_warnings", None)
         st.session_state.pop("_loaded_debug_logs", None)
         st.session_state.pop("_schema_recovery_attempted", None)
+        st.session_state.pop("_dataset_subset_cache", None)
+        st.session_state.pop("_series_stats_cache", None)
+        st.session_state.pop("_events_cache", None)
         st.rerun()
     sidebar_status = st.empty()
     sidebar_progress_box = st.empty()
@@ -919,6 +977,9 @@ if missing_columns:
         st.session_state.pop("_loaded_errors", None)
         st.session_state.pop("_loaded_empty_data_warnings", None)
         st.session_state.pop("_loaded_debug_logs", None)
+        st.session_state.pop("_dataset_subset_cache", None)
+        st.session_state.pop("_series_stats_cache", None)
+        st.session_state.pop("_events_cache", None)
         st.warning("데이터 스키마 불일치를 감지해 자동으로 데이터를 다시 불러옵니다.")
         st.rerun()
     present_columns = sorted(map(str, data.columns.tolist()))
@@ -960,7 +1021,7 @@ if needs_events:
         event_source = data[data["region_name"].isin(GYEONGGI_SIGUNGU)].copy()
     else:
         event_source = visible_data
-    events = _collect_new_events(event_source)
+    events = _get_cached_events(event_source, scope_tag=region_scope)
 
 if active_page == "① NEW HISTORY":
     _render_new_history_tab(events)
