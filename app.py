@@ -2,6 +2,7 @@
 
 import os
 import re
+import subprocess
 from typing import Any, Dict, List
 from urllib.parse import parse_qs, urlparse
 
@@ -190,6 +191,24 @@ def _seeded_access_code() -> str:
     except Exception:  # noqa: BLE001
         secret_value = ""
     return str(secret_value or os.getenv("access_code", "") or os.getenv("ACCESS_CODE", ""))
+
+
+@st.cache_data(show_spinner=False)
+def _latest_git_commit_meta() -> Dict[str, str]:
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        committed_at = subprocess.check_output(
+            ["git", "log", "-1", "--format=%cI"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        return {"sha": sha, "committed_at": committed_at}
+    except Exception:
+        return {"sha": "-", "committed_at": "-"}
 
 
 def _require_access_gate() -> None:
@@ -731,12 +750,17 @@ else:
     def _open_youtube_dialog() -> None:
         pass
 
-title_col, button_col = st.columns([0.94, 0.06])
+title_col, right_col = st.columns([0.86, 0.14])
 with title_col:
     st.title("경제활동인구 모니터링")
-with button_col:
-    if st.button("Y", key="open_youtube_dialog_btn", use_container_width=True, help="유튜브 디스플레이 열기"):
-        st.session_state["_show_youtube_popup"] = True
+with right_col:
+    meta_col, button_col = st.columns([0.78, 0.22])
+    with meta_col:
+        git_meta = _latest_git_commit_meta()
+        st.caption(f"커밋: {git_meta.get('sha', '-')} | {git_meta.get('committed_at', '-')}")
+    with button_col:
+        if st.button("Y", key="open_youtube_dialog_btn", use_container_width=True, help="유튜브 디스플레이 열기"):
+            st.session_state["_show_youtube_popup"] = True
 
 if hasattr(st, "dialog") and st.session_state.get("_show_youtube_popup", False):
     _open_youtube_dialog()
