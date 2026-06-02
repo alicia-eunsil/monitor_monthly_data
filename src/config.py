@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Dict
 
 KOSIS_BASE_URL = "https://kosis.kr/openapi/Param/statisticsParameterData.do"
@@ -55,7 +55,9 @@ class DatasetConfig:
 
 
 def default_end_period() -> str:
-    return date.today().strftime("%Y%m")
+    today = date.today()
+    last_day_prev_month = today.replace(day=1) - timedelta(days=1)
+    return last_day_prev_month.strftime("%Y%m")
 
 
 def default_end_period_by_prd_se(prd_se: str) -> str:

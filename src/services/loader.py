@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import json
+import os
 
 import pandas as pd
 
@@ -35,6 +36,15 @@ default_end_period_by_prd_se = getattr(
 
 CACHE_ROOT = Path("data/cache")
 MANIFEST_PATH = CACHE_ROOT / "manifest.json"
+
+
+def _kosis_max_workers(dataset_count: int) -> int:
+    raw = str(os.getenv("KOSIS_MAX_WORKERS", "1")).strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 1
+    return max(1, min(value, dataset_count))
 
 
 def fetch_records_live(
@@ -121,7 +131,7 @@ def load_all_data_with_progress(
         _set_progress(min(100, int(step * 100 / total_steps)))
 
         fetch_outputs: Dict[str, Dict[str, Any]] = {}
-        max_workers = max(1, min(4, len(datasets)))
+        max_workers = _kosis_max_workers(len(datasets))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {}
             for cfg in datasets:

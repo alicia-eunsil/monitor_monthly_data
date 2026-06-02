@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 from requests.adapters import HTTPAdapter
-from requests.exceptions import RequestException
+from requests.exceptions import ConnectTimeout, RequestException
 from urllib3.util.retry import Retry
 import time
 
@@ -37,24 +37,25 @@ REGION_OBJL1_CODES = [
 class KosisClient:
     _MAX_DEBUG_LOGS = 500
 
-    def __init__(self, api_key: str, timeout: int = 30):
+    def __init__(self, api_key: str, timeout: int = 90):
         self.api_key = api_key
         self.timeout = timeout
+        self.connect_timeout = 10
         self._debug_logs: List[str] = []
-        self._request_retry_count = 4
+        self._request_retry_count = 3
         self._session = requests.Session()
         retry = Retry(
-            total=3,
-            connect=3,
-            read=3,
-            status=3,
+            total=2,
+            connect=0,
+            read=0,
+            status=2,
             backoff_factor=0.6,
             status_forcelist=(429, 500, 502, 503, 504),
             allowed_methods=frozenset(["GET"]),
             respect_retry_after_header=True,
             raise_on_status=False,
         )
-        adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
+        adapter = HTTPAdapter(max_retries=retry, pool_connections=2, pool_maxsize=2)
         self._session.mount("https://", adapter)
         self._session.mount("http://", adapter)
         self._session.headers.update(
@@ -217,9 +218,23 @@ class KosisClient:
         last_error: Optional[Exception] = None
         for attempt in range(1, self._request_retry_count + 1):
             try:
-                response = self._session.get(KOSIS_BASE_URL, params=params, timeout=self.timeout)
+                response = self._session.get(
+                    KOSIS_BASE_URL,
+                    params=params,
+                    timeout=(self.connect_timeout, self.timeout),
+                )
                 response.raise_for_status()
                 return response.json()
+            except ConnectTimeout as exc:
+                last_error = exc
+                self._log(
+                    f"connect_timeout attempt={attempt}/{self._request_retry_count}: {exc}"
+                )
+                if attempt < self._request_retry_count:
+                    sleep_sec = 1.5 * attempt
+                    time.sleep(sleep_sec)
+                    continue
+                raise
             except RequestException as exc:
                 last_error = exc
                 self._log(f"http_error attempt={attempt}/{self._request_retry_count}: {exc}")

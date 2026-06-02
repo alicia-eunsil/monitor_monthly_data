@@ -12,7 +12,7 @@ from src.core.category_rules import ACTIVITY_INDICATOR_ORDER, norm_indicator_nam
 from src.core.formatters import escape_markdown_text, fmt_num, fmt_num_bold, fmt_period
 from src.features.new_history import build_ai_insight_context
 from src.services.insight_memory import build_prompt, compute_hash, load_memory, save_memory, select_memory_context
-from src.services.openai_client import create_response_text
+from src.services.openai_client import DEFAULT_OPENAI_MODEL, create_response_text, normalize_model_name
 
 TARGET_REGIONS = app_config.TARGET_REGIONS
 GYEONGGI_SIGUNGU = getattr(app_config, "GYEONGGI_SIGUNGU", [])
@@ -1354,11 +1354,11 @@ def render_ai_insights(
 
     with st.expander("AI 보조 해석", expanded=True):
         st.markdown("##### OpenAI 설정")
-        if st.session_state.get("ai_openai_model") in {None, "", "gpt-4.1", "gpt-5.2"}:
-            st.session_state["ai_openai_model"] = "gpt-5.4-mini"
+        if st.session_state.get("ai_openai_model") in {None, "", "gpt-4.1", "gpt-5.2", "gpt-5.4-mini"}:
+            st.session_state["ai_openai_model"] = DEFAULT_OPENAI_MODEL
         model = st.text_input(
             "모델",
-            value=st.session_state.get("ai_openai_model", "gpt-5.4-mini"),
+            value=normalize_model_name(st.session_state.get("ai_openai_model", DEFAULT_OPENAI_MODEL)),
             key="ai_openai_model",
         )
         temperature = 0.3

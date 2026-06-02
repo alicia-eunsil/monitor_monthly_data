@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List
 from urllib.parse import parse_qs, urlparse
 
@@ -234,11 +235,37 @@ def _get_cached_events(event_source: pd.DataFrame, scope_tag: str) -> pd.DataFra
 
 
 def _seeded_api_key() -> str:
+    def _from_dotenv() -> str:
+        dotenv_path = Path(".env")
+        if not dotenv_path.exists():
+            return ""
+        try:
+            for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                if key.strip() in {"api_key", "API_KEY", "KOSIS_API_KEY"}:
+                    return value.strip().strip("'").strip('"')
+        except Exception:
+            return ""
+        return ""
+
     try:
-        secret_value = st.secrets.get("api_key", "") or st.secrets.get("API_KEY", "")
+        secret_value = (
+            st.secrets.get("api_key", "")
+            or st.secrets.get("API_KEY", "")
+            or st.secrets.get("KOSIS_API_KEY", "")
+        )
     except Exception:  # noqa: BLE001
         secret_value = ""
-    return str(secret_value or os.getenv("api_key", "") or os.getenv("API_KEY", ""))
+    return str(
+        secret_value
+        or os.getenv("api_key", "")
+        or os.getenv("API_KEY", "")
+        or os.getenv("KOSIS_API_KEY", "")
+        or _from_dotenv()
+    )
 
 
 def _seeded_access_code() -> str:
@@ -858,7 +885,10 @@ with st.sidebar:
 api_key = _seeded_api_key()
 
 if not api_key:
-    st.warning("API key is not set.")
+    st.warning(
+        "KOSIS API key가 설정되지 않았습니다. "
+        "환경변수 `api_key`/`API_KEY`/`KOSIS_API_KEY`, `.env`, 또는 Streamlit secrets를 확인하세요."
+    )
     st.stop()
 
 is_sido_mode_default = bool(st.session_state.get("scope_toggle", True))
