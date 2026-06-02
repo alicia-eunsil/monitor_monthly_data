@@ -36,11 +36,13 @@ REGION_OBJL1_CODES = [
 
 class KosisClient:
     _MAX_DEBUG_LOGS = 500
+    _MAX_MONTHS_PER_REQUEST = 60
+    _MAX_HALVES_PER_REQUEST = 8
 
     def __init__(self, api_key: str, timeout: int = 90):
         self.api_key = api_key
         self.timeout = timeout
-        self.connect_timeout = 10
+        self.connect_timeout = 30
         self._debug_logs: List[str] = []
         self._request_retry_count = 3
         self._session = requests.Session()
@@ -73,6 +75,9 @@ class KosisClient:
 
     def fetch(self, config: DatasetConfig, end_prd_de: str) -> List[Dict[str, Any]]:
         params = config.to_params(api_key=self.api_key, end_prd_de=end_prd_de)
+        if self._should_proactively_split_period(params):
+            self._log("large period range detected; using proactive period chunking")
+            return self._fetch_chunked_by_period(config, params)
         rows = self._fetch_with_fallbacks(config, params)
         if self._is_dt_only_rows(rows):
             self._log("dt-only payload detected; trying alternate outputFields")
@@ -159,6 +164,21 @@ class KosisClient:
         return self._fetch_with_fallbacks(config, left_params) + self._fetch_with_fallbacks(
             config, right_params
         )
+
+    def _fetch_chunked_by_period(self, config: DatasetConfig, params: Dict[str, str]) -> List[Dict[str, Any]]:
+        prd_se = str(params.get("prdSe", "")).upper()
+        start = params.get("startPrdDe", "")
+        end = params.get("endPrdDe", "")
+        ranges = self._chunk_period_ranges(start, end, prd_se)
+        merged: List[Dict[str, Any]] = []
+        for chunk_start, chunk_end in ranges:
+            chunk_params = dict(params)
+            chunk_params["startPrdDe"] = chunk_start
+            chunk_params["endPrdDe"] = chunk_end
+            self._log(f"chunk request {chunk_start}-{chunk_end}")
+            merged.extend(self._fetch_with_fallbacks(config, chunk_params))
+            time.sleep(0.25)
+        return merged
 
     def _try_split_by_item(self, config: DatasetConfig, params: Dict[str, str]) -> Optional[List[Dict[str, Any]]]:
         raw_items = params.get("itmId", "")
@@ -254,6 +274,43 @@ class KosisClient:
         if last_error is not None:
             raise last_error
         raise RuntimeError("request failed without explicit exception")
+
+    def _should_proactively_split_period(self, params: Dict[str, str]) -> bool:
+        prd_se = str(params.get("prdSe", "")).upper()
+        start = str(params.get("startPrdDe", "")).strip()
+        end = str(params.get("endPrdDe", "")).strip()
+        if not start or not end:
+            return False
+        try:
+            if prd_se == "M":
+                span = self._month_index(end) - self._month_index(start) + 1
+                return span > self._MAX_MONTHS_PER_REQUEST
+            if prd_se == "H":
+                span = self._half_index(end) - self._half_index(start) + 1
+                return span > self._MAX_HALVES_PER_REQUEST
+        except ValueError:
+            return False
+        return False
+
+    def _chunk_period_ranges(self, start: str, end: str, prd_se: str) -> List[tuple[str, str]]:
+        if str(prd_se).upper() == "H":
+            max_units = self._MAX_HALVES_PER_REQUEST
+            start_idx = self._half_index(start)
+            end_idx = self._half_index(end)
+            to_text = self._index_to_yyyyhh
+        else:
+            max_units = self._MAX_MONTHS_PER_REQUEST
+            start_idx = self._month_index(start)
+            end_idx = self._month_index(end)
+            to_text = self._index_to_yyyymm
+
+        ranges: List[tuple[str, str]] = []
+        cursor = start_idx
+        while cursor <= end_idx:
+            chunk_end_idx = min(cursor + max_units - 1, end_idx)
+            ranges.append((to_text(cursor), to_text(chunk_end_idx)))
+            cursor = chunk_end_idx + 1
+        return ranges
 
     @staticmethod
     def _split_month_range(start_yyyymm: str, end_yyyymm: str) -> tuple[str, str]:
