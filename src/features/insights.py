@@ -932,6 +932,12 @@ def render_ai_insights(
         region = str(fixed_region)
         if region in GYEONGGI_SIGUNGU:
             base_region = "경기도"
+    else:
+        gyeonggi_default = TARGET_REGIONS[9] if len(TARGET_REGIONS) >= 10 else (region_pool[0] if region_pool else "")
+        region_default = gyeonggi_default if gyeonggi_default in region_pool else (region_pool[0] if region_pool else "")
+        region = str(st.session_state.get("ai_region", region_default))
+        if region not in region_pool and region_pool:
+            region = region_default
     st.markdown(f"#### 영향요인분해({base_region} 내 {region or '지역'} 비중)")
     gy_trend, gy_meta = compute_gyeonggi_vs_national_contribution(
         analysis_df,
@@ -1217,8 +1223,6 @@ def render_ai_insights(
     if fixed_region:
         st.caption(f"현재 선택된 시군 기준으로 분석합니다: **{region}**")
     else:
-        gyeonggi_default = TARGET_REGIONS[9] if len(TARGET_REGIONS) >= 10 else (region_pool[0] if region_pool else "")
-        region_default = gyeonggi_default if gyeonggi_default in region_pool else (region_pool[0] if region_pool else "")
         region = st.selectbox(
             "분석 지역 선택",
             region_pool,
