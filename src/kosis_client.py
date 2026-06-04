@@ -79,24 +79,7 @@ class KosisClient:
             self._log("large period range detected; using proactive period chunking")
             return self._fetch_chunked_by_period(config, params)
         rows = self._fetch_with_fallbacks(config, params)
-        if self._is_dt_only_rows(rows):
-            self._log("dt-only payload detected; trying alternate outputFields")
-            for output_fields in [
-                "TBL_ID+TBL_NM+OBJ_ID+OBJ_NM+ITM_ID+ITM_NM+UNIT_NM+PRD_SE+PRD_DE+",
-                "TBL_ID+TBL_NM+ITM_ID+ITM_NM+PRD_SE+PRD_DE+DT+OBJ_ID+OBJ_NM+",
-                "",
-            ]:
-                alt_params = dict(params)
-                if output_fields:
-                    alt_params["outputFields"] = output_fields
-                else:
-                    alt_params.pop("outputFields", None)
-                alt_rows = self._fetch_with_fallbacks(config, alt_params)
-                if not self._is_dt_only_rows(alt_rows):
-                    self._log("dt-only resolved with alternate outputFields")
-                    return alt_rows
-            self._log("dt-only still unresolved after alternate outputFields")
-        return rows
+        return self._resolve_dt_only_rows(config, params, rows)
 
     def fetch_with_debug(self, config: DatasetConfig, end_prd_de: str) -> tuple[List[Dict[str, Any]], List[str]]:
         self._debug_logs = []
@@ -176,9 +159,37 @@ class KosisClient:
             chunk_params["startPrdDe"] = chunk_start
             chunk_params["endPrdDe"] = chunk_end
             self._log(f"chunk request {chunk_start}-{chunk_end}")
-            merged.extend(self._fetch_with_fallbacks(config, chunk_params))
+            chunk_rows = self._fetch_with_fallbacks(config, chunk_params)
+            chunk_rows = self._resolve_dt_only_rows(config, chunk_params, chunk_rows)
+            merged.extend(chunk_rows)
             time.sleep(0.25)
         return merged
+
+    def _resolve_dt_only_rows(
+        self,
+        config: DatasetConfig,
+        params: Dict[str, str],
+        rows: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        if not self._is_dt_only_rows(rows):
+            return rows
+        self._log("dt-only payload detected; trying alternate outputFields")
+        for output_fields in [
+            "",
+            "TBL_ID+TBL_NM+OBJ_ID+OBJ_NM+ITM_ID+ITM_NM+UNIT_NM+PRD_SE+PRD_DE+",
+            "TBL_ID+TBL_NM+ITM_ID+ITM_NM+PRD_SE+PRD_DE+DT+OBJ_ID+OBJ_NM+",
+        ]:
+            alt_params = dict(params)
+            if output_fields:
+                alt_params["outputFields"] = output_fields
+            else:
+                alt_params.pop("outputFields", None)
+            alt_rows = self._fetch_with_fallbacks(config, alt_params)
+            if not self._is_dt_only_rows(alt_rows):
+                self._log("dt-only resolved with alternate outputFields")
+                return alt_rows
+        self._log("dt-only still unresolved after alternate outputFields")
+        return rows
 
     def _try_split_by_item(self, config: DatasetConfig, params: Dict[str, str]) -> Optional[List[Dict[str, Any]]]:
         raw_items = params.get("itmId", "")
