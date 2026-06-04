@@ -926,7 +926,6 @@ def render_ai_insights(
     show_ai: bool = True,
 ) -> None:
     analysis_df = source_df if isinstance(source_df, pd.DataFrame) and not source_df.empty else df
-    st.subheader("AI INSIGHTS")
     region = ""
     base_region = "전국"
     if fixed_region:
@@ -944,25 +943,12 @@ def render_ai_insights(
     else:
         analysis_region = str(region) if str(region).strip() else "경기도"
         st.markdown("##### 총량 방향 비교")
-        c1, c2 = st.columns(2)
         latest_period_text = fmt_period(gy_meta.get("latest_period"), str(gy_meta.get("prd_se", "M")))
         unit = str(gy_meta.get("unit", ""))
         direction_text = _direction_label(
             float(gy_meta.get("latest_nat_yoy_abs")) if pd.notna(gy_meta.get("latest_nat_yoy_abs")) else np.nan,
             float(gy_meta.get("latest_gg_yoy_abs")) if pd.notna(gy_meta.get("latest_gg_yoy_abs")) else np.nan,
         )
-        with c1:
-            card_fn(
-                f"{base_region} 증감({labels.get('yoy', '전년동월')}대비)",
-                fmt_num(gy_meta.get("latest_nat_yoy_abs"), unit),
-                f"기준: {latest_period_text}",
-            )
-        with c2:
-            card_fn(
-                f"{analysis_region} 증감({labels.get('yoy', '전년동월')}대비)",
-                fmt_num(gy_meta.get("latest_gg_yoy_abs"), unit),
-                f"방향: {direction_text}",
-            )
         st.markdown(
             f"- **{latest_period_text} 기준** {labels.get('yoy', '전년동월')} 대비 증감 방향은 **{direction_text}**입니다. "
             f"({base_region} {fmt_num(gy_meta.get('latest_nat_yoy_abs'), unit)} / "
@@ -981,9 +967,9 @@ def render_ai_insights(
             i_unit = str(industry_meta.get("unit", ""))
             i_latest = fmt_period(industry_meta.get("latest_period"), str(gy_meta.get("prd_se", "M")))
             st.caption(
-                f"기준: {i_latest} | 총증감 방향: {industry_meta.get('direction', '-')} "
-                f"({base_region} {fmt_num(industry_meta.get('base_total_delta'), i_unit)} / "
-                f"{analysis_region} {fmt_num(industry_meta.get('region_total_delta'), i_unit)})"
+                f"기준: {i_latest} | 산업 합산 증감 방향: {industry_meta.get('direction', '-')} "
+                f"({base_region} 산업합계 {fmt_num(industry_meta.get('base_total_delta'), i_unit)} / "
+                f"{analysis_region} 산업합계 {fmt_num(industry_meta.get('region_total_delta'), i_unit)})"
             )
             fmt_df = industry_df.copy()
             for col in ["전국 증감", "지역 증감"]:
