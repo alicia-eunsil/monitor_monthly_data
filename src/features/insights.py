@@ -16,6 +16,7 @@ from src.services.openai_client import DEFAULT_OPENAI_MODEL, create_response_tex
 
 TARGET_REGIONS = app_config.TARGET_REGIONS
 GYEONGGI_SIGUNGU = getattr(app_config, "GYEONGGI_SIGUNGU", [])
+ACTIVITY_DATASET_TOKENS = ("경제활동인구", "경제활동인구현황")
 
 
 def _seeded_openai_key() -> str:
@@ -45,6 +46,24 @@ def _auto_summary_from_insight(text: str, max_lines: int = 3) -> str:
     if bullets:
         return "\n".join(bullets[: max_lines])
     return " ".join(cleaned[: max_lines])[:240]
+
+
+def _select_activity_dataset(df: pd.DataFrame) -> pd.DataFrame:
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return pd.DataFrame()
+    if "dataset_key" in df.columns:
+        base = df[df["dataset_key"].astype(str).str.strip() == "activity"].copy()
+        if not base.empty:
+            return base
+    if "dataset_title" in df.columns:
+        titles = df["dataset_title"].astype(str)
+        mask = titles.map(lambda value: any(token in value for token in ACTIVITY_DATASET_TOKENS))
+        base = df[mask].copy()
+        if not base.empty:
+            if "dataset_key" in base.columns:
+                base["dataset_key"] = "activity"
+            return base
+    return pd.DataFrame()
 
 
 def _build_rule_based_insights(
@@ -364,7 +383,9 @@ def build_activity_snapshot(df: pd.DataFrame, region: str, lag: int) -> tuple[pd
         "latest_period": pd.NaT,
         "prev_period": pd.NaT,
     }
-    base = df[(df["dataset_key"] == "activity") & (df["region_name"] == region)].copy()
+    base = _select_activity_dataset(df)
+    if not base.empty:
+        base = base[base["region_name"] == region].copy()
     if base.empty:
         meta["message"] = "경제활동인구현황 데이터가 없습니다."
         return pd.DataFrame(), meta
@@ -472,7 +493,7 @@ def compute_gyeonggi_vs_national_contribution(
         "unit": "",
     }
 
-    base = df[df["dataset_key"] == "activity"].copy()
+    base = _select_activity_dataset(df)
     if base.empty:
         meta["message"] = "경제활동인구현황 데이터가 없습니다."
         return pd.DataFrame(), meta
@@ -948,6 +969,7 @@ def render_ai_insights(
     selected_month: Optional[str] = None,
     show_ai: bool = True,
 ) -> None:
+    analysis_df = source_df if isinstance(source_df, pd.DataFrame) and not source_df.empty else df
     st.subheader("AI INSIGHTS")
     region = ""
     base_region = "전국"
@@ -957,7 +979,7 @@ def render_ai_insights(
             base_region = "경기도"
     st.markdown(f"#### 영향요인분해({base_region} 내 {region or '지역'} 비중)")
     gy_trend, gy_meta = compute_gyeonggi_vs_national_contribution(
-        df,
+        analysis_df,
         region_name=str(region) if region else "경기도",
         base_region=base_region,
     )
@@ -993,7 +1015,7 @@ def render_ai_insights(
 
         st.markdown("##### 산업별 비교 및 기여도")
         industry_df, industry_meta = compute_industry_comparison_breakdown(
-            df,
+            analysis_df,
             region_name=analysis_region,
             base_region=base_region,
         )
@@ -1036,7 +1058,7 @@ def render_ai_insights(
 
             st.markdown("##### 산업별 추이 진단")
             trend_df, trend_meta = compute_industry_comparison_trend(
-                df,
+                analysis_df,
                 region_name=analysis_region,
                 base_region=base_region,
             )
@@ -1130,7 +1152,7 @@ def render_ai_insights(
             period_options = plot_df["period"].drop_duplicates().tolist()
             chart_prd = "M"
             if "prd_se" in df.columns and not df["prd_se"].dropna().empty:
-                chart_prd = "H" if str(df["prd_se"].dropna().iloc[0]).upper() == "H" else "M"
+                chart_prd = "H" if str(analysis_df["prd_se"].dropna().iloc[0]).upper() == "H" else "M"
             period_labels = [fmt_period(p, chart_prd) for p in period_options] if period_options else []
             default_window = (period_labels[0], period_labels[-1]) if period_labels else None
 
@@ -1254,8 +1276,8 @@ def render_ai_insights(
             key="ai_region",
         )
     lag = 12
-    if "prd_se" in df.columns and not df["prd_se"].dropna().empty:
-        lag = 2 if str(df["prd_se"].dropna().iloc[0]).upper() == "H" else 12
+    if "prd_se" in analysis_df.columns and not analysis_df["prd_se"].dropna().empty:
+        lag = 2 if str(analysis_df["prd_se"].dropna().iloc[0]).upper() == "H" else 12
     period_prd = "H" if lag == 2 else "M"
     st.markdown("#### 영향요인분해(지역별)")
     ds_options = {
@@ -1271,7 +1293,7 @@ def render_ai_insights(
         key="ai_decomp_axis",
     )
     ds_key = ds_options[ds_label]
-    contrib_df, contrib_meta = compute_contribution_table(df, region=region, dataset_key=ds_key, lag=lag)
+    contrib_df, contrib_meta = compute_contribution_table(analysis_df, region=region, dataset_key=ds_key, lag=lag)
     if not contrib_meta.get("ok"):
         st.info(str(contrib_meta.get("message", "분해 데이터를 계산할 수 없습니다.")))
     else:
