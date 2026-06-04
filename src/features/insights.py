@@ -1081,7 +1081,20 @@ def render_ai_insights(
                         .head(5)["category_name"]
                         .tolist()
                     )
-                    plot_view = trend_view[trend_view["category_name"].isin(top_cats)].copy()
+                    all_cats = (
+                        trend_view.groupby("category_name", as_index=False)["region_contrib_to_nat_pct"]
+                        .mean()
+                        .reindex(columns=["category_name", "region_contrib_to_nat_pct"])
+                        .sort_values("region_contrib_to_nat_pct", ascending=False)["category_name"]
+                        .tolist()
+                    )
+                    selected_cats = st.multiselect(
+                        "표시할 산업 선택",
+                        options=all_cats,
+                        default=top_cats,
+                        key=f"ai_industry_trend_categories_{analysis_region}",
+                    )
+                    plot_view = trend_view[trend_view["category_name"].isin(selected_cats)].copy()
                     if not plot_view.empty:
                         trend_chart = (
                             alt.Chart(plot_view)
@@ -1099,6 +1112,8 @@ def render_ai_insights(
                             .properties(height=280)
                         )
                         st.altair_chart(trend_chart, use_container_width=True)
+                    else:
+                        st.info("표시할 산업을 1개 이상 선택해 주세요.")
 
         st.markdown("##### 전국대비 추이(참고)")
         plot_df = gy_trend[["period", "share_pct", "contrib_pct"]].dropna(subset=["period"], how="any").copy()
