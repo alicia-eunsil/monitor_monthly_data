@@ -16,7 +16,6 @@ from src.services.openai_client import DEFAULT_OPENAI_MODEL, create_response_tex
 
 TARGET_REGIONS = app_config.TARGET_REGIONS
 GYEONGGI_SIGUNGU = getattr(app_config, "GYEONGGI_SIGUNGU", [])
-ACTIVITY_DATASET_TOKENS = ("경제활동인구", "경제활동인구현황")
 
 
 def _seeded_openai_key() -> str:
@@ -46,24 +45,6 @@ def _auto_summary_from_insight(text: str, max_lines: int = 3) -> str:
     if bullets:
         return "\n".join(bullets[: max_lines])
     return " ".join(cleaned[: max_lines])[:240]
-
-
-def _select_activity_dataset(df: pd.DataFrame) -> pd.DataFrame:
-    if not isinstance(df, pd.DataFrame) or df.empty:
-        return pd.DataFrame()
-    if "dataset_key" in df.columns:
-        base = df[df["dataset_key"].astype(str).str.strip() == "activity"].copy()
-        if not base.empty:
-            return base
-    if "dataset_title" in df.columns:
-        titles = df["dataset_title"].astype(str)
-        mask = titles.map(lambda value: any(token in value for token in ACTIVITY_DATASET_TOKENS))
-        base = df[mask].copy()
-        if not base.empty:
-            if "dataset_key" in base.columns:
-                base["dataset_key"] = "activity"
-            return base
-    return pd.DataFrame()
 
 
 def _build_rule_based_insights(
@@ -383,9 +364,7 @@ def build_activity_snapshot(df: pd.DataFrame, region: str, lag: int) -> tuple[pd
         "latest_period": pd.NaT,
         "prev_period": pd.NaT,
     }
-    base = _select_activity_dataset(df)
-    if not base.empty:
-        base = base[base["region_name"] == region].copy()
+    base = df[(df["dataset_key"] == "activity") & (df["region_name"] == region)].copy()
     if base.empty:
         meta["message"] = "경제활동인구현황 데이터가 없습니다."
         return pd.DataFrame(), meta
@@ -493,7 +472,7 @@ def compute_gyeonggi_vs_national_contribution(
         "unit": "",
     }
 
-    base = _select_activity_dataset(df)
+    base = df[df["dataset_key"] == "activity"].copy()
     if base.empty:
         meta["message"] = "경제활동인구현황 데이터가 없습니다."
         return pd.DataFrame(), meta
