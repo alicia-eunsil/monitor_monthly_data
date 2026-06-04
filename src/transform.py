@@ -114,7 +114,10 @@ def canonical_region(raw_name: object) -> str:
     compact = re.sub(r"\s+", "", text)
     for canonical, patterns in REGION_PATTERNS.items():
         for p in patterns:
-            if compact == re.sub(r"\s+", "", p):
+            normalized_pattern = re.sub(r"\s+", "", p)
+            if compact == normalized_pattern:
+                return canonical
+            if normalized_pattern and normalized_pattern in compact:
                 return canonical
     return text
 
@@ -279,7 +282,26 @@ def normalize_records(
     out["indicator_name"] = out["indicator_name"].replace("", pd.NA).fillna(out["indicator_code"])
     out["indicator_name"] = out["indicator_name"].replace("", "값")
     if region_scope == "province":
-        out = out[out["region_name"].isin(TARGET_REGIONS)].copy()
+        province_filtered = out[out["region_name"].isin(TARGET_REGIONS)].copy()
+        if province_filtered.empty and not out.empty:
+            out["_compact_region_name"] = out["raw_region_name"].astype(str).map(_compact_text)
+            matched_frames = []
+            for canonical, patterns in REGION_PATTERNS.items():
+                pattern_tokens = [re.sub(r"\s+", "", str(p)) for p in patterns if str(p).strip()]
+                if not pattern_tokens:
+                    continue
+                mask = out["_compact_region_name"].map(
+                    lambda value: any(token and token in value for token in pattern_tokens)
+                )
+                if mask.any():
+                    matched = out[mask].copy()
+                    matched["region_name"] = canonical
+                    matched_frames.append(matched)
+            if matched_frames:
+                province_filtered = pd.concat(matched_frames, ignore_index=True)
+            out = province_filtered.drop(columns=["_compact_region_name"], errors="ignore")
+        else:
+            out = province_filtered
     else:
         out["region_name"] = out["raw_region_name"].map(_to_gyeonggi_city)
         out["_from_district"] = out["raw_region_name"].map(_is_district_row)
