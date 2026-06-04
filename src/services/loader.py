@@ -332,6 +332,18 @@ def _latest_period_text(frame: pd.DataFrame) -> str:
     return pd.Timestamp(latest).strftime("%Y-%m-%d")
 
 
+def _scope_has_expected_datasets(frame: pd.DataFrame, scope_key: str) -> tuple[bool, List[str]]:
+    if not isinstance(frame, pd.DataFrame) or frame.empty or "dataset_key" not in frame.columns:
+        expected = [str(getattr(cfg, "key", "")).strip() for cfg in datasets_for_scope(scope_key)]
+        expected = [key for key in expected if key]
+        return False, expected
+    expected = [str(getattr(cfg, "key", "")).strip() for cfg in datasets_for_scope(scope_key)]
+    expected = [key for key in expected if key]
+    present = set(frame["dataset_key"].astype(str).str.strip().unique().tolist())
+    missing = [key for key in expected if key not in present]
+    return len(missing) == 0, missing
+
+
 def _probe_scope_latest_period(
     api_key: str,
     scope_key: str,
@@ -434,6 +446,13 @@ def load_data_with_local_cache(
             if _is_valid_scope_frame(new_df):
                 dedup_cols = ["dataset_key", "region_name", "indicator_name", "category_name", "period"]
                 dedup_df = new_df.drop_duplicates(subset=[c for c in dedup_cols if c in new_df.columns], keep="last").copy()
+                has_all_datasets, missing_dataset_keys = _scope_has_expected_datasets(dedup_df, scope)
+                if not has_all_datasets:
+                    errors.append(
+                        f"{scope} 저장 건너뜀: 일부 데이터셋 누락({', '.join(missing_dataset_keys)})으로 기존 캐시를 유지합니다."
+                    )
+                    debug_logs.append(f"[{scope}:cache] skipped_incomplete_scope missing={missing_dataset_keys}")
+                    continue
                 _write_scope_cache_atomic(scope, dedup_df)
                 scope_data[scope] = dedup_df
                 scope_meta = (manifest.get("scopes", {}) or {}).get(scope, {})
