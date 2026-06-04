@@ -165,6 +165,13 @@ st.markdown(
 DATA_MODEL_VERSION = "2026-04-02-schema-autorecover-v1"
 REQUIRED_SCOPE_COLUMNS = {"dataset_key", "region_name", "indicator_name", "category_name", "period", "value", "prd_se"}
 SHOW_AI_FEATURES = str(os.getenv("SHOW_AI_FEATURES", "false")).strip().lower() in {"1", "true", "yes", "y"}
+DATASET_TITLE_TOKENS = {
+    "activity": ("경제활동인구", "경제활동인구현황"),
+    "age": ("연령별 취업자",),
+    "status": ("종사상지위별 취업자",),
+    "industry": ("산업별 취업자수",),
+    "occupation": ("직종별 취업자수",),
+}
 
 
 def _is_valid_scope_data(scope_data: object, required_scopes: List[str]) -> bool:
@@ -193,7 +200,17 @@ def _get_cached_dataset_subset(df: pd.DataFrame, scope_tag: str, dataset_key: st
     key = (scope_tag, dataset_key, sig)
     if key in cache:
         return cache[key]
-    subset = df[df["dataset_key"] == dataset_key].copy()
+    subset = pd.DataFrame()
+    if "dataset_key" in df.columns:
+        subset = df[df["dataset_key"].astype(str).str.strip() == str(dataset_key).strip()].copy()
+    if subset.empty and "dataset_title" in df.columns:
+        tokens = DATASET_TITLE_TOKENS.get(str(dataset_key), ())
+        if tokens:
+            title_series = df["dataset_title"].astype(str)
+            mask = title_series.map(lambda value: any(token in value for token in tokens))
+            subset = df[mask].copy()
+            if not subset.empty and "dataset_key" in subset.columns:
+                subset["dataset_key"] = str(dataset_key)
     cache[key] = subset
     return subset
 
