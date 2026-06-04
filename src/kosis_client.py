@@ -76,6 +76,10 @@ class KosisClient:
     def fetch(self, config: DatasetConfig, end_prd_de: str) -> List[Dict[str, Any]]:
         params = config.to_params(api_key=self.api_key, end_prd_de=end_prd_de)
         if self._should_proactively_split_period(params):
+            if str(getattr(config, "key", "")).strip() == "activity":
+                params = dict(params)
+                params.pop("outputFields", None)
+                self._log("activity chunked request: dropped outputFields preemptively")
             self._log("large period range detected; using proactive period chunking")
             return self._fetch_chunked_by_period(config, params)
         rows = self._fetch_with_fallbacks(config, params)
@@ -155,15 +159,37 @@ class KosisClient:
         ranges = self._chunk_period_ranges(start, end, prd_se)
         merged: List[Dict[str, Any]] = []
         for chunk_start, chunk_end in ranges:
-            chunk_params = dict(params)
-            chunk_params["startPrdDe"] = chunk_start
-            chunk_params["endPrdDe"] = chunk_end
-            self._log(f"chunk request {chunk_start}-{chunk_end}")
-            chunk_rows = self._fetch_with_fallbacks(config, chunk_params)
-            chunk_rows = self._resolve_dt_only_rows(config, chunk_params, chunk_rows)
-            merged.extend(chunk_rows)
+            merged.extend(self._fetch_chunk_range(config, params, chunk_start, chunk_end))
             time.sleep(0.25)
         return merged
+
+    def _fetch_chunk_range(
+        self,
+        config: DatasetConfig,
+        base_params: Dict[str, str],
+        chunk_start: str,
+        chunk_end: str,
+    ) -> List[Dict[str, Any]]:
+        chunk_params = dict(base_params)
+        chunk_params["startPrdDe"] = chunk_start
+        chunk_params["endPrdDe"] = chunk_end
+        self._log(f"chunk request {chunk_start}-{chunk_end}")
+        try:
+            chunk_rows = self._fetch_with_fallbacks(config, chunk_params)
+            return self._resolve_dt_only_rows(config, chunk_params, chunk_rows)
+        except Exception as exc:  # noqa: BLE001
+            prd_se = str(chunk_params.get("prdSe", "")).upper()
+            if not self._can_split_period_range(chunk_start, chunk_end, prd_se):
+                self._log(f"chunk request failed without further split {chunk_start}-{chunk_end}: {exc}")
+                raise
+            self._log(f"chunk request failed; splitting smaller {chunk_start}-{chunk_end}: {exc}")
+            if prd_se == "H":
+                left_end, right_start = self._split_halfyear_range(chunk_start, chunk_end)
+            else:
+                left_end, right_start = self._split_month_range(chunk_start, chunk_end)
+            left_rows = self._fetch_chunk_range(config, base_params, chunk_start, left_end)
+            right_rows = self._fetch_chunk_range(config, base_params, right_start, chunk_end)
+            return left_rows + right_rows
 
     def _resolve_dt_only_rows(
         self,
@@ -322,6 +348,14 @@ class KosisClient:
             ranges.append((to_text(cursor), to_text(chunk_end_idx)))
             cursor = chunk_end_idx + 1
         return ranges
+
+    def _can_split_period_range(self, start: str, end: str, prd_se: str) -> bool:
+        try:
+            if str(prd_se).upper() == "H":
+                return self._half_index(start) < self._half_index(end)
+            return self._month_index(start) < self._month_index(end)
+        except ValueError:
+            return False
 
     @staticmethod
     def _split_month_range(start_yyyymm: str, end_yyyymm: str) -> tuple[str, str]:
