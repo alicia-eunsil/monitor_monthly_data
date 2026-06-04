@@ -639,24 +639,6 @@ def _direction_label(base_delta: float, region_delta: float) -> str:
     return "전국 변동 · 지역 보합"
 
 
-def _contribution_impact_label(total_delta: float, item_delta: float) -> str:
-    if pd.isna(total_delta) or pd.isna(item_delta):
-        return "해석 불가"
-    if total_delta > 0 and item_delta > 0:
-        return "증가를 도운 산업"
-    if total_delta > 0 and item_delta < 0:
-        return "증가를 줄인 산업"
-    if total_delta < 0 and item_delta < 0:
-        return "감소를 키운 산업"
-    if total_delta < 0 and item_delta > 0:
-        return "감소를 줄인 산업"
-    if total_delta == 0 and item_delta == 0:
-        return "변화 없음"
-    if total_delta == 0:
-        return "전체 보합 구간"
-    return "해석 불가"
-
-
 def compute_industry_comparison_breakdown(
     df: pd.DataFrame,
     region_name: str,
@@ -721,10 +703,6 @@ def compute_industry_comparison_breakdown(
 
     base_total_delta = float(view["yoy_abs_nat"].sum())
     region_total_delta = float(view["yoy_abs_reg"].sum())
-    view["방향"] = view.apply(
-        lambda r: _contribution_impact_label(base_total_delta, float(r["yoy_abs_reg"])),
-        axis=1,
-    )
     view["전국 산업 기여율(%)"] = np.where(
         base_total_delta == 0,
         np.nan,
@@ -751,7 +729,6 @@ def compute_industry_comparison_breakdown(
             "산업",
             "전국 증감",
             "지역 증감",
-            "방향",
             "전국 산업 기여율(%)",
             "지역 산업 기여율(%)",
             "전국 증감 대비 지역 기여율(%)",
