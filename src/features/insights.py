@@ -964,16 +964,9 @@ def render_ai_insights(
         if not industry_meta.get("ok"):
             st.info(str(industry_meta.get("message", "산업별 비교 데이터를 계산할 수 없습니다.")))
         else:
-            i_unit = str(industry_meta.get("unit", ""))
-            i_latest = fmt_period(industry_meta.get("latest_period"), str(gy_meta.get("prd_se", "M")))
-            st.caption(
-                f"기준: {i_latest} | 산업 합산 증감 방향: {industry_meta.get('direction', '-')} "
-                f"({base_region} 산업합계 {fmt_num(industry_meta.get('base_total_delta'), i_unit)} / "
-                f"{analysis_region} 산업합계 {fmt_num(industry_meta.get('region_total_delta'), i_unit)})"
-            )
             fmt_df = industry_df.copy()
             for col in ["전국 증감", "지역 증감"]:
-                fmt_df[col] = fmt_df[col].apply(lambda v: fmt_num(v, i_unit))
+                fmt_df[col] = fmt_df[col].apply(lambda v: fmt_num(v, str(industry_meta.get("unit", ""))))
             for col in ["전국 산업 기여율(%)", "지역 산업 기여율(%)", "전국 증감 대비 지역 기여율(%)"]:
                 fmt_df[col] = fmt_df[col].apply(lambda v: "-" if pd.isna(v) else f"{float(v):,.1f}%")
             st.dataframe(fmt_df, use_container_width=True, hide_index=True)
