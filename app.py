@@ -162,7 +162,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-DATA_MODEL_VERSION = "2026-04-02-schema-autorecover-v1"
+DATA_MODEL_VERSION = "2026-06-04-activity-dt-fallback-v1"
 REQUIRED_SCOPE_COLUMNS = {"dataset_key", "region_name", "indicator_name", "category_name", "period", "value", "prd_se"}
 SHOW_AI_FEATURES = str(os.getenv("SHOW_AI_FEATURES", "false")).strip().lower() in {"1", "true", "yes", "y"}
 DATASET_TITLE_TOKENS = {
@@ -1045,6 +1045,26 @@ visible_data = data[data["region_name"].isin(region_pool)].copy()
 if visible_data.empty:
     st.warning("선택한 범위에서 조회된 데이터가 없습니다.")
     st.stop()
+
+activity_subset = _get_cached_dataset_subset(visible_data, scope_tag=region_scope, dataset_key="activity")
+if activity_subset.empty:
+    if not st.session_state.get("_activity_recovery_attempted", False):
+        st.session_state["_activity_recovery_attempted"] = True
+        st.cache_data.clear()
+        st.session_state["_force_data_refresh"] = True
+        st.session_state.pop("_loaded_api_key", None)
+        st.session_state.pop("_loaded_data_version", None)
+        st.session_state.pop("_loaded_scope_data", None)
+        st.session_state.pop("_loaded_errors", None)
+        st.session_state.pop("_loaded_empty_data_warnings", None)
+        st.session_state.pop("_loaded_debug_logs", None)
+        st.session_state.pop("_dataset_subset_cache", None)
+        st.session_state.pop("_series_stats_cache", None)
+        st.session_state.pop("_events_cache", None)
+        st.warning("경제활동인구현황 데이터가 비어 있어 자동으로 데이터를 다시 불러옵니다.")
+        st.rerun()
+else:
+    st.session_state.pop("_activity_recovery_attempted", None)
 
 labels = _time_labels(active_datasets)
 
