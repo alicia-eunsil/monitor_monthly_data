@@ -1022,7 +1022,7 @@ def render_ai_insights(
                     else:
                         default_window = (labels_opts[max(0, len(labels_opts) - (6 if trend_prd == "H" else 12))], labels_opts[-1])
                         selected_window = st.select_slider(
-                            "산업별 추이 기간",
+                            "기간",
                             options=labels_opts,
                             value=default_window,
                             key=f"ai_industry_trend_period_{analysis_region}",

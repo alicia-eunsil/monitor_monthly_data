@@ -853,7 +853,7 @@ def render_new_monthly_report(
         point_label = str(labels.get("point", "월"))
         st.markdown(f"- {build_new_focus_line(month_df, '최고', f'이번 {point_label} NEW 핵심')}")
         st.markdown(f"- {build_new_focus_line(month_df, '최저', f'이번 {point_label} NEW 리스크')}")
-        st.caption("See tab 1 (NEW HISTORY) for event details and tab 8 (Report) for full document view.")
+        st.caption("See tab 1 (NEW RECORDS) for event details and tab 8 (Report) for full document view.")
         return
 
     type_summary = month_df.groupby(["구분", "범위", "유형"], as_index=False).size().rename(columns={"size": "NEW 건수"})
@@ -989,7 +989,7 @@ def _build_indicator_region_extreme_table(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def render_new_history_tab(events: pd.DataFrame) -> None:
-    st.subheader("NEW HISTORY")
+    st.subheader("NEW RECORDS")
     if events.empty:
         st.info("집계된 NEW 이벤트 이력이 없습니다.")
         return

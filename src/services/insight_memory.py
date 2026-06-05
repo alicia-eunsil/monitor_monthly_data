@@ -104,7 +104,7 @@ def build_prompt(
     if context_title:
         sections.append(f"[분석 범위]\n- {context_title}")
     if context_lines:
-        sections.append("[최신 NEW HISTORY 요약]\n" + "\n".join(context_lines))
+        sections.append("[최신 NEW RECORDS 요약]\n" + "\n".join(context_lines))
     if focus_lines:
         sections.append("[핵심 NEW 포인트]\n" + "\n".join(focus_lines))
     if consecutive_lines:

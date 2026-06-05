@@ -1061,7 +1061,7 @@ if visible_data.empty:
 labels = _time_labels(active_datasets)
 
 page_options = [
-    "① NEW HISTORY",
+    "① NEW RECORDS",
     "② 경제활동인구현황",
     "③ 연령별 취업자",
     "④ 종사상지위별 취업자",
@@ -1073,7 +1073,7 @@ page_options = [
 ]
 active_page = st.radio("메뉴", page_options, horizontal=True, key="active_page", label_visibility="collapsed")
 
-needs_events = active_page in {"① NEW HISTORY", "⑦ 요약"}
+needs_events = active_page in {"① NEW RECORDS", "⑦ 요약"}
 events = pd.DataFrame()
 if needs_events:
     if region_scope == "gyeonggi31":
@@ -1082,7 +1082,7 @@ if needs_events:
         event_source = visible_data
     events = _get_cached_events(event_source, scope_tag=region_scope)
 
-if active_page == "① NEW HISTORY":
+if active_page == "① NEW RECORDS":
     _render_new_history_tab(events)
 elif active_page == "② 경제활동인구현황":
     _render_dataset(
