@@ -590,9 +590,6 @@ def _render_dataset(
     region_state_key = f"{state_prefix}_region"
     indicator_state_key = f"{state_prefix}_indicator"
     category_state_key = f"{state_prefix}_category"
-    draft_region_key = f"{state_prefix}_draft_region"
-    draft_indicator_key = f"{state_prefix}_draft_indicator"
-    draft_category_key = f"{state_prefix}_draft_category"
 
     if st.session_state.get(region_state_key) not in region_options:
         st.session_state[region_state_key] = region_options[default_region_index]
@@ -637,115 +634,87 @@ def _render_dataset(
             default_indicator = _pick_auto_indicator(st.session_state[region_state_key])
         st.session_state[indicator_state_key] = default_indicator
 
-    if st.session_state.get(draft_region_key) not in region_options:
-        st.session_state[draft_region_key] = st.session_state.get(region_state_key, region_options[default_region_index])
-    if indicators and st.session_state.get(draft_indicator_key) not in indicators:
-        st.session_state[draft_indicator_key] = st.session_state.get(indicator_state_key, indicators[0])
-
-    with st.form(key=f"filters_{state_prefix}", border=False):
-        with col1:
-            st.selectbox(
-                "지역",
-                region_options,
-                index=region_options.index(st.session_state[draft_region_key]),
-                key=draft_region_key,
-            )
-
-        region_input = str(st.session_state.get(draft_region_key, region_options[default_region_index]))
-        indicator_input = st.session_state.get(draft_indicator_key, indicators[0] if indicators else "")
-        category_container = col2
-        if dataset_key == "activity" and indicators:
-            with col2:
-                st.radio(
-                    "지표",
-                    indicators,
-                    index=indicators.index(indicator_input) if indicator_input in indicators else 0,
-                    key=draft_indicator_key,
-                    horizontal=True,
-                )
-                indicator_input = st.session_state.get(draft_indicator_key, indicator_input)
-        elif dataset_key in {"industry", "occupation", "age", "status"} and indicators:
-            indicator_input = _pick_auto_indicator(region_input)
-            st.session_state[draft_indicator_key] = indicator_input
-
-        category_input = st.session_state.get(draft_category_key, st.session_state.get(category_state_key, ""))
-        if cfg.has_category:
-            category_pool = subset[subset["region_name"] == region_input]
-            if indicator_input:
-                category_pool = category_pool[category_pool["indicator_name"] == indicator_input]
-            categories = sorted(
-                c for c in category_pool["category_name"].dropna().unique().tolist() if str(c).strip() != ""
-            )
-            if not categories:
-                categories = sorted(
-                    c for c in subset["category_name"].dropna().unique().tolist() if str(c).strip() != ""
-                )
-            if dataset_key in {"industry", "occupation"}:
-                drop_labels = {"시도별", "산업별", "산업명", "직업별", "직종별"}
-                cleaned = [c for c in categories if str(c).strip() not in drop_labels]
-                if cleaned:
-                    categories = cleaned
-            if is_gyeonggi31_mode:
-                if dataset_key == "industry":
-                    categories = _order_sigungu_industry_categories(categories)
-                if dataset_key == "age":
-                    categories = _order_sigungu_age_categories(categories)
-                if dataset_key == "status":
-                    categories = _order_sigungu_status_categories(categories)
-                if dataset_key == "occupation":
-                    categories = _order_sigungu_occupation_categories(categories)
-            else:
-                if dataset_key == "industry":
-                    categories = _order_province_industry_categories(categories)
-                if dataset_key == "age":
-                    categories = _order_age_categories(categories)
-                if dataset_key == "status":
-                    categories = _order_status_categories(categories)
-                if dataset_key == "occupation":
-                    categories = _order_occupation_categories(categories)
-            if categories:
-                if category_input not in categories:
-                    category_input = categories[0]
-                    st.session_state[draft_category_key] = category_input
-                with category_container:
-                    if dataset_key in {"industry", "occupation", "age", "status"}:
-                        st.radio(
-                            cfg.category_label,
-                            categories,
-                            index=categories.index(category_input),
-                            key=draft_category_key,
-                            horizontal=True,
-                        )
-                        category_input = st.session_state.get(draft_category_key, category_input)
-                    else:
-                        st.selectbox(
-                            cfg.category_label,
-                            categories,
-                            index=categories.index(category_input),
-                            key=draft_category_key,
-                        )
-                        category_input = st.session_state.get(draft_category_key, category_input)
-            else:
-                category_input = ""
-                st.session_state[draft_category_key] = ""
-        apply_filter = st.form_submit_button("적용")
-
-    if apply_filter or region_state_key not in st.session_state:
-        st.session_state[region_state_key] = region_input
-        st.session_state[indicator_state_key] = indicator_input
-        if cfg.has_category:
-            st.session_state[category_state_key] = category_input
-
-    pending_changes = (
-        str(st.session_state.get(draft_region_key, "")) != str(st.session_state.get(region_state_key, ""))
-        or str(st.session_state.get(draft_indicator_key, "")) != str(st.session_state.get(indicator_state_key, ""))
-        or (
-            cfg.has_category
-            and str(st.session_state.get(draft_category_key, "")) != str(st.session_state.get(category_state_key, ""))
+    with col1:
+        region_input = st.selectbox(
+            "지역",
+            region_options,
+            index=region_options.index(st.session_state[region_state_key]),
+            key=region_state_key,
         )
-    )
-    if pending_changes:
-        st.caption("변경한 조건은 `적용` 버튼을 눌러야 반영됩니다.")
+
+    indicator_input = st.session_state.get(indicator_state_key, indicators[0] if indicators else "")
+    category_container = col2
+    if dataset_key == "activity" and indicators:
+        with col2:
+            indicator_input = st.radio(
+                "지표",
+                indicators,
+                index=indicators.index(indicator_input) if indicator_input in indicators else 0,
+                key=indicator_state_key,
+                horizontal=True,
+            )
+    elif dataset_key in {"industry", "occupation", "age", "status"} and indicators:
+        indicator_input = _pick_auto_indicator(region_input)
+        st.session_state[indicator_state_key] = indicator_input
+
+    category_input = st.session_state.get(category_state_key, "")
+    if cfg.has_category:
+        category_pool = subset[subset["region_name"] == region_input]
+        if indicator_input:
+            category_pool = category_pool[category_pool["indicator_name"] == indicator_input]
+        categories = sorted(
+            c for c in category_pool["category_name"].dropna().unique().tolist() if str(c).strip() != ""
+        )
+        if not categories:
+            categories = sorted(
+                c for c in subset["category_name"].dropna().unique().tolist() if str(c).strip() != ""
+            )
+        if dataset_key in {"industry", "occupation"}:
+            drop_labels = {"시도별", "산업별", "산업명", "직업별", "직종별"}
+            cleaned = [c for c in categories if str(c).strip() not in drop_labels]
+            if cleaned:
+                categories = cleaned
+        if is_gyeonggi31_mode:
+            if dataset_key == "industry":
+                categories = _order_sigungu_industry_categories(categories)
+            if dataset_key == "age":
+                categories = _order_sigungu_age_categories(categories)
+            if dataset_key == "status":
+                categories = _order_sigungu_status_categories(categories)
+            if dataset_key == "occupation":
+                categories = _order_sigungu_occupation_categories(categories)
+        else:
+            if dataset_key == "industry":
+                categories = _order_province_industry_categories(categories)
+            if dataset_key == "age":
+                categories = _order_age_categories(categories)
+            if dataset_key == "status":
+                categories = _order_status_categories(categories)
+            if dataset_key == "occupation":
+                categories = _order_occupation_categories(categories)
+        if categories:
+            if category_input not in categories:
+                category_input = categories[0]
+                st.session_state[category_state_key] = category_input
+            with category_container:
+                if dataset_key in {"industry", "occupation", "age", "status"}:
+                    category_input = st.radio(
+                        cfg.category_label,
+                        categories,
+                        index=categories.index(category_input),
+                        key=category_state_key,
+                        horizontal=True,
+                    )
+                else:
+                    category_input = st.selectbox(
+                        cfg.category_label,
+                        categories,
+                        index=categories.index(category_input),
+                        key=category_state_key,
+                    )
+        else:
+            category_input = ""
+            st.session_state[category_state_key] = ""
 
     region = str(st.session_state.get(region_state_key, region_input))
     indicator = str(st.session_state.get(indicator_state_key, indicator_input))
