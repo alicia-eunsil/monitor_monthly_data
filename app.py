@@ -196,6 +196,19 @@ def _frame_signature(df: pd.DataFrame) -> str:
     return f"{len(df)}|{latest_text}"
 
 
+def _dataset_row_counts(df: pd.DataFrame) -> Dict[str, int]:
+    if not isinstance(df, pd.DataFrame) or df.empty or "dataset_key" not in df.columns:
+        return {}
+    counts = df["dataset_key"].astype(str).str.strip().value_counts(dropna=False).to_dict()
+    return {str(key): int(value) for key, value in counts.items()}
+
+
+def _clear_derived_caches() -> None:
+    st.session_state.pop("_dataset_subset_cache", None)
+    st.session_state.pop("_series_stats_cache", None)
+    st.session_state.pop("_events_cache", None)
+
+
 def _get_cached_dataset_subset(df: pd.DataFrame, scope_tag: str, dataset_key: str) -> pd.DataFrame:
     cache = st.session_state.setdefault("_dataset_subset_cache", {})
     sig = _frame_signature(df)
@@ -554,7 +567,9 @@ def _render_dataset(
     subset = _get_cached_dataset_subset(df, scope_tag=scope_tag, dataset_key=dataset_key)
     st.subheader(cfg.title)
     if subset.empty:
+        counts = _dataset_row_counts(df)
         st.warning("해당 데이터가 없습니다.")
+        st.caption(f"진단: scope={scope_tag}, dataset_key={dataset_key}, available={counts}")
         return
 
     region_options = [r for r in region_pool if r in subset["region_name"].unique()]
@@ -945,6 +960,7 @@ try:
             load_errors = [*load_errors, *add_errors]
             empty_data_warnings = [*empty_data_warnings, *add_warnings]
             debug_logs = [*debug_logs, *add_debug_logs]
+            _clear_derived_caches()
     else:
         scope_data, load_errors, debug_logs, empty_data_warnings = load_data_with_local_cache(
             api_key=api_key,
@@ -967,6 +983,7 @@ try:
         st.session_state["_loaded_errors"] = load_errors
         st.session_state["_loaded_empty_data_warnings"] = empty_data_warnings
         st.session_state["_loaded_debug_logs"] = debug_logs
+        _clear_derived_caches()
     if not _is_valid_scope_data(scope_data, requested_scopes):
         raise RuntimeError("필수 조회 범위 데이터 로딩에 실패했습니다.")
     st.session_state["_loaded_scope_data"] = scope_data
