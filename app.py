@@ -43,7 +43,6 @@ from src.features.new_history import (
     render_new_history_tab as _render_new_history_tab,
     render_new_monthly_report as _render_new_monthly_report,
 )
-from src.features.report import render_report_template as _render_report_template
 from src.features.sigungu_typology import render_sigungu_typology_tab as _render_sigungu_typology_tab
 from src.services.loader import load_all_data_with_progress, load_data_with_local_cache
 from src.transform import build_stats, series_filter
@@ -1059,8 +1058,7 @@ page_options = [
     "⑤ 산업별 취업자수",
     "⑥ 직종별 취업자수",
     "⑦ 요약",
-    "⑧ 리포트",
-    "⑨ 시군 유형화·정책매칭",
+    "⑧ 시군 유형화·정책매칭",
 ]
 active_page = st.radio("메뉴", page_options, horizontal=True, key="active_page", label_visibility="collapsed")
 
@@ -1307,17 +1305,7 @@ elif active_page == "⑦ 요약":
             selected_month=selected_report_month,
             show_ai=SHOW_AI_FEATURES,
         )
-elif active_page == "⑧ 리포트":
-    st.subheader("리포트(상세/다운로드)")
-    _render_report_template(
-        df=visible_data,
-        province_df=scope_data.get("province", pd.DataFrame()),
-        region_pool=region_pool,
-        datasets=active_datasets,
-        is_gyeonggi31_mode=is_gyeonggi31_mode,
-        labels=labels,
-    )
-elif active_page == "⑨ 시군 유형화·정책매칭":
+elif active_page == "⑧ 시군 유형화·정책매칭":
     _render_sigungu_typology_tab(visible_data, is_gyeonggi31_mode=is_gyeonggi31_mode, datasets=active_datasets)
 
 st.markdown(

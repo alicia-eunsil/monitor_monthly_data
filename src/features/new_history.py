@@ -171,7 +171,7 @@ def _build_dataset_new_event_lines(
     per_dataset_events: int = 3,
 ) -> List[str]:
     if month_df.empty:
-        return ["##### 데이터셋별 NEW 이벤트", "- 표시할 데이터가 없습니다."]
+        return ["##### 데이터셋별 NEW RECORDS", "- 표시할 데이터가 없습니다."]
 
     ds_order = [str(getattr(cfg, "title", "")).strip() for cfg in datasets]
     metric_order = {"원자료": 0, "YoY(절대)": 1, "YoY(증감률)": 2}
@@ -185,7 +185,7 @@ def _build_dataset_new_event_lines(
     if top_n_datasets is not None:
         ds_names = ds_names[: int(top_n_datasets)]
 
-    lines: List[str] = ["##### 데이터셋별 NEW 이벤트"]
+    lines: List[str] = ["##### 데이터셋별 NEW RECORDS"]
     for ds_name in ds_names:
         ds_view = month_df[month_df["데이터셋"].astype(str) == str(ds_name)].copy()
         if ds_view.empty:
@@ -853,7 +853,7 @@ def render_new_monthly_report(
         point_label = str(labels.get("point", "월"))
         st.markdown(f"- {build_new_focus_line(month_df, '최고', f'이번 {point_label} NEW 핵심')}")
         st.markdown(f"- {build_new_focus_line(month_df, '최저', f'이번 {point_label} NEW 리스크')}")
-        st.caption("See tab 1 (NEW RECORDS) for event details and tab 8 (Report) for full document view.")
+        st.caption("See tab 1 (NEW RECORDS) for event details.")
         return
 
     type_summary = month_df.groupby(["구분", "범위", "유형"], as_index=False).size().rename(columns={"size": "NEW 건수"})
