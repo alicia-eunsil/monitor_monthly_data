@@ -590,6 +590,9 @@ def _render_dataset(
     region_state_key = f"{state_prefix}_region"
     indicator_state_key = f"{state_prefix}_indicator"
     category_state_key = f"{state_prefix}_category"
+    draft_region_key = f"{state_prefix}_draft_region"
+    draft_indicator_key = f"{state_prefix}_draft_indicator"
+    draft_category_key = f"{state_prefix}_draft_category"
 
     if st.session_state.get(region_state_key) not in region_options:
         st.session_state[region_state_key] = region_options[default_region_index]
@@ -634,30 +637,38 @@ def _render_dataset(
             default_indicator = _pick_auto_indicator(st.session_state[region_state_key])
         st.session_state[indicator_state_key] = default_indicator
 
+    if st.session_state.get(draft_region_key) not in region_options:
+        st.session_state[draft_region_key] = st.session_state.get(region_state_key, region_options[default_region_index])
+    if indicators and st.session_state.get(draft_indicator_key) not in indicators:
+        st.session_state[draft_indicator_key] = st.session_state.get(indicator_state_key, indicators[0])
+
     with st.form(key=f"filters_{state_prefix}", border=False):
         with col1:
-            region_input = st.selectbox(
+            st.selectbox(
                 "지역",
                 region_options,
-                index=region_options.index(st.session_state[region_state_key]),
-                key=f"{state_prefix}_region_input",
+                index=region_options.index(st.session_state[draft_region_key]),
+                key=draft_region_key,
             )
 
-        indicator_input = st.session_state.get(indicator_state_key, indicators[0] if indicators else "")
+        region_input = str(st.session_state.get(draft_region_key, region_options[default_region_index]))
+        indicator_input = st.session_state.get(draft_indicator_key, indicators[0] if indicators else "")
         category_container = col2
         if dataset_key == "activity" and indicators:
             with col2:
-                indicator_input = st.radio(
+                st.radio(
                     "지표",
                     indicators,
                     index=indicators.index(indicator_input) if indicator_input in indicators else 0,
-                    key=f"{state_prefix}_indicator_input",
+                    key=draft_indicator_key,
                     horizontal=True,
                 )
+                indicator_input = st.session_state.get(draft_indicator_key, indicator_input)
         elif dataset_key in {"industry", "occupation", "age", "status"} and indicators:
             indicator_input = _pick_auto_indicator(region_input)
+            st.session_state[draft_indicator_key] = indicator_input
 
-        category_input = st.session_state.get(category_state_key, "")
+        category_input = st.session_state.get(draft_category_key, st.session_state.get(category_state_key, ""))
         if cfg.has_category:
             category_pool = subset[subset["region_name"] == region_input]
             if indicator_input:
@@ -695,24 +706,28 @@ def _render_dataset(
             if categories:
                 if category_input not in categories:
                     category_input = categories[0]
+                    st.session_state[draft_category_key] = category_input
                 with category_container:
                     if dataset_key in {"industry", "occupation", "age", "status"}:
-                        category_input = st.radio(
+                        st.radio(
                             cfg.category_label,
                             categories,
                             index=categories.index(category_input),
-                            key=f"{state_prefix}_category_input",
+                            key=draft_category_key,
                             horizontal=True,
                         )
+                        category_input = st.session_state.get(draft_category_key, category_input)
                     else:
-                        category_input = st.selectbox(
+                        st.selectbox(
                             cfg.category_label,
                             categories,
                             index=categories.index(category_input),
-                            key=f"{state_prefix}_category_select_input",
+                            key=draft_category_key,
                         )
+                        category_input = st.session_state.get(draft_category_key, category_input)
             else:
                 category_input = ""
+                st.session_state[draft_category_key] = ""
         apply_filter = st.form_submit_button("적용")
 
     if apply_filter or region_state_key not in st.session_state:
@@ -720,10 +735,17 @@ def _render_dataset(
         st.session_state[indicator_state_key] = indicator_input
         if cfg.has_category:
             st.session_state[category_state_key] = category_input
-    elif dataset_key in {"industry", "occupation", "age", "status"}:
-        # Hidden-indicator datasets should always keep the auto-selected indicator
-        # in sync with current region/category context.
-        st.session_state[indicator_state_key] = indicator_input
+
+    pending_changes = (
+        str(st.session_state.get(draft_region_key, "")) != str(st.session_state.get(region_state_key, ""))
+        or str(st.session_state.get(draft_indicator_key, "")) != str(st.session_state.get(indicator_state_key, ""))
+        or (
+            cfg.has_category
+            and str(st.session_state.get(draft_category_key, "")) != str(st.session_state.get(category_state_key, ""))
+        )
+    )
+    if pending_changes:
+        st.caption("변경한 조건은 `적용` 버튼을 눌러야 반영됩니다.")
 
     region = str(st.session_state.get(region_state_key, region_input))
     indicator = str(st.session_state.get(indicator_state_key, indicator_input))
