@@ -976,27 +976,40 @@ def render_ai_insights(
             if not industry_meta.get("ok"):
                 st.info(str(industry_meta.get("message", "산업별 비교 데이터를 계산할 수 없습니다.")))
             else:
-                fmt_df = industry_df.copy()
-                for col in ["전국 증감", "지역 증감"]:
+                base_delta_col = "전국 증감"
+                base_share_col = "전국 산업 기여율(%)"
+                contrib_col = "전국 증감 대비 지역 기여율(%)"
+                if base_region != "전국":
+                    base_delta_col = f"{base_region} 증감"
+                    base_share_col = f"{base_region} 산업 기여율(%)"
+                    contrib_col = f"{base_region} 증감 대비 지역 기여율(%)"
+                chart_df = industry_df.copy().rename(
+                    columns={
+                        "전국 증감": base_delta_col,
+                        "전국 산업 기여율(%)": base_share_col,
+                        "전국 증감 대비 지역 기여율(%)": contrib_col,
+                    }
+                )
+                fmt_df = chart_df.copy()
+                for col in [base_delta_col, "지역 증감"]:
                     fmt_df[col] = fmt_df[col].apply(lambda v: fmt_num(v, str(industry_meta.get("unit", ""))))
-                for col in ["전국 산업 기여율(%)", "지역 산업 기여율(%)", "전국 증감 대비 지역 기여율(%)"]:
+                for col in [base_share_col, "지역 산업 기여율(%)", contrib_col]:
                     fmt_df[col] = fmt_df[col].apply(lambda v: "-" if pd.isna(v) else f"{float(v):,.1f}%")
                 st.dataframe(fmt_df, use_container_width=True, hide_index=True)
 
-                chart_df = industry_df.copy()
-                top_df = chart_df.nlargest(10, "전국 증감 대비 지역 기여율(%)")
+                top_df = chart_df.nlargest(10, contrib_col)
                 bar = (
                     alt.Chart(top_df)
                     .mark_bar()
                     .encode(
-                        x=alt.X("전국 증감 대비 지역 기여율(%):Q", title="전국 증감 대비 지역 기여율(%)"),
+                        x=alt.X(f"{contrib_col}:Q", title=contrib_col),
                         y=alt.Y("산업:N", sort="-x", title="산업"),
-                        color=alt.condition("datum['전국 증감 대비 지역 기여율(%)'] >= 0", alt.value("#2563eb"), alt.value("#dc2626")),
+                        color=alt.condition(f"datum['{contrib_col}'] >= 0", alt.value("#2563eb"), alt.value("#dc2626")),
                         tooltip=[
                             alt.Tooltip("산업:N", title="산업"),
-                            alt.Tooltip("전국 증감:Q", title="전국 증감", format=",.1f"),
+                            alt.Tooltip(f"{base_delta_col}:Q", title=base_delta_col, format=",.1f"),
                             alt.Tooltip("지역 증감:Q", title="지역 증감", format=",.1f"),
-                            alt.Tooltip("전국 증감 대비 지역 기여율(%):Q", title="지역 기여율(%)", format=".1f"),
+                            alt.Tooltip(f"{contrib_col}:Q", title="지역 기여율(%)", format=".1f"),
                         ],
                     )
                     .properties(height=320)
@@ -1090,13 +1103,13 @@ def render_ai_insights(
                                 alt.Chart(plot_view)
                                 .mark_line(point=True)
                                 .encode(
-                                    x=alt.X("period:T", title=labels.get("point", "월")),
-                                    y=alt.Y("region_contrib_to_nat_pct:Q", title="전국 증감 대비 지역 기여율(%)"),
-                                    color=alt.Color("category_name:N", title="산업"),
-                                    tooltip=[
-                                        alt.Tooltip("yearmonth(period):T", title=labels.get("point", "월")),
-                                        alt.Tooltip("category_name:N", title="산업"),
-                                        alt.Tooltip("region_contrib_to_nat_pct:Q", title="기여율(%)", format=".1f"),
+                                x=alt.X("period:T", title=labels.get("point", "월")),
+                                y=alt.Y("region_contrib_to_nat_pct:Q", title=contrib_col),
+                                color=alt.Color("category_name:N", title="산업"),
+                                tooltip=[
+                                    alt.Tooltip("yearmonth(period):T", title=labels.get("point", "월")),
+                                    alt.Tooltip("category_name:N", title="산업"),
+                                    alt.Tooltip("region_contrib_to_nat_pct:Q", title="기여율(%)", format=".1f"),
                                     ],
                                 )
                                 .properties(height=280)
@@ -1142,16 +1155,16 @@ def render_ai_insights(
                         share_pad = share_span * 0.15
                         share_domain = [share_min - share_pad, share_max + share_pad]
                     share_chart = (
-                        alt.Chart(share_plot_df)
-                        .mark_line(color="#2563eb", point=True)
-                        .encode(
-                            x=alt.X("period:T", title=labels.get("point", "월")),
-                            y=alt.Y("share_pct:Q", title="전국 대비 경기도 비중(%)", scale=alt.Scale(domain=share_domain)),
-                            tooltip=[
-                                alt.Tooltip("yearmonth(period):T", title=labels.get("point", "월")),
-                                alt.Tooltip("share_pct:Q", title="비중(%)", format=".2f"),
-                            ],
-                        )
+                    alt.Chart(share_plot_df)
+                    .mark_line(color="#2563eb", point=True)
+                    .encode(
+                        x=alt.X("period:T", title=labels.get("point", "월")),
+                        y=alt.Y("share_pct:Q", title=f"{base_region} 대비 {analysis_region} 비중(%)", scale=alt.Scale(domain=share_domain)),
+                        tooltip=[
+                            alt.Tooltip("yearmonth(period):T", title=labels.get("point", "월")),
+                            alt.Tooltip("share_pct:Q", title="비중(%)", format=".2f"),
+                        ],
+                    )
                         .properties(height=280)
                     )
                     st.altair_chart(share_chart, use_container_width=True)
@@ -1195,7 +1208,7 @@ def render_ai_insights(
                         ],
                     )
                     contrib_line = base.mark_line(color="#dc2626", point=True).encode(
-                        y=alt.Y("contrib_pct:Q", title="전국 증감 기여율(%)", scale=alt.Scale(domain=contrib_domain))
+                        y=alt.Y("contrib_pct:Q", title=f"{base_region} 증감 기여율(%)", scale=alt.Scale(domain=contrib_domain))
                     )
                     zero = alt.Chart(pd.DataFrame({"zero": [0]})).mark_rule(
                         color="#9CA3AF",
