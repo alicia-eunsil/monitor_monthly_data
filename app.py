@@ -1312,7 +1312,7 @@ elif active_page == "⑦ 요약":
             events=events,
             report_scope=summary_scope,
             source_df=data,
-            fixed_region=None if selected_province == "전국" else selected_province,
+            fixed_region=selected_province,
             selected_month=selected_report_month,
             show_ai=SHOW_AI_FEATURES,
         )
