@@ -173,9 +173,11 @@ def _is_valid_scope_data(scope_data: object, required_scopes: List[str]) -> bool
         frame = scope_data.get(scope_key)
         if not isinstance(frame, pd.DataFrame):
             return False
-        if not frame.empty and not REQUIRED_SCOPE_COLUMNS.issubset(set(frame.columns)):
+        if frame.empty:
             return False
-        if not frame.empty and "dataset_key" in frame.columns:
+        if not REQUIRED_SCOPE_COLUMNS.issubset(set(frame.columns)):
+            return False
+        if "dataset_key" in frame.columns:
             expected = {
                 str(getattr(cfg, "key", "")).strip()
                 for cfg in datasets_for_scope(scope_key)
