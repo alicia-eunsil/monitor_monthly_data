@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import json
 import os
+import shutil
 
 import pandas as pd
 
@@ -262,6 +263,10 @@ def _scope_cache_path(scope_key: str) -> Path:
     return CACHE_ROOT / scope_key / "all.parquet"
 
 
+def _scope_backup_cache_path(scope_key: str) -> Path:
+    return CACHE_ROOT / scope_key / "all.backup.parquet"
+
+
 def _default_manifest() -> Dict[str, Any]:
     return {
         "schema_version": "",
@@ -302,17 +307,35 @@ def _is_valid_scope_frame(frame: object) -> bool:
     return REQUIRED_SCOPE_COLUMNS.issubset(set(frame.columns))
 
 
-def _read_scope_cache(scope_key: str) -> pd.DataFrame:
-    path = _scope_cache_path(scope_key)
+def _dataset_row_counts(frame: object) -> Dict[str, int]:
+    if not isinstance(frame, pd.DataFrame) or frame.empty or "dataset_key" not in frame.columns:
+        return {}
+    counts = frame["dataset_key"].astype(str).str.strip().value_counts(dropna=False).to_dict()
+    return {str(key): int(value) for key, value in counts.items()}
+
+
+def _read_valid_scope_cache(path: Path, scope_key: str) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
     try:
         frame = pd.read_parquet(path)
         if not _is_valid_scope_frame(frame):
             return pd.DataFrame()
+        has_all_datasets, _missing = _scope_has_expected_datasets(frame, scope_key)
+        if not has_all_datasets:
+            return pd.DataFrame()
         return frame
     except Exception:
         return pd.DataFrame()
+
+
+def _read_scope_cache(scope_key: str) -> pd.DataFrame:
+    path = _scope_cache_path(scope_key)
+    frame = _read_valid_scope_cache(path, scope_key)
+    if not frame.empty:
+        return frame
+    backup_path = _scope_backup_cache_path(scope_key)
+    return _read_valid_scope_cache(backup_path, scope_key)
 
 
 def _write_scope_cache_atomic(scope_key: str, frame: pd.DataFrame) -> None:
@@ -321,6 +344,8 @@ def _write_scope_cache_atomic(scope_key: str, frame: pd.DataFrame) -> None:
     tmp_path = path.with_suffix(".tmp.parquet")
     frame.to_parquet(tmp_path, index=False)
     tmp_path.replace(path)
+    backup_path = _scope_backup_cache_path(scope_key)
+    shutil.copy2(path, backup_path)
 
 
 def _latest_period_text(frame: pd.DataFrame) -> str:
@@ -342,6 +367,13 @@ def _scope_has_expected_datasets(frame: pd.DataFrame, scope_key: str) -> tuple[b
     present = set(frame["dataset_key"].astype(str).str.strip().unique().tolist())
     missing = [key for key in expected if key not in present]
     return len(missing) == 0, missing
+
+
+def _scope_debug_summary(scope_key: str, label: str, frame: object) -> str:
+    if not isinstance(frame, pd.DataFrame):
+        return f"[{scope_key}:{label}] no_frame"
+    row_counts = _dataset_row_counts(frame)
+    return f"[{scope_key}:{label}] rows={len(frame)} dataset_rows={row_counts}"
 
 
 def _probe_scope_latest_period(
@@ -404,6 +436,8 @@ def load_data_with_local_cache(
     warnings: List[str] = []
 
     scope_data: Dict[str, pd.DataFrame] = {scope: _read_scope_cache(scope) for scope in requested_scopes}
+    for scope in requested_scopes:
+        debug_logs.append(_scope_debug_summary(scope, "cache_read", scope_data.get(scope)))
     missing_scopes = [scope for scope in requested_scopes if not _is_valid_scope_frame(scope_data.get(scope))]
 
     schema_mismatch = str(manifest.get("schema_version", "")) != str(data_model_version)
@@ -443,6 +477,7 @@ def load_data_with_local_cache(
 
         for scope in scopes_to_refresh:
             new_df = fetched.get(scope, pd.DataFrame())
+            debug_logs.append(_scope_debug_summary(scope, "refresh_result", new_df))
             if _is_valid_scope_frame(new_df):
                 dedup_cols = ["dataset_key", "region_name", "indicator_name", "category_name", "period"]
                 dedup_df = new_df.drop_duplicates(subset=[c for c in dedup_cols if c in new_df.columns], keep="last").copy()
@@ -452,9 +487,11 @@ def load_data_with_local_cache(
                         f"{scope} 저장 건너뜀: 일부 데이터셋 누락({', '.join(missing_dataset_keys)})으로 기존 캐시를 유지합니다."
                     )
                     debug_logs.append(f"[{scope}:cache] skipped_incomplete_scope missing={missing_dataset_keys}")
+                    debug_logs.append(_scope_debug_summary(scope, "cache_kept", scope_data.get(scope)))
                     continue
                 _write_scope_cache_atomic(scope, dedup_df)
                 scope_data[scope] = dedup_df
+                debug_logs.append(_scope_debug_summary(scope, "cache_saved", dedup_df))
                 scope_meta = (manifest.get("scopes", {}) or {}).get(scope, {})
                 scope_meta.update(
                     {

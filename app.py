@@ -162,7 +162,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-DATA_MODEL_VERSION = "2026-06-04-activity-dt-fallback-v1"
+DATA_MODEL_VERSION = "2026-06-05-activity-cache-guard-v1"
 REQUIRED_SCOPE_COLUMNS = {"dataset_key", "region_name", "indicator_name", "category_name", "period", "value", "prd_se"}
 SHOW_AI_FEATURES = str(os.getenv("SHOW_AI_FEATURES", "false")).strip().lower() in {"1", "true", "yes", "y"}
 
@@ -176,6 +176,15 @@ def _is_valid_scope_data(scope_data: object, required_scopes: List[str]) -> bool
             return False
         if not frame.empty and not REQUIRED_SCOPE_COLUMNS.issubset(set(frame.columns)):
             return False
+        if not frame.empty and "dataset_key" in frame.columns:
+            expected = {
+                str(getattr(cfg, "key", "")).strip()
+                for cfg in datasets_for_scope(scope_key)
+                if str(getattr(cfg, "key", "")).strip()
+            }
+            present = set(frame["dataset_key"].astype(str).str.strip().unique().tolist())
+            if expected - present:
+                return False
     return True
 
 
@@ -920,13 +929,16 @@ try:
                 "데이터 추가 불러오는 중... "
                 + ("경기 31개 시군" if "gyeonggi31" in missing_scopes else "전국 17개 시도")
             )
-            new_scope_data, add_errors, add_debug_logs, add_warnings = load_all_data_with_progress(
+            new_scope_data, add_errors, add_debug_logs, add_warnings = load_data_with_local_cache(
                 api_key=api_key,
+                data_model_version=DATA_MODEL_VERSION,
                 status_box=sidebar_status,
                 progress_box=sidebar_progress_box,
                 main_status_box=loading_notice,
                 main_progress_box=loading_progress,
                 scopes=missing_scopes,
+                force_refresh=False,
+                check_interval_hours=24,
             )
             for scope in missing_scopes:
                 scope_data[scope] = new_scope_data.get(scope, pd.DataFrame())
