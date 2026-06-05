@@ -1034,36 +1034,6 @@ def render_ai_insights(
                         selected_periods = set(period_options[s_idx : e_idx + 1])
                         trend_view = trend_df[trend_df["period"].isin(selected_periods)].copy()
 
-                        dir_match_rate = float(trend_view["direction_match"].mean() * 100.0) if not trend_view.empty else np.nan
-                        agg_by_cat = (
-                            trend_view.groupby("category_name", as_index=False)
-                            .agg(
-                                avg_contrib=("region_contrib_to_nat_pct", "mean"),
-                                latest_contrib=("region_contrib_to_nat_pct", "last"),
-                                pos_count=("region_contrib_to_nat_pct", lambda x: int((pd.to_numeric(x, errors="coerce") > 0).sum())),
-                                neg_count=("region_contrib_to_nat_pct", lambda x: int((pd.to_numeric(x, errors="coerce") < 0).sum())),
-                            )
-                        )
-                        if not agg_by_cat.empty:
-                            agg_by_cat["latest_vs_avg_pp"] = agg_by_cat["latest_contrib"] - agg_by_cat["avg_contrib"]
-                            top_pos = agg_by_cat.sort_values("pos_count", ascending=False).head(1)
-                            top_dev = agg_by_cat.reindex(agg_by_cat["latest_vs_avg_pp"].abs().sort_values(ascending=False).index).head(1)
-                        else:
-                            top_pos = pd.DataFrame()
-                            top_dev = pd.DataFrame()
-
-                        k1, k2, k3 = st.columns(3)
-                        with k1:
-                            card_fn("방향 일치율", "-" if pd.isna(dir_match_rate) else f"{dir_match_rate:,.1f}%", "산업 기준")
-                        with k2:
-                            pos_text = "-" if top_pos.empty else f"{str(top_pos.iloc[0]['category_name'])} ({int(top_pos.iloc[0]['pos_count'])}회)"
-                            card_fn("연속 +기여 우세", pos_text, "선택 기간 기준")
-                        with k3:
-                            dev_text = "-"
-                            if not top_dev.empty and pd.notna(top_dev.iloc[0]["latest_vs_avg_pp"]):
-                                dev_text = f"{str(top_dev.iloc[0]['category_name'])} ({float(top_dev.iloc[0]['latest_vs_avg_pp']):+,.1f}%p)"
-                            card_fn("최신-평균 편차", dev_text, "절대값 기준 최대")
-
                         top_cats = (
                             trend_view.groupby("category_name", as_index=False)["region_contrib_to_nat_pct"]
                             .mean()
@@ -1086,6 +1056,35 @@ def render_ai_insights(
                             key=f"ai_industry_trend_categories_{analysis_region}",
                         )
                         plot_view = trend_view[trend_view["category_name"].isin(selected_cats)].copy()
+                        dir_match_rate = float(plot_view["direction_match"].mean() * 100.0) if not plot_view.empty else np.nan
+                        agg_by_cat = (
+                            plot_view.groupby("category_name", as_index=False)
+                            .agg(
+                                avg_contrib=("region_contrib_to_nat_pct", "mean"),
+                                latest_contrib=("region_contrib_to_nat_pct", "last"),
+                                pos_count=("region_contrib_to_nat_pct", lambda x: int((pd.to_numeric(x, errors="coerce") > 0).sum())),
+                                neg_count=("region_contrib_to_nat_pct", lambda x: int((pd.to_numeric(x, errors="coerce") < 0).sum())),
+                            )
+                        )
+                        if not agg_by_cat.empty:
+                            agg_by_cat["latest_vs_avg_pp"] = agg_by_cat["latest_contrib"] - agg_by_cat["avg_contrib"]
+                            top_pos = agg_by_cat.sort_values("pos_count", ascending=False).head(1)
+                            top_dev = agg_by_cat.reindex(agg_by_cat["latest_vs_avg_pp"].abs().sort_values(ascending=False).index).head(1)
+                        else:
+                            top_pos = pd.DataFrame()
+                            top_dev = pd.DataFrame()
+
+                        k1, k2, k3 = st.columns(3)
+                        with k1:
+                            card_fn("방향 일치율", "-" if pd.isna(dir_match_rate) else f"{dir_match_rate:,.1f}%", "선택 산업 기준")
+                        with k2:
+                            pos_text = "-" if top_pos.empty else f"{str(top_pos.iloc[0]['category_name'])} ({int(top_pos.iloc[0]['pos_count'])}회)"
+                            card_fn("연속 +기여 우세", pos_text, "선택 산업·기간 기준")
+                        with k3:
+                            dev_text = "-"
+                            if not top_dev.empty and pd.notna(top_dev.iloc[0]["latest_vs_avg_pp"]):
+                                dev_text = f"{str(top_dev.iloc[0]['category_name'])} ({float(top_dev.iloc[0]['latest_vs_avg_pp']):+,.1f}%p)"
+                            card_fn("최신-평균 편차", dev_text, "선택 산업 중 최대")
                         if not plot_view.empty:
                             trend_chart = (
                                 alt.Chart(plot_view)
