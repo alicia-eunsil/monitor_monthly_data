@@ -896,6 +896,14 @@ with st.sidebar:
     sidebar_status = st.empty()
     sidebar_progress_box = st.empty()
 
+is_sido_mode_default = bool(st.session_state.get("scope_toggle", True))
+is_sido_mode = st.toggle(
+    "시도",
+    value=is_sido_mode_default,
+    key="scope_toggle",
+)
+requested_scopes = ["province"] if is_sido_mode else ["province", "gyeonggi31"]
+
 api_key = _seeded_api_key()
 
 if not api_key:
@@ -904,9 +912,6 @@ if not api_key:
         "환경변수 `api_key`/`API_KEY`/`KOSIS_API_KEY`, `.env`, 또는 Streamlit secrets를 확인하세요."
     )
     st.stop()
-
-is_sido_mode_default = bool(st.session_state.get("scope_toggle", True))
-requested_scopes = ["province"] if is_sido_mode_default else ["province", "gyeonggi31"]
 
 loading_notice = st.empty()
 loading_notice.info("데이터 불러오는 중... (기본: 시도, 시군은 필요 시 추가 로딩)")
@@ -998,11 +1003,6 @@ if debug_logs:
         with st.expander("진단 로그 보기", expanded=bool(load_errors)):
             st.code("\n".join(debug_logs[-300:]))
 
-is_sido_mode = st.toggle(
-    "시도",
-    value=is_sido_mode_default,
-    key="scope_toggle",
-)
 scope_label = "전국 17개 시도" if is_sido_mode else "경기 31개 시군"
 region_scope = "province" if is_sido_mode else "gyeonggi31"
 is_gyeonggi31_mode = region_scope == "gyeonggi31"
