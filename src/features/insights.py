@@ -1093,9 +1093,15 @@ def render_ai_insights(
                             card_fn("연속 +기여 우세", pos_text, "선택 산업·기간 기준")
                         with k3:
                             dev_text = "-"
+                            dev_sub = "선택 산업 중 최대"
                             if not top_dev.empty and pd.notna(top_dev.iloc[0]["latest_vs_avg_pp"]):
                                 dev_text = f"{str(top_dev.iloc[0]['category_name'])} ({float(top_dev.iloc[0]['latest_vs_avg_pp']):+,.1f}%p)"
-                            card_fn("최신-평균 편차", dev_text, "선택 산업 중 최대")
+                                latest_contrib = top_dev.iloc[0]["latest_contrib"]
+                                avg_contrib = top_dev.iloc[0]["avg_contrib"]
+                                latest_text = "-" if pd.isna(latest_contrib) else f"{float(latest_contrib):,.1f}%"
+                                avg_text = "-" if pd.isna(avg_contrib) else f"{float(avg_contrib):,.1f}%"
+                                dev_sub = f"최신 {latest_text} / 평균 {avg_text}"
+                            card_fn("최신기여율 - 평균기여율", dev_text, dev_sub)
                         if not plot_view.empty:
                             trend_chart = (
                                 alt.Chart(plot_view)
