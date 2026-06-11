@@ -714,9 +714,9 @@ def compute_industry_comparison_breakdown(
         view["yoy_abs_reg"] / region_total_delta * 100.0,
     )
     view["전국 증감 대비 지역 기여율(%)"] = np.where(
-        base_total_delta == 0,
+        pd.to_numeric(view["yoy_abs_nat"], errors="coerce") == 0,
         np.nan,
-        view["yoy_abs_reg"] / base_total_delta * 100.0,
+        view["yoy_abs_reg"] / view["yoy_abs_nat"] * 100.0,
     )
     out = view.rename(
         columns={
