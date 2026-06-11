@@ -801,12 +801,10 @@ def compute_industry_comparison_trend(
         meta["message"] = "산업별 추이 데이터가 없습니다."
         return pd.DataFrame(), meta
 
-    totals = merged.groupby("period", as_index=False).agg({"yoy_abs_nat": "sum", "yoy_abs_reg": "sum"})
-    merged = merged.merge(totals, on="period", suffixes=("", "_total"))
     merged["region_contrib_to_nat_pct"] = np.where(
-        merged["yoy_abs_nat_total"] == 0,
+        pd.to_numeric(merged["yoy_abs_nat"], errors="coerce") == 0,
         np.nan,
-        merged["yoy_abs_reg"] / merged["yoy_abs_nat_total"] * 100.0,
+        merged["yoy_abs_reg"] / merged["yoy_abs_nat"] * 100.0,
     )
     merged["direction_match"] = np.where(
         np.sign(merged["yoy_abs_nat"]) == np.sign(merged["yoy_abs_reg"]),
