@@ -1124,15 +1124,18 @@ def render_ai_insights(
                 base_share_col = f"{base_region} 기여율(%)"
                 contrib_col = f"{base_region} 증감 대비 지역 기여율(%)"
                 chart_df = comparison_df.copy()
-                fmt_df = chart_df.copy()
+                st.markdown(f"###### 상위지역 대비 기여 ({base_region} 기준)")
+                upper_df = chart_df[["분류", base_delta_col, "지역 증감", contrib_col]].copy()
+                upper_fmt_df = upper_df.copy()
                 for col in [base_delta_col, "지역 증감"]:
-                    fmt_df[col] = fmt_df[col].apply(lambda v: fmt_num(v, str(comparison_meta.get("unit", ""))))
-                for col in [base_share_col, "지역 산업 기여율(%)", contrib_col]:
-                    fmt_df[col] = fmt_df[col].apply(lambda v: "-" if pd.isna(v) else f"{float(v):,.1f}%")
-                st.dataframe(fmt_df, use_container_width=True, hide_index=True)
+                    upper_fmt_df[col] = upper_fmt_df[col].apply(lambda v: fmt_num(v, str(comparison_meta.get("unit", ""))))
+                upper_fmt_df[contrib_col] = upper_fmt_df[contrib_col].apply(
+                    lambda v: "-" if pd.isna(v) else f"{float(v):,.1f}%"
+                )
+                st.dataframe(upper_fmt_df, use_container_width=True, hide_index=True)
 
-                top_df = chart_df.nlargest(10, contrib_col)
-                bar = (
+                top_df = upper_df.nlargest(10, contrib_col)
+                upper_bar = (
                     alt.Chart(top_df)
                     .mark_bar()
                     .encode(
@@ -1148,7 +1151,37 @@ def render_ai_insights(
                     )
                     .properties(height=320)
                 )
-                st.altair_chart(bar, use_container_width=True)
+                st.altair_chart(upper_bar, use_container_width=True)
+
+                if internal_meta.get("ok"):
+                    st.markdown(f"###### 지역 내부 기여 ({analysis_region} 기준)")
+                    internal_fmt_df = internal_df.copy()
+                    for col in ["최신값", "비교값", "증감"]:
+                        internal_fmt_df[col] = internal_fmt_df[col].apply(
+                            lambda v: fmt_num(v, str(internal_meta.get("unit", "")))
+                        )
+                    internal_fmt_df["기여율(%)"] = internal_fmt_df["기여율(%)"].apply(
+                        lambda v: "-" if pd.isna(v) else f"{float(v):,.1f}%"
+                    )
+                    st.dataframe(internal_fmt_df, use_container_width=True, hide_index=True)
+
+                    internal_chart_df = internal_df.copy().nlargest(10, "기여율(%)")
+                    internal_bar = (
+                        alt.Chart(internal_chart_df)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X("기여율(%):Q", title=f"{analysis_region} 내부 기여율(%)"),
+                            y=alt.Y("분류:N", sort="-x", title="분류"),
+                            color=alt.condition("datum['기여율(%)'] >= 0", alt.value("#2563eb"), alt.value("#dc2626")),
+                            tooltip=[
+                                alt.Tooltip("분류:N", title="분류"),
+                                alt.Tooltip("증감:Q", title="지역 증감", format=",.1f"),
+                                alt.Tooltip("기여율(%):Q", title="지역 내부 기여율(%)", format=".1f"),
+                            ],
+                        )
+                        .properties(height=320)
+                    )
+                    st.altair_chart(internal_bar, use_container_width=True)
 
                 if ds_key == "industry":
                     st.markdown("##### 산업별 추이 진단")
@@ -1365,29 +1398,6 @@ def render_ai_insights(
                     if not contrib_table.empty:
                         st.caption("증감 기여율 최고·최저")
                         st.dataframe(_style_new_in_extreme_table(contrib_table), use_container_width=True, hide_index=True)
-    st.markdown("---")
-    st.markdown(
-        """
-<div style="border:2px solid #0f172a; border-radius:14px; padding:16px 18px; background:#e0f2fe; margin-bottom:10px;">
-  <div style="font-weight:900; font-size:1.25rem; color:#0f172a; letter-spacing:0.2px;">
-    분석 지역
-  </div>
-  <div style="margin-top:6px; color:#1f2937; font-size:1.02rem; font-weight:700;">
-    아래 모든 AI 분석(영향요인분해, 인사이트)에 공통 적용됩니다.
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-    if fixed_region:
-        st.caption(f"현재 선택된 시군 기준으로 분석합니다: **{region}**")
-    else:
-        region = st.selectbox(
-            "분석 지역 선택",
-            region_pool,
-            index=region_pool.index(region_default) if region_default in region_pool else 0,
-            key="ai_region",
-        )
     st.markdown("---")
 
     if not show_ai or events is None or source_df is None or not datasets:
