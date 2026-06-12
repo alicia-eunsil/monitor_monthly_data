@@ -446,12 +446,14 @@ def _render_youtube_display_content() -> None:
 
 def _card(title: str, value: str, sub: str, is_new: bool = False, value_class: str = "") -> None:
     value_cls = f"metric-value {value_class}".strip()
+    value_html = f'<div class="{value_cls}">{value}</div>' if str(value).strip() else ""
+    sub_html = f'<div class="metric-sub">{sub}</div>' if str(sub).strip() else ""
     st.markdown(
         f"""
 <div class="metric-card">
   <div class="metric-title">{title}{_new(is_new)}</div>
-  <div class="{value_cls}">{value}</div>
-  <div class="metric-sub">{sub}</div>
+  {value_html}
+  {sub_html}
 </div>
 """,
         unsafe_allow_html=True,
@@ -516,24 +518,6 @@ def _render_current_level_summary(df: pd.DataFrame, region: str, labels: Dict[st
         return
 
     latest_period = _fmt_period(meta.get("latest_period"), str(meta.get("prd_se", "M")))
-    st.markdown("#### 주요지표 현황")
-    cols = st.columns(len(available_metrics))
-    for col, (title, row) in zip(cols, available_metrics):
-        with col:
-            unit = str(row.get("unit", ""))
-            latest_value = row.get("latest_value")
-            delta_value = row.get("delta_value")
-            value_text = _fmt_num(latest_value, unit)
-            if "%" in unit or "율" in title:
-                delta_text = "-" if pd.isna(delta_value) else f"{float(delta_value):+,.1f}%p"
-            else:
-                delta_text = _fmt_num(delta_value, unit)
-                if delta_text != "-":
-                    delta_text = f"전년동월 대비 {delta_text}"
-            sub = f"{latest_period} 기준"
-            if delta_text != "-":
-                sub = f"{sub} · {delta_text}"
-            _card(title, value_text, sub)
 
     def _metric_series(row: pd.Series) -> pd.DataFrame:
         indicator_name = str(row.get("지표", ""))
@@ -569,40 +553,49 @@ def _render_current_level_summary(df: pd.DataFrame, region: str, labels: Dict[st
         avg_value = float(same_cycle["value"].mean())
         return float(latest_row["value"]), avg_value
 
-    st.markdown("#### 3,5년 평균대비")
-    avg_cols = st.columns(len(available_metrics))
-    for col, (title, row) in zip(avg_cols, available_metrics):
-        with col:
+    st.markdown("#### 주요지표 현황 · 3,5년 평균대비")
+    summary_cols = st.columns(len(available_metrics) * 2)
+
+    for idx, (title, row) in enumerate(available_metrics):
+        with summary_cols[idx]:
+            unit = str(row.get("unit", ""))
+            latest_value = row.get("latest_value")
+            delta_value = row.get("delta_value")
+            value_text = _fmt_num(latest_value, unit)
+            if "%" in unit or "율" in title:
+                delta_text = "-" if pd.isna(delta_value) else f"전년동월 대비 {float(delta_value):+,.1f}%p"
+            else:
+                delta_text = _fmt_num(delta_value, unit)
+                if delta_text != "-":
+                    delta_text = f"전년동월 대비 {delta_text}"
+            sub = f"{latest_period} 기준"
+            if delta_text != "-":
+                sub = f"{sub} · {delta_text}"
+            _card(title, value_text, sub)
+
+    for idx, (title, row) in enumerate(available_metrics, start=len(available_metrics)):
+        with summary_cols[idx]:
             unit = str(row.get("unit", ""))
             series_df = _metric_series(row)
             latest_3y, avg_3y = _same_cycle_average(series_df, 3)
             latest_5y, avg_5y = _same_cycle_average(series_df, 5)
-            latest_value = latest_5y if pd.notna(latest_5y) else latest_3y
+            diff_3y = np.nan if pd.isna(latest_3y) or pd.isna(avg_3y) else latest_3y - avg_3y
+            diff_5y = np.nan if pd.isna(latest_5y) or pd.isna(avg_5y) else latest_5y - avg_5y
+
             if "%" in unit or "율" in title:
-                diff_3y = np.nan if pd.isna(latest_3y) or pd.isna(avg_3y) else latest_3y - avg_3y
-                diff_5y = np.nan if pd.isna(latest_5y) or pd.isna(avg_5y) else latest_5y - avg_5y
-                value_text = "-"
-                if not pd.isna(diff_3y) or not pd.isna(diff_5y):
-                    parts = []
-                    if not pd.isna(diff_3y):
-                        parts.append(f"3년 평균 대비 {diff_3y:+,.1f}%p")
-                    if not pd.isna(diff_5y):
-                        parts.append(f"5년 평균 대비 {diff_5y:+,.1f}%p")
-                    value_text = " · ".join(parts)
-                sub_text = ""
+                line_3y = "-" if pd.isna(diff_3y) else f"3년 평균 대비 {diff_3y:+,.1f}%p"
+                line_5y = "-" if pd.isna(diff_5y) else f"5년 평균 대비 {diff_5y:+,.1f}%p"
             else:
-                diff_3y = np.nan if pd.isna(latest_3y) or pd.isna(avg_3y) else latest_3y - avg_3y
-                diff_5y = np.nan if pd.isna(latest_5y) or pd.isna(avg_5y) else latest_5y - avg_5y
-                value_text = "-"
-                if not pd.isna(diff_3y) or not pd.isna(diff_5y):
-                    parts = []
-                    if not pd.isna(diff_3y):
-                        parts.append(f"3년 평균 대비 {_fmt_num(diff_3y, unit)}")
-                    if not pd.isna(diff_5y):
-                        parts.append(f"5년 평균 대비 {_fmt_num(diff_5y, unit)}")
-                    value_text = " · ".join(parts)
-                sub_text = ""
-            _card(title, value_text, sub_text)
+                line_3y = "-" if pd.isna(diff_3y) else f"3년 평균 대비 {_fmt_num(diff_3y, unit)}"
+                line_5y = "-" if pd.isna(diff_5y) else f"5년 평균 대비 {_fmt_num(diff_5y, unit)}"
+
+            sub_text = (
+                "<span style='font-size:0.92rem;font-weight:500;line-height:1.45;'>"
+                f"{line_3y}</span><br>"
+                "<span style='font-size:0.92rem;font-weight:500;line-height:1.45;'>"
+                f"{line_5y}</span>"
+            )
+            _card(f"{title}<br><span style='font-size:0.82rem;font-weight:600;'>평균대비</span>", "", sub_text)
     st.markdown("---")
 
 
