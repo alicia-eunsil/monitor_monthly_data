@@ -534,6 +534,90 @@ def _render_current_level_summary(df: pd.DataFrame, region: str, labels: Dict[st
             if delta_text != "-":
                 sub = f"{sub} · {delta_text}"
             _card(title, value_text, sub)
+
+    def _metric_series(row: pd.Series) -> pd.DataFrame:
+        indicator_name = str(row.get("지표", ""))
+        return series_filter(
+            df=df,
+            dataset_key="activity",
+            region_name=region,
+            indicator_name=indicator_name,
+            category_name="",
+        ).sort_values("period")
+
+    def _format_direction_delta(delta_value: object, title: str, unit: str) -> str:
+        if delta_value is None or pd.isna(delta_value):
+            return "-"
+        if "%" in unit or "율" in title:
+            return f"{float(delta_value):+,.1f}%p"
+        return _fmt_num(delta_value, unit)
+
+    def _same_cycle_average(series_df: pd.DataFrame, years: int) -> tuple[float, float]:
+        if series_df.empty or "period" not in series_df.columns:
+            return np.nan, np.nan
+        frame = series_df.copy()
+        frame["period"] = pd.to_datetime(frame["period"], errors="coerce")
+        frame["value"] = pd.to_numeric(frame["value"], errors="coerce")
+        frame = frame.dropna(subset=["period", "value"]).sort_values("period")
+        if frame.empty:
+            return np.nan, np.nan
+        latest_row = frame.iloc[-1]
+        latest_period = pd.Timestamp(latest_row["period"])
+        earliest = latest_period - pd.DateOffset(years=years)
+        same_cycle = frame[
+            (frame["period"] >= earliest)
+            & (frame["period"] < latest_period)
+            & (frame["period"].dt.month == latest_period.month)
+        ].copy()
+        if same_cycle.empty:
+            same_cycle = frame[(frame["period"] >= earliest) & (frame["period"] < latest_period)].copy()
+        if same_cycle.empty:
+            return float(latest_row["value"]), np.nan
+        avg_value = float(same_cycle["value"].mean())
+        return float(latest_row["value"]), avg_value
+
+    st.markdown("#### 최근 추세")
+    trend_cols = st.columns(len(available_metrics))
+    for col, (title, row) in zip(trend_cols, available_metrics):
+        with col:
+            unit = str(row.get("unit", ""))
+            series_df = _metric_series(row)
+            values = pd.to_numeric(series_df.get("value"), errors="coerce") if not series_df.empty else pd.Series(dtype="float64")
+            three_delta = np.nan
+            six_delta = np.nan
+            if len(values.dropna()) >= 4:
+                latest_idx = values.last_valid_index()
+                if latest_idx is not None:
+                    latest_pos = values.index.get_loc(latest_idx)
+                    latest_val = values.iloc[latest_pos]
+                    if latest_pos >= 3 and pd.notna(values.iloc[latest_pos - 3]):
+                        three_delta = latest_val - values.iloc[latest_pos - 3]
+                    if latest_pos >= 6 and pd.notna(values.iloc[latest_pos - 6]):
+                        six_delta = latest_val - values.iloc[latest_pos - 6]
+            value_text = f"3개월 {_format_direction_delta(three_delta, title, unit)}"
+            sub_text = f"6개월 {_format_direction_delta(six_delta, title, unit)}"
+            _card(title, value_text, sub_text)
+
+    st.markdown("#### 평년 대비 위치")
+    avg_cols = st.columns(len(available_metrics))
+    for col, (title, row) in zip(avg_cols, available_metrics):
+        with col:
+            unit = str(row.get("unit", ""))
+            series_df = _metric_series(row)
+            latest_3y, avg_3y = _same_cycle_average(series_df, 3)
+            latest_5y, avg_5y = _same_cycle_average(series_df, 5)
+            latest_value = latest_5y if pd.notna(latest_5y) else latest_3y
+            if "%" in unit or "율" in title:
+                diff_3y = np.nan if pd.isna(latest_3y) or pd.isna(avg_3y) else latest_3y - avg_3y
+                diff_5y = np.nan if pd.isna(latest_5y) or pd.isna(avg_5y) else latest_5y - avg_5y
+                value_text = "-" if pd.isna(diff_3y) else f"3년 평균 대비 {diff_3y:+,.1f}%p"
+                sub_text = "-" if pd.isna(diff_5y) else f"5년 평균 대비 {diff_5y:+,.1f}%p"
+            else:
+                diff_3y = np.nan if pd.isna(latest_3y) or pd.isna(avg_3y) else latest_3y - avg_3y
+                diff_5y = np.nan if pd.isna(latest_5y) or pd.isna(avg_5y) else latest_5y - avg_5y
+                value_text = "-" if pd.isna(diff_3y) else f"3년 평균 대비 {_fmt_num(diff_3y, unit)}"
+                sub_text = "-" if pd.isna(diff_5y) else f"5년 평균 대비 {_fmt_num(diff_5y, unit)}"
+            _card(title, value_text, sub_text)
     st.markdown("---")
 
 
