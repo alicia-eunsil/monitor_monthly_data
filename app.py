@@ -131,7 +131,7 @@ st.markdown(
   background: #ffffff;
 }
 .summary-card {
-  min-height: 150px;
+  height: 158px;
   display: flex;
   flex-direction: column;
 }
@@ -143,7 +143,7 @@ st.markdown(
   min-height: 1.8em;
 }
 .summary-card .metric-sub {
-  min-height: 3.1em;
+  min-height: 3.3em;
   line-height: 1.4;
 }
 .summary-avg-card .metric-sub {
@@ -471,11 +471,22 @@ def _card(
     is_new: bool = False,
     value_class: str = "",
     card_class: str = "",
+    keep_empty_slots: bool = False,
 ) -> None:
     value_cls = f"metric-value {value_class}".strip()
     card_cls = f"metric-card {card_class}".strip()
-    value_html = f'<div class="{value_cls}">{value}</div>' if str(value).strip() else ""
-    sub_html = f'<div class="metric-sub">{sub}</div>' if str(sub).strip() else ""
+    value_has_text = str(value).strip() != ""
+    sub_has_text = str(sub).strip() != ""
+    value_html = (
+        f'<div class="{value_cls}">{value if value_has_text else "&nbsp;"}</div>'
+        if value_has_text or keep_empty_slots
+        else ""
+    )
+    sub_html = (
+        f'<div class="metric-sub">{sub if sub_has_text else "&nbsp;"}</div>'
+        if sub_has_text or keep_empty_slots
+        else ""
+    )
     st.markdown(
         f"""
 <div class="{card_cls}">
@@ -602,7 +613,7 @@ def _render_current_level_summary(df: pd.DataFrame, region: str, labels: Dict[st
                 )
             else:
                 sub = ""
-            _card(title, value_text, sub, card_class="summary-card")
+            _card(title, value_text, sub, card_class="summary-card", keep_empty_slots=True)
 
     for idx, (title, row) in enumerate(available_metrics, start=len(available_metrics)):
         with summary_cols[idx]:
@@ -621,7 +632,7 @@ def _render_current_level_summary(df: pd.DataFrame, region: str, labels: Dict[st
                 line_5y = "-" if pd.isna(diff_5y) else f"5년 {_fmt_num(diff_5y, unit)}"
 
             sub_text = f"{line_3y}<br>{line_5y}"
-            _card(title, "", sub_text, card_class="summary-card summary-avg-card")
+            _card(title, "", sub_text, card_class="summary-card summary-avg-card", keep_empty_slots=True)
     st.markdown("---")
 
 
