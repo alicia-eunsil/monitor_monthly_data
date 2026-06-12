@@ -8,7 +8,7 @@ import streamlit as st
 import os
 
 import src.config as app_config
-from src.core.category_rules import ACTIVITY_INDICATOR_ORDER, norm_indicator_name
+from src.core.category_rules import ACTIVITY_INDICATOR_ORDER, _industry_code_token, norm_age_category, norm_indicator_name
 from src.core.formatters import escape_markdown_text, fmt_num, fmt_num_bold, fmt_period
 from src.features.new_history import build_ai_insight_context
 from src.services.insight_memory import build_prompt, compute_hash, load_memory, save_memory, select_memory_context
@@ -16,6 +16,15 @@ from src.services.openai_client import DEFAULT_OPENAI_MODEL, create_response_tex
 
 TARGET_REGIONS = app_config.TARGET_REGIONS
 GYEONGGI_SIGUNGU = getattr(app_config, "GYEONGGI_SIGUNGU", [])
+ALLOWED_AGE_CONTRIB_CATEGORIES = {
+    "15~19",
+    "20~29",
+    "30~39",
+    "40~49",
+    "50~59",
+    "60세이상",
+}
+ALLOWED_INDUSTRY_CONTRIB_TOKENS = {"A", "BC", "D~U"}
 
 
 def _seeded_openai_key() -> str:
@@ -280,6 +289,16 @@ def compute_contribution_table(
 
     view_df = merged.copy()
     view_df = view_df[~view_df["category_name"].isin(["계", "합계", "전체"])].copy()
+    if dataset_key == "age":
+        view_df["_norm_age"] = view_df["category_name"].map(norm_age_category)
+        view_df = view_df[view_df["_norm_age"].isin(ALLOWED_AGE_CONTRIB_CATEGORIES)].copy()
+        view_df = view_df.drop(columns=["_norm_age"], errors="ignore")
+    if dataset_key == "industry":
+        view_df["_industry_token"] = view_df["category_name"].map(_industry_code_token)
+        filtered_view = view_df[view_df["_industry_token"].isin(ALLOWED_INDUSTRY_CONTRIB_TOKENS)].copy()
+        if not filtered_view.empty:
+            view_df = filtered_view
+        view_df = view_df.drop(columns=["_industry_token"], errors="ignore")
     view_df = view_df.sort_values("delta", ascending=False)
     out_df = pd.DataFrame(
         {
