@@ -404,32 +404,47 @@ def build_ai_comparison_commentary(
     top_pos = work[work[contrib_col] > 0].nlargest(3, contrib_col)
     top_neg = work[work[contrib_col] < 0].nsmallest(3, contrib_col)
     dominant = work.loc[work[contrib_col].abs().idxmax()] if not work.empty else None
+    same_direction = work[np.sign(work[base_delta_col]) == np.sign(work[region_delta_col])].copy()
+    opposite_direction = work[np.sign(work[base_delta_col]) != np.sign(work[region_delta_col])].copy()
+    opposite_direction = opposite_direction[
+        (work[base_delta_col] != 0) & (work[region_delta_col] != 0)
+    ].copy()
 
     def _fmt_items(frame: pd.DataFrame) -> str:
         items: List[str] = []
         for _, row in frame.iterrows():
             items.append(
                 f"{escape_markdown_text(str(row['분류']))}"
-                f"({fmt_num(row[region_delta_col], unit)}, "
-                f"{float(row[contrib_col]):,.1f}%)"
+                f"({base_region} {fmt_num(row[base_delta_col], unit)} / "
+                f"{region_name} {fmt_num(row[region_delta_col], unit)} / "
+                f"기여율 {float(row[contrib_col]):,.1f}%)"
             )
         return ", ".join(items) if items else "-"
 
+    direction_match_rate = float((np.sign(work[base_delta_col]) == np.sign(work[region_delta_col])).mean() * 100.0) if not work.empty else np.nan
     lines: List[str] = [
-        f"- {latest_text} 기준 **{axis_label}**에서 {base_region} 대비 {region_name} 기여를 비교했습니다.",
+        f"- {latest_text} 기준 **{axis_label}**에서 각 분류별로 **{base_region} 증감 대비 {region_name} 증감 기여율**을 비교했습니다.",
     ]
+    if pd.notna(direction_match_rate):
+        lines.append(f"- 전체 분류 중 증감 방향이 같았던 비율은 **{direction_match_rate:,.1f}%**입니다.")
     if not top_pos.empty:
-        lines.append(f"- 상위지역 대비 **증가 기여가 컸던 항목**은 {_fmt_items(top_pos)} 입니다.")
+        lines.append(f"- **{base_region} 동일 분류 증가분 대비 {region_name} 기여가 컸던 항목**은 {_fmt_items(top_pos)} 입니다.")
     if not top_neg.empty:
-        lines.append(f"- 상위지역 대비 **감소 기여가 컸던 항목**은 {_fmt_items(top_neg)} 입니다.")
+        lines.append(f"- **{base_region} 동일 분류 감소분 대비 {region_name} 기여가 컸던 항목**은 {_fmt_items(top_neg)} 입니다.")
+    if not opposite_direction.empty:
+        top_opposite = opposite_direction.reindex(opposite_direction[contrib_col].abs().sort_values(ascending=False).index).head(3)
+        lines.append(f"- **상위지역과 방향이 엇갈린 항목**은 {_fmt_items(top_opposite)} 입니다.")
     if dominant is not None and pd.notna(dominant[contrib_col]):
         lines.append(
             f"- 가장 두드러진 항목은 **{escape_markdown_text(str(dominant['분류']))}**이며, "
-            f"{region_name} 증감 {fmt_num_bold(dominant[region_delta_col], unit)} / "
-            f"{base_region} 증감 {fmt_num_bold(dominant[base_delta_col], unit)}로 "
+            f"{base_region} 증감이 {fmt_num_bold(dominant[base_delta_col], unit)}, "
+            f"{region_name} 증감이 {fmt_num_bold(dominant[region_delta_col], unit)}로 "
             f"기여율은 **{float(dominant[contrib_col]):,.1f}%**입니다."
         )
-    lines.append("- 해석 기준은 `상위지역 동일 항목 증감 대비 선택지역 증감 비중`입니다.")
+    lines.append(
+        f"- 해석 기준은 **같은 분류끼리 비교한 {base_region} 증감 대비 {region_name} 증감 비중**이며, "
+        "지역 내부 기여율과는 다른 개념입니다."
+    )
     return "\n".join(lines)
 
 
