@@ -130,6 +130,26 @@ st.markdown(
   padding: 14px 16px;
   background: #ffffff;
 }
+.summary-card {
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+}
+.summary-card .metric-title {
+  min-height: 2.5em;
+  line-height: 1.25;
+}
+.summary-card .metric-value {
+  min-height: 1.8em;
+}
+.summary-card .metric-sub {
+  min-height: 3.1em;
+  line-height: 1.4;
+}
+.summary-avg-card .metric-sub {
+  font-size: 0.92rem;
+  font-weight: 500;
+}
 .metric-title {
   font-size: 1.0rem;
   color: #4b5563;
@@ -444,13 +464,21 @@ def _render_youtube_display_content() -> None:
         st.rerun()
 
 
-def _card(title: str, value: str, sub: str, is_new: bool = False, value_class: str = "") -> None:
+def _card(
+    title: str,
+    value: str,
+    sub: str,
+    is_new: bool = False,
+    value_class: str = "",
+    card_class: str = "",
+) -> None:
     value_cls = f"metric-value {value_class}".strip()
+    card_cls = f"metric-card {card_class}".strip()
     value_html = f'<div class="{value_cls}">{value}</div>' if str(value).strip() else ""
     sub_html = f'<div class="metric-sub">{sub}</div>' if str(sub).strip() else ""
     st.markdown(
         f"""
-<div class="metric-card">
+<div class="{card_cls}">
   <div class="metric-title">{title}{_new(is_new)}</div>
   {value_html}
   {sub_html}
@@ -574,7 +602,7 @@ def _render_current_level_summary(df: pd.DataFrame, region: str, labels: Dict[st
                 )
             else:
                 sub = ""
-            _card(title, value_text, sub)
+            _card(title, value_text, sub, card_class="summary-card")
 
     for idx, (title, row) in enumerate(available_metrics, start=len(available_metrics)):
         with summary_cols[idx]:
@@ -592,13 +620,8 @@ def _render_current_level_summary(df: pd.DataFrame, region: str, labels: Dict[st
                 line_3y = "-" if pd.isna(diff_3y) else f"3년 {_fmt_num(diff_3y, unit)}"
                 line_5y = "-" if pd.isna(diff_5y) else f"5년 {_fmt_num(diff_5y, unit)}"
 
-            sub_text = (
-                "<span style='font-size:0.92rem;font-weight:500;line-height:1.45;'>"
-                f"{line_3y}</span><br>"
-                "<span style='font-size:0.92rem;font-weight:500;line-height:1.45;'>"
-                f"{line_5y}</span>"
-            )
-            _card(title, "", sub_text)
+            sub_text = f"{line_3y}<br>{line_5y}"
+            _card(title, "", sub_text, card_class="summary-card summary-avg-card")
     st.markdown("---")
 
 
