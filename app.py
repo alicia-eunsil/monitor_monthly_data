@@ -563,14 +563,17 @@ def _render_current_level_summary(df: pd.DataFrame, region: str, labels: Dict[st
             delta_value = row.get("delta_value")
             value_text = _fmt_num(latest_value, unit)
             if "%" in unit or "율" in title:
-                delta_text = "-" if pd.isna(delta_value) else f"전년동월 대비 {float(delta_value):+,.1f}%p"
+                delta_text = "-" if pd.isna(delta_value) else f"{float(delta_value):+,.1f}%p"
             else:
                 delta_text = _fmt_num(delta_value, unit)
-                if delta_text != "-":
-                    delta_text = f"전년동월 대비 {delta_text}"
-            sub = f"{latest_period} 기준"
             if delta_text != "-":
-                sub = f"{sub} · {delta_text}"
+                sub = (
+                    f"{delta_text}<br>"
+                    "<span style='font-size:0.84rem;font-weight:500;line-height:1.35;'>"
+                    "(전년동월대비)</span>"
+                )
+            else:
+                sub = ""
             _card(title, value_text, sub)
 
     for idx, (title, row) in enumerate(available_metrics, start=len(available_metrics)):
@@ -583,11 +586,11 @@ def _render_current_level_summary(df: pd.DataFrame, region: str, labels: Dict[st
             diff_5y = np.nan if pd.isna(latest_5y) or pd.isna(avg_5y) else latest_5y - avg_5y
 
             if "%" in unit or "율" in title:
-                line_3y = "-" if pd.isna(diff_3y) else f"3년 평균 대비 {diff_3y:+,.1f}%p"
-                line_5y = "-" if pd.isna(diff_5y) else f"5년 평균 대비 {diff_5y:+,.1f}%p"
+                line_3y = "-" if pd.isna(diff_3y) else f"3년 {diff_3y:+,.1f}%p"
+                line_5y = "-" if pd.isna(diff_5y) else f"5년 {diff_5y:+,.1f}%p"
             else:
-                line_3y = "-" if pd.isna(diff_3y) else f"3년 평균 대비 {_fmt_num(diff_3y, unit)}"
-                line_5y = "-" if pd.isna(diff_5y) else f"5년 평균 대비 {_fmt_num(diff_5y, unit)}"
+                line_3y = "-" if pd.isna(diff_3y) else f"3년 {_fmt_num(diff_3y, unit)}"
+                line_5y = "-" if pd.isna(diff_5y) else f"5년 {_fmt_num(diff_5y, unit)}"
 
             sub_text = (
                 "<span style='font-size:0.92rem;font-weight:500;line-height:1.45;'>"
@@ -595,7 +598,7 @@ def _render_current_level_summary(df: pd.DataFrame, region: str, labels: Dict[st
                 "<span style='font-size:0.92rem;font-weight:500;line-height:1.45;'>"
                 f"{line_5y}</span>"
             )
-            _card(f"{title}<br><span style='font-size:0.82rem;font-weight:600;'>평균대비</span>", "", sub_text)
+            _card(title, "", sub_text)
     st.markdown("---")
 
 
@@ -1236,7 +1239,7 @@ elif active_page == "⑥ 직종별 취업자수":
         scope_tag=region_scope,
     )
 elif active_page == "⑦ 요약":
-    st.subheader("요약(간략)")
+    summary_title_placeholder = st.empty()
     if region_scope == "gyeonggi31":
         summary_scope = "31개 시군"
         sigungu_options = _get_report_region_options(events, summary_scope)
@@ -1291,6 +1294,9 @@ elif active_page == "⑦ 요약":
                     disabled=True,
                 )
 
+        summary_title_placeholder.subheader(
+            f"요약(기준:{selected_report_month})" if selected_report_month else "요약"
+        )
         _render_current_level_summary(data, selected_sigungu or "", labels)
         _render_new_monthly_report(
             events,
@@ -1386,6 +1392,9 @@ elif active_page == "⑦ 요약":
                     disabled=True,
                 )
 
+        summary_title_placeholder.subheader(
+            f"요약(기준:{selected_report_month})" if selected_report_month else "요약"
+        )
         _render_current_level_summary(data, selected_province, labels)
         _render_new_monthly_report(
             events,
