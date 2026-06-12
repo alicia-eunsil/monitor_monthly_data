@@ -1317,9 +1317,7 @@ elif active_page == "⑦ 요약":
                     disabled=True,
                 )
 
-        summary_title_placeholder.subheader(
-            f"요약(기준:{selected_report_month})" if selected_report_month else "요약"
-        )
+        summary_title_placeholder.subheader("요약")
         _render_current_level_summary(data, selected_sigungu or "", labels)
         _render_new_monthly_report(
             events,
@@ -1415,9 +1413,7 @@ elif active_page == "⑦ 요약":
                     disabled=True,
                 )
 
-        summary_title_placeholder.subheader(
-            f"요약(기준:{selected_report_month})" if selected_report_month else "요약"
-        )
+        summary_title_placeholder.subheader("요약")
         _render_current_level_summary(data, selected_province, labels)
         _render_new_monthly_report(
             events,
