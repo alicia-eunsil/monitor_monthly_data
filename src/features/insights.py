@@ -1125,14 +1125,6 @@ def render_ai_insights(
                     build_ai_comparison_commentary(comparison_df, comparison_meta, ds_label, labels),
                     unsafe_allow_html=True,
                 )
-                st.markdown("###### AI 해설 - 지역 내부")
-                if not internal_meta.get("ok"):
-                    st.info(str(internal_meta.get("message", "지역 내부 해설 데이터를 계산할 수 없습니다.")))
-                else:
-                    st.markdown(
-                        build_ai_contribution_commentary(internal_df, internal_meta, labels["point"], labels["yoy"]),
-                        unsafe_allow_html=True,
-                    )
 
                 base_delta_col = f"{base_region} 증감"
                 base_share_col = f"{base_region} 기여율(%)"
@@ -1168,6 +1160,11 @@ def render_ai_insights(
                 st.altair_chart(upper_bar, use_container_width=True)
 
                 if internal_meta.get("ok"):
+                    st.markdown("###### AI 해설 - 지역 내부")
+                    st.markdown(
+                        build_ai_contribution_commentary(internal_df, internal_meta, labels["point"], labels["yoy"]),
+                        unsafe_allow_html=True,
+                    )
                     st.markdown(f"###### 지역 내부 기여 ({analysis_region} 기준)")
                     internal_fmt_df = internal_df.copy()
                     for col in ["최신값", "비교값", "증감"]:
@@ -1196,6 +1193,9 @@ def render_ai_insights(
                         .properties(height=320)
                     )
                     st.altair_chart(internal_bar, use_container_width=True)
+                else:
+                    st.markdown("###### AI 해설 - 지역 내부")
+                    st.info(str(internal_meta.get("message", "지역 내부 해설 데이터를 계산할 수 없습니다.")))
 
                 if ds_key == "industry":
                     st.markdown("##### 산업별 추이 진단")
