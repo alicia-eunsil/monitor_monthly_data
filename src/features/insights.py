@@ -777,7 +777,6 @@ def compute_comparison_breakdown(
     drop_labels = {"시도별", "산업별", "산업명", "직업별", "직종별"}
     base["category_name"] = base["category_name"].astype(str).str.strip()
     base = base[(base["category_name"] != "") & (~base["category_name"].isin(drop_labels))].copy()
-    base = _filter_decomposition_categories(base, dataset_key)
     if base.empty:
         meta["message"] = f"{axis_label} 분류 데이터가 없습니다."
         return pd.DataFrame(), meta
