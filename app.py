@@ -16,6 +16,7 @@ import os
 
 import src.config as app_config
 from src.core.category_rules import (
+    norm_indicator_name as _norm_indicator_name,
     order_activity_indicators as _order_activity_indicators,
     order_age_categories as _order_age_categories,
     order_occupation_categories as _order_occupation_categories,
@@ -34,7 +35,7 @@ from src.core.formatters import (
     remark_new as _remark_new,
     time_labels,
 )
-from src.features.insights import render_ai_insights as _render_ai_insights
+from src.features.insights import build_activity_snapshot as _build_activity_snapshot, render_ai_insights as _render_ai_insights
 from src.features.new_history import (
     collect_new_events as _collect_new_events,
     get_report_period_options as _get_report_period_options,
@@ -487,6 +488,53 @@ def _style_extreme_table(df: pd.DataFrame) -> pd.io.formats.style.Styler:
             subset=new_cols,
         )
     return styler
+
+
+def _render_current_level_summary(df: pd.DataFrame, region: str, labels: Dict[str, str]) -> None:
+    lag = 2 if ("prd_se" in df.columns and not df["prd_se"].dropna().empty and str(df["prd_se"].dropna().iloc[0]).upper() == "H") else 12
+    snapshot_df, meta = _build_activity_snapshot(df, region=region, lag=lag)
+    if not meta.get("ok") or snapshot_df.empty:
+        return
+
+    def _find_metric(tokens: List[str], exclude_tokens: List[str] | None = None) -> pd.Series | None:
+        exclude_tokens = exclude_tokens or []
+        for _, row in snapshot_df.iterrows():
+            norm = _norm_indicator_name(row.get("지표", ""))
+            if any(token in norm for token in tokens) and not any(ex in norm for ex in exclude_tokens):
+                return row
+        return None
+
+    metric_rows = [
+        ("취업자수", _find_metric(["취업자수", "취업자"], exclude_tokens=["고용률", "실업률"])),
+        ("고용률", _find_metric(["고용률"], exclude_tokens=["15~64"])),
+        ("실업률", _find_metric(["실업률"])),
+        ("경제활동참가율", _find_metric(["경제활동참가율"])),
+    ]
+
+    available_metrics = [(title, row) for title, row in metric_rows if row is not None]
+    if not available_metrics:
+        return
+
+    latest_period = _fmt_period(meta.get("latest_period"), str(meta.get("prd_se", "M")))
+    st.markdown("#### 현재 수준 요약")
+    cols = st.columns(len(available_metrics))
+    for col, (title, row) in zip(cols, available_metrics):
+        with col:
+            unit = str(row.get("unit", ""))
+            latest_value = row.get("latest_value")
+            delta_value = row.get("delta_value")
+            value_text = _fmt_num(latest_value, unit)
+            if "%" in unit or "율" in title:
+                delta_text = "-" if pd.isna(delta_value) else f"{float(delta_value):+,.1f}%p"
+            else:
+                delta_text = _fmt_num(delta_value, unit)
+                if delta_text != "-":
+                    delta_text = f"전년동월 대비 {delta_text}"
+            sub = f"{latest_period} 기준"
+            if delta_text != "-":
+                sub = f"{sub} · {delta_text}"
+            _card(title, value_text, sub)
+    st.markdown("---")
 
 
 def _render_extreme_table(df: pd.DataFrame) -> None:
@@ -1181,6 +1229,7 @@ elif active_page == "⑦ 요약":
                     disabled=True,
                 )
 
+        _render_current_level_summary(data, selected_sigungu or "", labels)
         _render_new_monthly_report(
             events,
             report_scope=summary_scope,
@@ -1275,6 +1324,7 @@ elif active_page == "⑦ 요약":
                     disabled=True,
                 )
 
+        _render_current_level_summary(data, selected_province, labels)
         _render_new_monthly_report(
             events,
             report_scope=summary_scope,
