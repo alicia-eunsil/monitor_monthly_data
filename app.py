@@ -475,23 +475,12 @@ def _extract_naver_media_url(raw_url: str) -> str:
     return ""
 
 
-def _render_naver_player(target_url: str, player_nonce: int = 0) -> None:
-    if not target_url:
-        return
-    iframe_src = f"{target_url}{'&' if '?' in target_url else '?'}autoplay=1&nonce={int(player_nonce)}"
-    st.components.v1.iframe(iframe_src, width=1100, height=560, scrolling=False)
-    st.caption("내장 재생이 막히는 경우 아래 링크로 새 창에서 열어 주세요.")
-    st.markdown(f"[네이버 영상 새 창 열기]({target_url})")
-
-
 def _render_naver_display_content() -> None:
-    st.caption("네이버 영상 URL 또는 `naver.me` 단축링크를 입력하면 재생을 시도합니다.")
+    st.caption("네이버 영상 URL 또는 `naver.me` 단축링크를 입력하면 새 창에서 열 수 있습니다.")
     if "_naver_active_url" not in st.session_state:
         st.session_state["_naver_active_url"] = ""
     if "_naver_last_input" not in st.session_state:
         st.session_state["_naver_last_input"] = ""
-    if "_naver_player_nonce" not in st.session_state:
-        st.session_state["_naver_player_nonce"] = 0
 
     input_url = st.text_input(
         "Naver URL",
@@ -505,17 +494,16 @@ def _render_naver_display_content() -> None:
 
     if parsed_url and (play_clicked or input_changed):
         st.session_state["_naver_active_url"] = parsed_url
-        st.session_state["_naver_player_nonce"] = int(st.session_state.get("_naver_player_nonce", 0)) + 1
         st.rerun()
     elif play_clicked and not parsed_url:
         st.session_state["_naver_active_url"] = ""
         st.warning("유효한 네이버 영상 URL 또는 `naver.me` 단축링크를 입력해 주세요.")
 
     active_url = str(st.session_state.get("_naver_active_url", "")).strip()
-    player_nonce = int(st.session_state.get("_naver_player_nonce", 0))
     if active_url:
-        _render_naver_player(target_url=active_url, player_nonce=player_nonce)
+        st.info("네이버 영상은 앱 내부 재생이 제한될 수 있어 새 창 열기 방식으로 제공합니다.")
         st.caption(f"현재 링크: {active_url}")
+        st.link_button("네이버 영상 열기", active_url, use_container_width=True)
 
     if st.button("닫기", key="naver_popup_close_btn"):
         st.session_state["_show_naver_popup"] = False
