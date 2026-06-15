@@ -53,6 +53,25 @@ def _to_timestamp(value: str, prd_se: str = "M") -> pd.Timestamp:
     if not text or text in {"None", "nan", "NaN", "null"}:
         return pd.NaT
 
+    if str(prd_se).upper() == "Q":
+        if len(text) == 5 and text.isdigit() and text[-1] in {"1", "2", "3", "4"}:
+            year = int(text[:4])
+            quarter = int(text[-1])
+            month = quarter * 3
+            return pd.to_datetime(f"{year:04d}{month:02d}01", format="%Y%m%d", errors="coerce")
+        m_q = re.search(r"^(\d{4})\D*[Qq]?([1-4])$", text)
+        if m_q:
+            year = int(m_q.group(1))
+            quarter = int(m_q.group(2))
+            month = quarter * 3
+            return pd.to_datetime(f"{year:04d}{month:02d}01", format="%Y%m%d", errors="coerce")
+        digits_q = re.sub(r"\D", "", text)
+        if len(digits_q) == 6 and digits_q[4:6] in {"01", "02", "03", "04"}:
+            year = int(digits_q[:4])
+            quarter = int(digits_q[4:6])
+            month = quarter * 3
+            return pd.to_datetime(f"{year:04d}{month:02d}01", format="%Y%m%d", errors="coerce")
+
     # Half-year formats from KOSIS: YYYY1/2, YYYY.1/2, YYYY01/02
     if str(prd_se).upper() == "H":
         if len(text) == 5 and text.isdigit() and text[-1] in {"1", "2"}:
@@ -380,7 +399,12 @@ def add_yoy(df: pd.DataFrame) -> pd.DataFrame:
             for col in missing_group_cols:
                 g[col] = key_map.get(col, "")
 
-        lag = 2 if str(g["prd_se"].iloc[0]).upper() == "H" else 12
+        prd_se = str(g["prd_se"].iloc[0]).upper()
+        lag = 12
+        if prd_se == "H":
+            lag = 2
+        elif prd_se == "Q":
+            lag = 4
         g = g.copy()
         values = pd.to_numeric(g["value"], errors="coerce")
         prev = values.shift(lag)

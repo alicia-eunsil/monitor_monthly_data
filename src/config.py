@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Dict
+from typing import Any, Dict
 
 KOSIS_BASE_URL = "https://kosis.kr/openapi/Param/statisticsParameterData.do"
 
@@ -27,6 +27,9 @@ class DatasetConfig:
     has_category: bool = False
     category_label: str = ""
     output_fields: str = ""
+    include_in_events: bool = True
+    include_in_summary: bool = True
+    extra_params: Dict[str, Any] = field(default_factory=dict)
 
     def to_params(self, api_key: str, end_prd_de: str) -> Dict[str, str]:
         params: Dict[str, str] = {
@@ -51,6 +54,9 @@ class DatasetConfig:
         }
         if self.output_fields:
             params["outputFields"] = self.output_fields
+        for key, value in self.extra_params.items():
+            if value is not None and str(value) != "":
+                params[str(key)] = str(value)
         return params
 
 
@@ -61,9 +67,16 @@ def default_end_period() -> str:
 
 
 def default_end_period_by_prd_se(prd_se: str) -> str:
-    if str(prd_se).upper() == "H":
+    prd = str(prd_se).upper()
+    if prd == "H":
         # Regional employment survey fixed latest half-year point.
         return "202502"
+    if prd == "Q":
+        today = date.today()
+        current_quarter = ((today.month - 1) // 3) + 1
+        if current_quarter == 1:
+            return f"{today.year - 1}Q4"
+        return f"{today.year}Q{current_quarter - 1}"
     return default_end_period()
 
 
@@ -125,6 +138,23 @@ DATASETS_MONTHLY = [
         start_prd_de="201301",
         has_category=True,
         category_label="직종(대분류)",
+    ),
+    DatasetConfig(
+        key="age_unemployment_q",
+        title="분기별 연령별 실업자 현황",
+        org_id="101",
+        tbl_id="DT_1DA7095S",
+        itm_id="T40+",
+        obj_l1="00+",
+        obj_l2="ALL",
+        obj_l3="ALL",
+        prd_se="Q",
+        start_prd_de="2000Q1",
+        has_category=True,
+        category_label="연령(구분)",
+        include_in_events=False,
+        include_in_summary=False,
+        extra_params={"newEstPrdCnt": "3"},
     ),
 ]
 

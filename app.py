@@ -182,7 +182,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-DATA_MODEL_VERSION = "2026-06-05-activity-cache-guard-v1"
+DATA_MODEL_VERSION = "2026-06-16-quarterly-unemployment-v1"
 REQUIRED_SCOPE_COLUMNS = {"dataset_key", "region_name", "indicator_name", "category_name", "period", "value", "prd_se"}
 SHOW_AI_FEATURES = str(os.getenv("SHOW_AI_FEATURES", "false")).strip().lower() in {"1", "true", "yes", "y"}
 
@@ -712,6 +712,8 @@ def _render_dataset(
     scope_tag: str,
 ) -> None:
     cfg = next(x for x in datasets if x.key == dataset_key)
+    age_like_dataset_keys = {"age", "age_unemployment_q"}
+    category_radio_dataset_keys = {"industry", "occupation", "age", "status", "age_unemployment_q"}
     subset = _get_cached_dataset_subset(df, scope_tag=scope_tag, dataset_key=dataset_key)
     st.subheader(cfg.title)
     if subset.empty:
@@ -728,7 +730,7 @@ def _render_dataset(
     if dataset_key == "activity":
         # Keep activity indicators on one line by giving wider horizontal space.
         col1, col2 = st.columns([0.6, 5.4])
-    elif dataset_key in {"industry", "occupation", "age", "status"}:
+    elif dataset_key in {"industry", "occupation", "age", "status", "age_unemployment_q"}:
         # Narrow region control and widen classification area.
         col1, col2 = st.columns([0.6, 3.4])
     else:
@@ -772,13 +774,15 @@ def _render_dataset(
                 score += 220
             elif "취업자" in compact:
                 score += 120
+            elif "실업자" in compact:
+                score += 200
             return (score, _category_count(ind_name), str(ind_name))
 
         return sorted(indicators, key=_priority, reverse=True)[0]
 
     if indicators and st.session_state.get(indicator_state_key) not in indicators:
         default_indicator = indicators[0]
-        if dataset_key in {"industry", "occupation", "age", "status"}:
+        if dataset_key in {"industry", "occupation", "age", "status", "age_unemployment_q"}:
             default_indicator = _pick_auto_indicator(st.session_state[region_state_key])
         st.session_state[indicator_state_key] = default_indicator
 
@@ -801,7 +805,7 @@ def _render_dataset(
                 key=indicator_state_key,
                 horizontal=True,
             )
-    elif dataset_key in {"industry", "occupation", "age", "status"} and indicators:
+    elif dataset_key in {"industry", "occupation", "age", "status", "age_unemployment_q"} and indicators:
         indicator_input = _pick_auto_indicator(region_input)
         st.session_state[indicator_state_key] = indicator_input
 
@@ -825,7 +829,7 @@ def _render_dataset(
         if is_gyeonggi31_mode:
             if dataset_key == "industry":
                 categories = _order_sigungu_industry_categories(categories)
-            if dataset_key == "age":
+            if dataset_key in age_like_dataset_keys:
                 categories = _order_sigungu_age_categories(categories)
             if dataset_key == "status":
                 categories = _order_sigungu_status_categories(categories)
@@ -834,7 +838,7 @@ def _render_dataset(
         else:
             if dataset_key == "industry":
                 categories = _order_province_industry_categories(categories)
-            if dataset_key == "age":
+            if dataset_key in age_like_dataset_keys:
                 categories = _order_age_categories(categories)
             if dataset_key == "status":
                 categories = _order_status_categories(categories)
@@ -845,7 +849,7 @@ def _render_dataset(
                 category_input = categories[0]
                 st.session_state[category_state_key] = category_input
             with category_container:
-                if dataset_key in {"industry", "occupation", "age", "status"}:
+                if dataset_key in category_radio_dataset_keys:
                     category_input = st.radio(
                         cfg.category_label,
                         categories,
@@ -867,7 +871,7 @@ def _render_dataset(
     region = str(st.session_state.get(region_state_key, region_input))
     indicator = str(st.session_state.get(indicator_state_key, indicator_input))
     category = str(st.session_state.get(category_state_key, category_input if cfg.has_category else ""))
-    if dataset_key in {"industry", "occupation", "age", "status"} and indicator:
+    if dataset_key in {"industry", "occupation", "age", "status", "age_unemployment_q"} and indicator:
         st.caption(f"지표: {indicator}")
 
     series_df, stats = _get_cached_series_and_stats(
@@ -883,7 +887,7 @@ def _render_dataset(
         return
 
     prd_se = str(series_df["prd_se"].iloc[-1]).upper() if "prd_se" in series_df.columns else "M"
-    labels = _time_labels(datasets)
+    labels = _time_labels([cfg])
     latest_period = _fmt_period(stats.get("latest_period"), prd_se)
     unit = str(series_df["unit"].dropna().iloc[-1]) if not series_df["unit"].dropna().empty else ""
 
@@ -1156,6 +1160,8 @@ scope_label = "전국 17개 시도" if is_sido_mode else "경기 31개 시군"
 region_scope = "province" if is_sido_mode else "gyeonggi31"
 is_gyeonggi31_mode = region_scope == "gyeonggi31"
 active_datasets = datasets_for_scope(region_scope)
+event_datasets = [cfg for cfg in active_datasets if getattr(cfg, "include_in_events", True)]
+summary_datasets = [cfg for cfg in active_datasets if getattr(cfg, "include_in_summary", True)]
 st.caption(f"조회범위: {scope_label}")
 
 data = scope_data.get(region_scope, pd.DataFrame())
@@ -1197,7 +1203,7 @@ if visible_data.empty:
     st.warning("선택한 범위에서 조회된 데이터가 없습니다.")
     st.stop()
 
-labels = _time_labels(active_datasets)
+labels = _time_labels(summary_datasets or active_datasets)
 
 page_options = [
     "① NEW RECORDS",
@@ -1205,19 +1211,23 @@ page_options = [
     "③ 연령별 취업자",
     "④ 종사상지위별 취업자",
     "⑤ 산업별 취업자수",
-    "⑥ 직종별 취업자수",
-    "⑦ 요약",
-    "⑧ 시군 유형화·정책매칭",
+    "⑥ 분기별 연령별 실업자 현황",
+    "⑦ 직종별 취업자수",
+    "⑧ 요약",
+    "⑨ 시군 유형화·정책매칭",
 ]
 active_page = st.radio("메뉴", page_options, horizontal=True, key="active_page", label_visibility="collapsed")
 
-needs_events = active_page in {"① NEW RECORDS", "⑦ 요약"}
+needs_events = active_page in {"① NEW RECORDS", "⑧ 요약"}
 events = pd.DataFrame()
 if needs_events:
     if region_scope == "gyeonggi31":
         event_source = data[data["region_name"].isin(GYEONGGI_SIGUNGU)].copy()
     else:
         event_source = visible_data
+    event_dataset_keys = {str(getattr(cfg, "key", "")).strip() for cfg in event_datasets}
+    if event_dataset_keys:
+        event_source = event_source[event_source["dataset_key"].isin(event_dataset_keys)].copy()
     events = _get_cached_events(event_source, scope_tag=region_scope)
 
 if active_page == "① NEW RECORDS":
@@ -1262,7 +1272,20 @@ elif active_page == "⑤ 산업별 취업자수":
         is_gyeonggi31_mode,
         scope_tag=region_scope,
     )
-elif active_page == "⑥ 직종별 취업자수":
+elif active_page == "⑥ 분기별 연령별 실업자 현황":
+    if region_scope != "province":
+        st.info("이 메뉴는 시도 기준 분기 데이터 전용입니다.")
+    else:
+        _render_dataset(
+            visible_data,
+            "age_unemployment_q",
+            region_pool,
+            default_region,
+            active_datasets,
+            is_gyeonggi31_mode,
+            scope_tag=region_scope,
+        )
+elif active_page == "⑦ 직종별 취업자수":
     _render_dataset(
         visible_data,
         "occupation",
@@ -1272,7 +1295,7 @@ elif active_page == "⑥ 직종별 취업자수":
         is_gyeonggi31_mode,
         scope_tag=region_scope,
     )
-elif active_page == "⑦ 요약":
+elif active_page == "⑧ 요약":
     summary_title_placeholder = st.empty()
     if region_scope == "gyeonggi31":
         summary_scope = "31개 시군"
@@ -1333,7 +1356,7 @@ elif active_page == "⑦ 요약":
         _render_new_monthly_report(
             events,
             report_scope=summary_scope,
-            datasets=active_datasets,
+            datasets=summary_datasets,
             source_df=data,
             compact=True,
             include_consecutive_summary=False,
@@ -1343,7 +1366,7 @@ elif active_page == "⑦ 요약":
         _render_consecutive_change_summary(
             events=events,
             report_scope=summary_scope,
-            datasets=active_datasets,
+            datasets=summary_datasets,
             source_df=data,
             selected_region=selected_sigungu or None,
             selected_month=selected_report_month,
@@ -1354,7 +1377,7 @@ elif active_page == "⑦ 요약":
             sigungu_options if sigungu_options else region_pool,
             labels,
             card_fn=_card,
-            datasets=active_datasets,
+            datasets=summary_datasets,
             events=events,
             report_scope=summary_scope,
             source_df=data,
@@ -1429,7 +1452,7 @@ elif active_page == "⑦ 요약":
         _render_new_monthly_report(
             events,
             report_scope=summary_scope,
-            datasets=active_datasets,
+            datasets=summary_datasets,
             source_df=data,
             compact=True,
             include_consecutive_summary=False,
@@ -1439,7 +1462,7 @@ elif active_page == "⑦ 요약":
         _render_consecutive_change_summary(
             events=events,
             report_scope=summary_scope,
-            datasets=active_datasets,
+            datasets=summary_datasets,
             source_df=data,
             selected_region=selected_province,
             selected_month=selected_report_month,
@@ -1450,7 +1473,7 @@ elif active_page == "⑦ 요약":
             province_options if province_options else region_pool,
             labels,
             card_fn=_card,
-            datasets=active_datasets,
+            datasets=summary_datasets,
             events=events,
             report_scope=summary_scope,
             source_df=data,
@@ -1458,7 +1481,7 @@ elif active_page == "⑦ 요약":
             selected_month=selected_report_month,
             show_ai=SHOW_AI_FEATURES,
         )
-elif active_page == "⑧ 시군 유형화·정책매칭":
+elif active_page == "⑨ 시군 유형화·정책매칭":
     _render_sigungu_typology_tab(visible_data, is_gyeonggi31_mode=is_gyeonggi31_mode, datasets=active_datasets)
 
 st.markdown(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -38,6 +39,7 @@ class KosisClient:
     _MAX_DEBUG_LOGS = 500
     _MAX_MONTHS_PER_REQUEST = 60
     _MAX_HALVES_PER_REQUEST = 8
+    _MAX_QUARTERS_PER_REQUEST = 20
 
     def __init__(self, api_key: str, timeout: int = 90):
         self.api_key = api_key
@@ -132,7 +134,7 @@ class KosisClient:
         self, config: DatasetConfig, params: Dict[str, str]
     ) -> Optional[List[Dict[str, Any]]]:
         prd_se = str(params.get("prdSe", "")).upper()
-        if prd_se not in {"M", "H"}:
+        if prd_se not in {"M", "H", "Q"}:
             return None
         start = params.get("startPrdDe", "")
         end = params.get("endPrdDe", "")
@@ -141,6 +143,8 @@ class KosisClient:
 
         if prd_se == "H":
             left_end, right_start = self._split_halfyear_range(start, end)
+        elif prd_se == "Q":
+            left_end, right_start = self._split_quarter_range(start, end)
         else:
             left_end, right_start = self._split_month_range(start, end)
         self._log(f"period split {start}-{end} -> {start}-{left_end} | {right_start}-{end}")
@@ -185,6 +189,8 @@ class KosisClient:
             self._log(f"chunk request failed; splitting smaller {chunk_start}-{chunk_end}: {exc}")
             if prd_se == "H":
                 left_end, right_start = self._split_halfyear_range(chunk_start, chunk_end)
+            elif prd_se == "Q":
+                left_end, right_start = self._split_quarter_range(chunk_start, chunk_end)
             else:
                 left_end, right_start = self._split_month_range(chunk_start, chunk_end)
             left_rows = self._fetch_chunk_range(config, base_params, chunk_start, left_end)
@@ -325,6 +331,9 @@ class KosisClient:
             if prd_se == "H":
                 span = self._half_index(end) - self._half_index(start) + 1
                 return span > self._MAX_HALVES_PER_REQUEST
+            if prd_se == "Q":
+                span = self._quarter_index(end) - self._quarter_index(start) + 1
+                return span > self._MAX_QUARTERS_PER_REQUEST
         except ValueError:
             return False
         return False
@@ -335,6 +344,11 @@ class KosisClient:
             start_idx = self._half_index(start)
             end_idx = self._half_index(end)
             to_text = self._index_to_yyyyhh
+        elif str(prd_se).upper() == "Q":
+            max_units = self._MAX_QUARTERS_PER_REQUEST
+            start_idx = self._quarter_index(start)
+            end_idx = self._quarter_index(end)
+            to_text = self._index_to_yyyyqq
         else:
             max_units = self._MAX_MONTHS_PER_REQUEST
             start_idx = self._month_index(start)
@@ -353,6 +367,8 @@ class KosisClient:
         try:
             if str(prd_se).upper() == "H":
                 return self._half_index(start) < self._half_index(end)
+            if str(prd_se).upper() == "Q":
+                return self._quarter_index(start) < self._quarter_index(end)
             return self._month_index(start) < self._month_index(end)
         except ValueError:
             return False
@@ -377,6 +393,17 @@ class KosisClient:
         mid_idx = (start_idx + end_idx) // 2
         left_end = KosisClient._index_to_yyyyhh(mid_idx)
         right_start = KosisClient._index_to_yyyyhh(mid_idx + 1)
+        return left_end, right_start
+
+    @staticmethod
+    def _split_quarter_range(start_yyyyqq: str, end_yyyyqq: str) -> tuple[str, str]:
+        start_idx = KosisClient._quarter_index(start_yyyyqq)
+        end_idx = KosisClient._quarter_index(end_yyyyqq)
+        if start_idx >= end_idx:
+            return start_yyyyqq, end_yyyyqq
+        mid_idx = (start_idx + end_idx) // 2
+        left_end = KosisClient._index_to_yyyyqq(mid_idx)
+        right_start = KosisClient._index_to_yyyyqq(mid_idx + 1)
         return left_end, right_start
 
     @staticmethod
@@ -410,6 +437,31 @@ class KosisClient:
         year = index // 2
         half = "01" if (index % 2) == 0 else "02"
         return f"{year:04d}{half}"
+
+    @staticmethod
+    def _quarter_index(yyyyqq: str) -> int:
+        text = str(yyyyqq).strip()
+        match = re.match(r"^(\d{4})\D*[Qq]?([1-4])$", text)
+        if match:
+            year = int(match.group(1))
+            quarter = int(match.group(2))
+            return year * 4 + (quarter - 1)
+        digits = re.sub(r"\D", "", text)
+        if len(digits) == 6 and digits[4:6] in {"01", "02", "03", "04"}:
+            year = int(digits[:4])
+            quarter = int(digits[4:6])
+            return year * 4 + (quarter - 1)
+        if len(digits) == 5 and digits[-1] in {"1", "2", "3", "4"}:
+            year = int(digits[:4])
+            quarter = int(digits[-1])
+            return year * 4 + (quarter - 1)
+        raise ValueError(f"Unsupported quarter format: {yyyyqq}")
+
+    @staticmethod
+    def _index_to_yyyyqq(index: int) -> str:
+        year = index // 4
+        quarter = (index % 4) + 1
+        return f"{year:04d}Q{quarter}"
 
     def _log(self, message: str) -> None:
         if len(self._debug_logs) < self._MAX_DEBUG_LOGS:

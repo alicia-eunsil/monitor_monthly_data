@@ -7,18 +7,26 @@ def fmt_period(value: object, prd_se: str = "M") -> str:
     ts = pd.Timestamp(value)
     if pd.isna(ts):
         return "-"
-    if str(prd_se).upper() == "H":
+    prd = str(prd_se).upper()
+    if prd == "H":
         month = int(ts.month)
         if month <= 6:
             return f"{ts.year}-상반기"
         return f"{ts.year}-하반기"
+    if prd == "Q":
+        quarter = ((int(ts.month) - 1) // 3) + 1
+        return f"{ts.year}-Q{quarter}"
     return ts.strftime("%Y-%m")
 
 
 def time_labels(prd_se_values: List[str]) -> Dict[str, str]:
-    is_halfyear = bool(prd_se_values) and all(str(v).upper() == "H" for v in prd_se_values)
+    normalized = [str(v).upper() for v in prd_se_values]
+    is_halfyear = bool(normalized) and all(v == "H" for v in normalized)
     if is_halfyear:
         return {"point": "반기", "trend": "반기별", "yoy": "전년동기"}
+    is_quarter = bool(normalized) and all(v == "Q" for v in normalized)
+    if is_quarter:
+        return {"point": "분기", "trend": "분기별", "yoy": "전년동분기"}
     return {"point": "월", "trend": "월별", "yoy": "전년동월"}
 
 
@@ -68,10 +76,10 @@ def fmt_triangle_delta(v: object, unit: str, fmt_num_func=fmt_num) -> str:
         return "-"
     vv = float(v)
     if vv > 0:
-        return f"▲{fmt_num_func(vv, unit)}"
+        return f"▲ {fmt_num_func(vv, unit)}"
     if vv < 0:
-        return f"▼{fmt_num_func(abs(vv), unit)}"
-    return f"→{fmt_num_func(0, unit)}"
+        return f"▼ {fmt_num_func(abs(vv), unit)}"
+    return f"→ {fmt_num_func(0, unit)}"
 
 
 def escape_markdown_text(text: object) -> str:
