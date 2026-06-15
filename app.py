@@ -464,6 +464,64 @@ def _render_youtube_display_content() -> None:
         st.rerun()
 
 
+def _extract_naver_media_url(raw_url: str) -> str:
+    url = str(raw_url or "").strip()
+    if not url:
+        return ""
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if any(token in host for token in ["naver.me", "tv.naver.com", "m.tv.naver.com", "video.naver.com"]):
+        return url
+    return ""
+
+
+def _render_naver_player(target_url: str, player_nonce: int = 0) -> None:
+    if not target_url:
+        return
+    iframe_src = f"{target_url}{'&' if '?' in target_url else '?'}autoplay=1&nonce={int(player_nonce)}"
+    st.components.v1.iframe(iframe_src, width=1100, height=560, scrolling=False)
+    st.caption("내장 재생이 막히는 경우 아래 링크로 새 창에서 열어 주세요.")
+    st.markdown(f"[네이버 영상 새 창 열기]({target_url})")
+
+
+def _render_naver_display_content() -> None:
+    st.caption("네이버 영상 URL 또는 `naver.me` 단축링크를 입력하면 재생을 시도합니다.")
+    if "_naver_active_url" not in st.session_state:
+        st.session_state["_naver_active_url"] = ""
+    if "_naver_last_input" not in st.session_state:
+        st.session_state["_naver_last_input"] = ""
+    if "_naver_player_nonce" not in st.session_state:
+        st.session_state["_naver_player_nonce"] = 0
+
+    input_url = st.text_input(
+        "Naver URL",
+        key="naver_popup_input_url",
+        placeholder="예: https://naver.me/FXnSkgj4",
+    )
+    play_clicked = st.button("재생", key="naver_play_btn", use_container_width=True)
+    parsed_url = _extract_naver_media_url(input_url)
+    input_changed = input_url != str(st.session_state.get("_naver_last_input", ""))
+    st.session_state["_naver_last_input"] = input_url
+
+    if parsed_url and (play_clicked or input_changed):
+        st.session_state["_naver_active_url"] = parsed_url
+        st.session_state["_naver_player_nonce"] = int(st.session_state.get("_naver_player_nonce", 0)) + 1
+        st.rerun()
+    elif play_clicked and not parsed_url:
+        st.session_state["_naver_active_url"] = ""
+        st.warning("유효한 네이버 영상 URL 또는 `naver.me` 단축링크를 입력해 주세요.")
+
+    active_url = str(st.session_state.get("_naver_active_url", "")).strip()
+    player_nonce = int(st.session_state.get("_naver_player_nonce", 0))
+    if active_url:
+        _render_naver_player(target_url=active_url, player_nonce=player_nonce)
+        st.caption(f"현재 링크: {active_url}")
+
+    if st.button("닫기", key="naver_popup_close_btn"):
+        st.session_state["_show_naver_popup"] = False
+        st.rerun()
+
+
 def _card(
     title: str,
     value: str,
@@ -992,16 +1050,25 @@ _require_access_gate()
 
 if "_show_youtube_popup" not in st.session_state:
     st.session_state["_show_youtube_popup"] = False
+if "_show_naver_popup" not in st.session_state:
+    st.session_state["_show_naver_popup"] = False
 
 if hasattr(st, "dialog"):
     @st.dialog("경제활동인구 모니터링")
     def _open_youtube_dialog() -> None:
         _render_youtube_display_content()
+
+    @st.dialog("네이버 영상")
+    def _open_naver_dialog() -> None:
+        _render_naver_display_content()
 else:
     def _open_youtube_dialog() -> None:
         pass
 
-title_col, button_col = st.columns([0.94, 0.06])
+    def _open_naver_dialog() -> None:
+        pass
+
+title_col, button_col, naver_button_col = st.columns([0.90, 0.05, 0.05])
 with title_col:
     git_meta = _latest_git_commit_meta()
     st.markdown(
@@ -1016,6 +1083,9 @@ with title_col:
 with button_col:
     if st.button("Y", key="open_youtube_dialog_btn", use_container_width=True, help="유튜브 디스플레이 열기"):
         st.session_state["_show_youtube_popup"] = True
+with naver_button_col:
+    if st.button("N", key="open_naver_dialog_btn", use_container_width=True, help="네이버 영상 열기"):
+        st.session_state["_show_naver_popup"] = True
 
 if hasattr(st, "dialog") and st.session_state.get("_show_youtube_popup", False):
     _open_youtube_dialog()
@@ -1025,6 +1095,14 @@ elif not hasattr(st, "dialog") and st.session_state.get("_show_youtube_popup", F
     with st.expander("경제활동인구 모니터링", expanded=True):
         _render_youtube_display_content()
     st.session_state["_show_youtube_popup"] = False
+
+if hasattr(st, "dialog") and st.session_state.get("_show_naver_popup", False):
+    _open_naver_dialog()
+    st.session_state["_show_naver_popup"] = False
+elif not hasattr(st, "dialog") and st.session_state.get("_show_naver_popup", False):
+    with st.expander("네이버 영상", expanded=True):
+        _render_naver_display_content()
+    st.session_state["_show_naver_popup"] = False
 
 with st.sidebar:
     st.subheader("데이터 제어")
