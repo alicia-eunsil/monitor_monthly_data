@@ -76,8 +76,8 @@ def default_end_period_by_prd_se(prd_se: str) -> str:
         today = date.today()
         current_quarter = ((today.month - 1) // 3) + 1
         if current_quarter == 1:
-            return f"{today.year - 1}Q4"
-        return f"{today.year}Q{current_quarter - 1}"
+            return f"{today.year - 1}04"
+        return f"{today.year}{current_quarter - 1:02d}"
     return default_end_period()
 
 
@@ -150,7 +150,7 @@ DATASETS_MONTHLY = [
         obj_l2="ALL",
         obj_l3="ALL",
         prd_se="Q",
-        start_prd_de="2000Q1",
+        start_prd_de="200001",
         has_category=True,
         category_label="연령(구분)",
         include_in_events=False,

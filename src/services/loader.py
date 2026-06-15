@@ -177,8 +177,11 @@ def load_all_data_with_progress(
                         )
                 except Exception as exc:  # noqa: BLE001
                     fetch_outputs[cfg.key] = {"records": [], "end_period": end_period}
-                    errors.append(f"{scope_title} - {cfg.title}: {exc}")
-                    debug_logs.append(f"[{scope_key}:{cfg.key}] ERROR: {exc}")
+                    if getattr(cfg, "required_for_scope", True):
+                        errors.append(f"{scope_title} - {cfg.title}: {exc}")
+                        debug_logs.append(f"[{scope_key}:{cfg.key}] ERROR: {exc}")
+                    else:
+                        debug_logs.append(f"[{scope_key}:{cfg.key}] OPTIONAL_ERROR: {exc}")
                 step += 1
                 _set_progress(min(100, int(step * 100 / total_steps)))
 
@@ -190,13 +193,23 @@ def load_all_data_with_progress(
             parsed = normalize_records(cfg, records, region_scope=scope_key)
             debug_logs.append(f"[{scope_key}:{cfg.key}] parsed_rows={len(parsed)} raw_rows={len(records)}")
             if len(records) == 0:
-                empty_data_warnings.append(
-                    f"{scope_title} - {cfg.title}: API 응답이 비어 있습니다 (end={end_period}, prd_se={cfg.prd_se})."
-                )
+                if getattr(cfg, "required_for_scope", True):
+                    empty_data_warnings.append(
+                        f"{scope_title} - {cfg.title}: API 응답이 비어 있습니다 (end={end_period}, prd_se={cfg.prd_se})."
+                    )
+                else:
+                    debug_logs.append(
+                        f"[{scope_key}:{cfg.key}] optional_empty_response end={end_period} prd_se={cfg.prd_se}"
+                    )
             elif parsed.empty:
-                empty_data_warnings.append(
-                    f"{scope_title} - {cfg.title}: API 원본 {len(records)}건 수신했지만 파싱 후 0건입니다."
-                )
+                if getattr(cfg, "required_for_scope", True):
+                    empty_data_warnings.append(
+                        f"{scope_title} - {cfg.title}: API 원본 {len(records)}건 수신했지만 파싱 후 0건입니다."
+                    )
+                else:
+                    debug_logs.append(
+                        f"[{scope_key}:{cfg.key}] optional_parse_empty raw_rows={len(records)}"
+                    )
             if not parsed.empty:
                 frames_by_scope[scope_key].append(parsed)
             step += 1

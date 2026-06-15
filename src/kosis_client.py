@@ -461,7 +461,7 @@ class KosisClient:
     def _index_to_yyyyqq(index: int) -> str:
         year = index // 4
         quarter = (index % 4) + 1
-        return f"{year:04d}Q{quarter}"
+        return f"{year:04d}{quarter:02d}"
 
     def _log(self, message: str) -> None:
         if len(self._debug_logs) < self._MAX_DEBUG_LOGS:
