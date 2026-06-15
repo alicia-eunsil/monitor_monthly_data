@@ -202,6 +202,7 @@ def _is_valid_scope_data(scope_data: object, required_scopes: List[str]) -> bool
             expected = {
                 str(getattr(cfg, "key", "")).strip()
                 for cfg in datasets_for_scope(scope_key)
+                if getattr(cfg, "required_for_scope", True)
                 if str(getattr(cfg, "key", "")).strip()
             }
             present = set(frame["dataset_key"].astype(str).str.strip().unique().tolist())

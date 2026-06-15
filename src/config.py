@@ -29,6 +29,7 @@ class DatasetConfig:
     output_fields: str = ""
     include_in_events: bool = True
     include_in_summary: bool = True
+    required_for_scope: bool = True
     extra_params: Dict[str, Any] = field(default_factory=dict)
 
     def to_params(self, api_key: str, end_prd_de: str) -> Dict[str, str]:
@@ -154,6 +155,7 @@ DATASETS_MONTHLY = [
         category_label="연령(구분)",
         include_in_events=False,
         include_in_summary=False,
+        required_for_scope=False,
         extra_params={"newEstPrdCnt": "3"},
     ),
 ]

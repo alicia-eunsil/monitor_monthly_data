@@ -358,12 +358,14 @@ def _latest_period_text(frame: pd.DataFrame) -> str:
 
 
 def _scope_has_expected_datasets(frame: pd.DataFrame, scope_key: str) -> tuple[bool, List[str]]:
-    if not isinstance(frame, pd.DataFrame) or frame.empty or "dataset_key" not in frame.columns:
-        expected = [str(getattr(cfg, "key", "")).strip() for cfg in datasets_for_scope(scope_key)]
-        expected = [key for key in expected if key]
-        return False, expected
-    expected = [str(getattr(cfg, "key", "")).strip() for cfg in datasets_for_scope(scope_key)]
+    expected = [
+        str(getattr(cfg, "key", "")).strip()
+        for cfg in datasets_for_scope(scope_key)
+        if getattr(cfg, "required_for_scope", True)
+    ]
     expected = [key for key in expected if key]
+    if not isinstance(frame, pd.DataFrame) or frame.empty or "dataset_key" not in frame.columns:
+        return False, expected
     present = set(frame["dataset_key"].astype(str).str.strip().unique().tolist())
     missing = [key for key in expected if key not in present]
     return len(missing) == 0, missing
