@@ -1219,6 +1219,29 @@ page_options = [
 ]
 active_page = st.radio("메뉴", page_options, horizontal=True, key="active_page", label_visibility="collapsed")
 
+quarterly_dataset_missing = (
+    active_page == "⑥ 분기별 연령별 실업자 현황"
+    and region_scope == "province"
+    and visible_data[visible_data["dataset_key"] == "age_unemployment_q"].empty
+)
+if quarterly_dataset_missing and not st.session_state.get("_quarterly_dataset_recovery_attempted", False):
+    st.session_state["_quarterly_dataset_recovery_attempted"] = True
+    st.cache_data.clear()
+    st.session_state["_force_data_refresh"] = True
+    st.session_state.pop("_loaded_api_key", None)
+    st.session_state.pop("_loaded_data_version", None)
+    st.session_state.pop("_loaded_scope_data", None)
+    st.session_state.pop("_loaded_errors", None)
+    st.session_state.pop("_loaded_empty_data_warnings", None)
+    st.session_state.pop("_loaded_debug_logs", None)
+    st.session_state.pop("_dataset_subset_cache", None)
+    st.session_state.pop("_series_stats_cache", None)
+    st.session_state.pop("_events_cache", None)
+    st.info("분기 데이터를 확인하기 위해 한 번 다시 불러옵니다.")
+    st.rerun()
+if not quarterly_dataset_missing:
+    st.session_state.pop("_quarterly_dataset_recovery_attempted", None)
+
 needs_events = active_page in {"① NEW RECORDS", "⑧ 요약"}
 events = pd.DataFrame()
 if needs_events:
