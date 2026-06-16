@@ -251,6 +251,29 @@ def _dataset_missing_diagnostics(scope_tag: str, dataset_key: str) -> List[str]:
     return diagnostics[-8:]
 
 
+def _norm_quarterly_age_category(text: object) -> str:
+    s = str(text or "").strip()
+    s = re.sub(r"\s+", "", s)
+    s = s.replace("-", "~")
+    return s
+
+
+def _order_quarterly_age_unemployment_categories(categories: List[str]) -> List[str]:
+    def _rank(cat: str) -> tuple[int, str]:
+        n = _norm_quarterly_age_category(cat)
+        if "15~29" in n:
+            return (0, str(cat))
+        if "30~59" in n:
+            return (1, str(cat))
+        if "60" in n and ("이상" in n or "세이상" in n):
+            return (2, str(cat))
+        if n in {"계", "합계", "전체"}:
+            return (3, str(cat))
+        return (999, str(cat))
+
+    return sorted(categories, key=_rank)
+
+
 def _clear_derived_caches() -> None:
     st.session_state.pop("_dataset_subset_cache", None)
     st.session_state.pop("_series_stats_cache", None)
@@ -868,7 +891,9 @@ def _render_dataset(
         else:
             if dataset_key == "industry":
                 categories = _order_province_industry_categories(categories)
-            if dataset_key in age_like_dataset_keys:
+            if dataset_key == "age_unemployment_q":
+                categories = _order_quarterly_age_unemployment_categories(categories)
+            elif dataset_key in age_like_dataset_keys:
                 categories = _order_age_categories(categories)
             if dataset_key == "status":
                 categories = _order_status_categories(categories)
@@ -901,7 +926,7 @@ def _render_dataset(
     region = str(st.session_state.get(region_state_key, region_input))
     indicator = str(st.session_state.get(indicator_state_key, indicator_input))
     category = str(st.session_state.get(category_state_key, category_input if cfg.has_category else ""))
-    if dataset_key in {"industry", "occupation", "age", "status", "age_unemployment_q"} and indicator:
+    if dataset_key in {"industry", "occupation", "age", "status"} and indicator:
         st.caption(f"지표: {indicator}")
 
     series_df, stats = _get_cached_series_and_stats(
@@ -1242,34 +1267,11 @@ page_options = [
     "④ 종사상지위별 취업자",
     "⑤ 산업별 취업자수",
     "⑥ 직종별 취업자수",
-    "⑦ 분기별 연령별 실업자 현황",
+    "⑦ 연령별 실업자",
     "⑧ 요약",
     "⑨ 시군 유형화·정책매칭",
 ]
 active_page = st.radio("메뉴", page_options, horizontal=True, key="active_page", label_visibility="collapsed")
-
-quarterly_dataset_missing = (
-    active_page == "⑦ 분기별 연령별 실업자 현황"
-    and region_scope == "province"
-    and visible_data[visible_data["dataset_key"] == "age_unemployment_q"].empty
-)
-if quarterly_dataset_missing and not st.session_state.get("_quarterly_dataset_recovery_attempted", False):
-    st.session_state["_quarterly_dataset_recovery_attempted"] = True
-    st.cache_data.clear()
-    st.session_state["_force_data_refresh"] = True
-    st.session_state.pop("_loaded_api_key", None)
-    st.session_state.pop("_loaded_data_version", None)
-    st.session_state.pop("_loaded_scope_data", None)
-    st.session_state.pop("_loaded_errors", None)
-    st.session_state.pop("_loaded_empty_data_warnings", None)
-    st.session_state.pop("_loaded_debug_logs", None)
-    st.session_state.pop("_dataset_subset_cache", None)
-    st.session_state.pop("_series_stats_cache", None)
-    st.session_state.pop("_events_cache", None)
-    st.info("분기 데이터를 확인하기 위해 한 번 다시 불러옵니다.")
-    st.rerun()
-if not quarterly_dataset_missing:
-    st.session_state.pop("_quarterly_dataset_recovery_attempted", None)
 
 needs_events = active_page in {"① NEW RECORDS", "⑧ 요약"}
 events = pd.DataFrame()
@@ -1335,7 +1337,7 @@ elif active_page == "⑥ 직종별 취업자수":
         is_gyeonggi31_mode,
         scope_tag=region_scope,
     )
-elif active_page == "⑦ 분기별 연령별 실업자 현황":
+elif active_page == "⑦ 연령별 실업자":
     if region_scope != "province":
         st.info("이 메뉴는 시도 기준 분기 데이터 전용입니다.")
     else:

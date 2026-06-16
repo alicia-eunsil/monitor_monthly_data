@@ -142,7 +142,7 @@ DATASETS_MONTHLY = [
     ),
     DatasetConfig(
         key="age_unemployment_q",
-        title="분기별 연령별 실업자 현황",
+        title="연령별 실업자",
         org_id="101",
         tbl_id="DT_1DA7095S",
         itm_id="T40+",
