@@ -926,9 +926,6 @@ def _render_dataset(
     region = str(st.session_state.get(region_state_key, region_input))
     indicator = str(st.session_state.get(indicator_state_key, indicator_input))
     category = str(st.session_state.get(category_state_key, category_input if cfg.has_category else ""))
-    if dataset_key in {"industry", "occupation", "age", "status"} and indicator:
-        st.caption(f"지표: {indicator}")
-
     series_df, stats = _get_cached_series_and_stats(
         subset=subset,
         scope_tag=scope_tag,
@@ -945,6 +942,12 @@ def _render_dataset(
     labels = _time_labels([cfg])
     latest_period = _fmt_period(stats.get("latest_period"), prd_se)
     unit = str(series_df["unit"].dropna().iloc[-1]) if not series_df["unit"].dropna().empty else ""
+    yoy_abs_unit = "%p" if "%" in unit else unit
+    yoy_abs_title = (
+        f"{labels['yoy']}대비 증감 ({yoy_abs_unit})"
+        if yoy_abs_unit
+        else f"{labels['yoy']}대비 증감"
+    )
 
     st.caption(f"최신 기준{labels['point']}: {latest_period}")
     card_specs = [
@@ -1018,12 +1021,12 @@ def _render_dataset(
             x=alt.X("period:T", title=labels["point"]),
             tooltip=[
                 alt.Tooltip("yearmonth(period):T", title=labels["point"]),
-                alt.Tooltip("yoy_abs:Q", title=f"{labels['yoy']}대비 증감", format=",.2f"),
+                alt.Tooltip("yoy_abs:Q", title=yoy_abs_title, format=",.2f"),
                 alt.Tooltip("yoy_pct:Q", title=f"{labels['yoy']}대비 증감률(%)", format=".2f"),
             ],
         )
         bars = base.mark_bar(color="#4C78A8", opacity=0.55).encode(
-            y=alt.Y("yoy_abs:Q", title=f"{labels['yoy']}대비 증감")
+            y=alt.Y("yoy_abs:Q", title=yoy_abs_title)
         )
         line = base.mark_line(color="#E45756", point=True).encode(
             y=alt.Y("yoy_pct:Q", title=f"{labels['yoy']}대비 증감률(%)")
