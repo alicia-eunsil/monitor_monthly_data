@@ -280,6 +280,37 @@ def _select_category_column(
     return sorted(ranked, key=lambda c: _uniq_count(c), reverse=True)[0]
 
 
+def _select_category_columns(name_cols: list[str], region_name_col: Optional[str]) -> list[str]:
+    candidates = [c for c in name_cols if c != region_name_col]
+    ordered = sorted(
+        candidates,
+        key=lambda c: int(_dim_no(c) or "999"),
+    )
+    return [c for c in ordered if not c.endswith("_OBJ_NM")] or ordered
+
+
+def _build_deepest_category_series(df: pd.DataFrame, category_cols: list[str]) -> pd.Series:
+    if not category_cols:
+        return pd.Series([""] * len(df), index=df.index, dtype="object")
+
+    def _pick(row: pd.Series) -> str:
+        values = []
+        for col in category_cols:
+            raw = str(row.get(col, "") or "").strip()
+            if not raw or raw.lower() in {"nan", "none", "null"}:
+                continue
+            values.append(raw)
+        if not values:
+            return ""
+        for value in reversed(values):
+            compact = _compact_text(value)
+            if compact not in {"계", "합계", "전체"}:
+                return value
+        return values[-1]
+
+    return df[category_cols].apply(_pick, axis=1)
+
+
 def normalize_records(
     config: DatasetConfig,
     records: list[Dict],
@@ -309,10 +340,20 @@ def normalize_records(
     region_code_col = _matching_code_col(region_name_col, code_dims) if region_name_col else None
     category_name_col = None
     category_code_col = None
+    category_name_series = None
+    category_code_series = None
     if config.has_category:
-        category_name_col = _select_category_column(df, name_dims, region_name_col)
-        if category_name_col:
-            category_code_col = _matching_code_col(category_name_col, code_dims)
+        if str(getattr(config, "key", "")).strip() == "inactive_population":
+            category_cols = _select_category_columns(name_dims, region_name_col)
+            category_name_series = _build_deepest_category_series(df, category_cols)
+            code_candidates = [_matching_code_col(col, code_dims) for col in category_cols]
+            code_candidates = [c for c in code_candidates if c]
+            if code_candidates:
+                category_code_series = _build_deepest_category_series(df, code_candidates)
+        else:
+            category_name_col = _select_category_column(df, name_dims, region_name_col)
+            if category_name_col:
+                category_code_col = _matching_code_col(category_name_col, code_dims)
 
     out = pd.DataFrame(
         {
@@ -327,10 +368,14 @@ def normalize_records(
             "indicator_code": df[indicator_id_col].astype(str).str.strip() if indicator_id_col else "",
             "indicator_name": df[indicator_nm_col].astype(str).str.strip() if indicator_nm_col else "",
             "category_code": (
-                df[category_code_col].astype(str).str.strip() if category_code_col else ""
+                category_code_series.astype(str).str.strip()
+                if category_code_series is not None
+                else (df[category_code_col].astype(str).str.strip() if category_code_col else "")
             ),
             "category_name": (
-                df[category_name_col].astype(str).str.strip() if category_name_col else ""
+                category_name_series.astype(str).str.strip()
+                if category_name_series is not None
+                else (df[category_name_col].astype(str).str.strip() if category_name_col else "")
             ),
         }
     )
