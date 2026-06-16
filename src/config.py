@@ -157,6 +157,22 @@ DATASETS_MONTHLY = [
         include_in_summary=False,
         required_for_scope=False,
     ),
+    DatasetConfig(
+        key="inactive_population",
+        title="비경제활동인구",
+        org_id="101",
+        tbl_id="DT_1DA7146S",
+        itm_id="T50+",
+        obj_l1="ALL",
+        obj_l2="ALL",
+        prd_se="M",
+        start_prd_de="200001",
+        has_category=True,
+        category_label="세부사유",
+        include_in_events=False,
+        include_in_summary=False,
+        required_for_scope=False,
+    ),
 ]
 
 

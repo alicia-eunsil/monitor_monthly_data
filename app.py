@@ -182,7 +182,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-DATA_MODEL_VERSION = "2026-06-16-quarterly-unemployment-v4"
+DATA_MODEL_VERSION = "2026-06-16-quarterly-unemployment-v5"
 REQUIRED_SCOPE_COLUMNS = {"dataset_key", "region_name", "indicator_name", "category_name", "period", "value", "prd_se"}
 SHOW_AI_FEATURES = str(os.getenv("SHOW_AI_FEATURES", "false")).strip().lower() in {"1", "true", "yes", "y"}
 
@@ -783,7 +783,7 @@ def _render_dataset(
     if dataset_key == "activity":
         # Keep activity indicators on one line by giving wider horizontal space.
         col1, col2 = st.columns([0.6, 5.4])
-    elif dataset_key in {"industry", "occupation", "age", "status", "age_unemployment_q"}:
+    elif dataset_key in {"industry", "occupation", "age", "status", "age_unemployment_q", "inactive_population"}:
         # Narrow region control and widen classification area.
         col1, col2 = st.columns([0.6, 3.4])
     else:
@@ -835,7 +835,7 @@ def _render_dataset(
 
     if indicators and st.session_state.get(indicator_state_key) not in indicators:
         default_indicator = indicators[0]
-        if dataset_key in {"industry", "occupation", "age", "status", "age_unemployment_q"}:
+        if dataset_key in {"industry", "occupation", "age", "status", "age_unemployment_q", "inactive_population"}:
             default_indicator = _pick_auto_indicator(st.session_state[region_state_key])
         st.session_state[indicator_state_key] = default_indicator
 
@@ -858,7 +858,7 @@ def _render_dataset(
                 key=indicator_state_key,
                 horizontal=True,
             )
-    elif dataset_key in {"industry", "occupation", "age", "status", "age_unemployment_q"} and indicators:
+    elif dataset_key in {"industry", "occupation", "age", "status", "age_unemployment_q", "inactive_population"} and indicators:
         indicator_input = _pick_auto_indicator(region_input)
         st.session_state[indicator_state_key] = indicator_input
 
@@ -1271,12 +1271,13 @@ page_options = [
     "⑤ 산업별 취업자수",
     "⑥ 직종별 취업자수",
     "⑦ 연령별 실업자",
-    "⑧ 요약",
-    "⑨ 시군 유형화·정책매칭",
+    "⑧ 비경제활동인구",
+    "⑨ 요약",
+    "⑩ 시군 유형화·정책매칭",
 ]
 active_page = st.radio("메뉴", page_options, horizontal=True, key="active_page", label_visibility="collapsed")
 
-needs_events = active_page in {"① NEW RECORDS", "⑧ 요약"}
+needs_events = active_page in {"① NEW RECORDS", "⑨ 요약"}
 events = pd.DataFrame()
 if needs_events:
     if region_scope == "gyeonggi31":
@@ -1353,7 +1354,20 @@ elif active_page == "⑦ 연령별 실업자":
             is_gyeonggi31_mode,
             scope_tag=region_scope,
         )
-elif active_page == "⑧ 요약":
+elif active_page == "⑧ 비경제활동인구":
+    if region_scope != "province":
+        st.info("이 메뉴는 시도 기준 월간 데이터 전용입니다.")
+    else:
+        _render_dataset(
+            visible_data,
+            "inactive_population",
+            region_pool,
+            default_region,
+            active_datasets,
+            is_gyeonggi31_mode,
+            scope_tag=region_scope,
+        )
+elif active_page == "⑨ 요약":
     summary_title_placeholder = st.empty()
     if region_scope == "gyeonggi31":
         summary_scope = "31개 시군"
@@ -1539,7 +1553,7 @@ elif active_page == "⑧ 요약":
             selected_month=selected_report_month,
             show_ai=SHOW_AI_FEATURES,
         )
-elif active_page == "⑨ 시군 유형화·정책매칭":
+elif active_page == "⑩ 시군 유형화·정책매칭":
     _render_sigungu_typology_tab(visible_data, is_gyeonggi31_mode=is_gyeonggi31_mode, datasets=active_datasets)
 
 st.markdown(
