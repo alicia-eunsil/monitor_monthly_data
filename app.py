@@ -226,6 +226,31 @@ def _dataset_row_counts(df: pd.DataFrame) -> Dict[str, int]:
     return {str(key): int(value) for key, value in counts.items()}
 
 
+def _dataset_missing_diagnostics(scope_tag: str, dataset_key: str) -> List[str]:
+    diagnostics: List[str] = []
+    debug_logs = st.session_state.get("_loaded_debug_logs", []) or []
+    load_errors = st.session_state.get("_loaded_errors", []) or []
+    empty_warnings = st.session_state.get("_loaded_empty_data_warnings", []) or []
+    key_token = f"[{scope_tag}:{dataset_key}]"
+    for line in debug_logs:
+        text = str(line)
+        if key_token in text and (
+            "OPTIONAL_ERROR" in text
+            or "ERROR" in text
+            or "optional_empty_response" in text
+            or "optional_parse_empty" in text
+            or "parsed_rows=" in text
+            or "sample_PRD_DE=" in text
+            or "quarter request" in text
+        ):
+            diagnostics.append(text)
+    for line in [*load_errors, *empty_warnings]:
+        text = str(line)
+        if dataset_key in text:
+            diagnostics.append(text)
+    return diagnostics[-8:]
+
+
 def _clear_derived_caches() -> None:
     st.session_state.pop("_dataset_subset_cache", None)
     st.session_state.pop("_series_stats_cache", None)
@@ -721,6 +746,10 @@ def _render_dataset(
         counts = _dataset_row_counts(df)
         st.warning("해당 데이터가 없습니다.")
         st.caption(f"진단: scope={scope_tag}, dataset_key={dataset_key}, available={counts}")
+        diagnostics = _dataset_missing_diagnostics(scope_tag, dataset_key)
+        if diagnostics:
+            with st.expander("분기 데이터 진단", expanded=True):
+                st.code("\n".join(diagnostics))
         return
 
     region_options = [r for r in region_pool if r in subset["region_name"].unique()]
