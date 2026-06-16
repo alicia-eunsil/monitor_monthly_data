@@ -35,6 +35,27 @@ REGION_PATTERNS = {
     "제주특별자치도": ["제주특별자치도", "제주"],
 }
 
+PROVINCE_REGION_CODES = {
+    "00",
+    "11",
+    "21",
+    "22",
+    "23",
+    "24",
+    "25",
+    "26",
+    "29",
+    "31",
+    "32",
+    "33",
+    "34",
+    "35",
+    "36",
+    "37",
+    "38",
+    "39",
+}
+
 
 def _pick_first(columns: Iterable[str], candidates: Iterable[str]) -> Optional[str]:
     col_set = set(columns)
@@ -199,24 +220,38 @@ def _matching_code_col(name_col: str, code_cols: list[str]) -> Optional[str]:
 def _select_region_column(
     df: pd.DataFrame,
     name_cols: list[str],
+    code_cols: list[str],
     region_candidates: Optional[list[str]] = None,
+    region_scope: str = "province",
 ) -> Optional[str]:
     if not name_cols:
         return None
     candidates = region_candidates or TARGET_REGIONS
     candidate_tokens = [_compact_text(x) for x in candidates if str(x).strip()]
     best_col = name_cols[0]
-    best_score = -1
+    best_score = (-1, -1, -1)
     for col in name_cols:
-        score = (
+        token_score = int(
             df[col]
             .astype(str)
             .map(_compact_text)
             .map(lambda x: any(token and token in x for token in candidate_tokens))
             .sum()
         )
+        code_score = 0
+        code_col = _matching_code_col(col, code_cols)
+        if code_col and region_scope == "province":
+            code_score = int(
+                df[code_col]
+                .astype(str)
+                .str.strip()
+                .isin(PROVINCE_REGION_CODES)
+                .sum()
+            )
+        uniq_score = int(df[col].astype(str).str.strip().replace("", pd.NA).dropna().nunique())
+        score = (code_score, token_score, uniq_score)
         if score > best_score:
-            best_score = int(score)
+            best_score = score
             best_col = col
     return best_col
 
@@ -264,7 +299,13 @@ def normalize_records(
     region_candidates = TARGET_REGIONS
     if region_scope == "gyeonggi31":
         region_candidates = GYEONGGI_SIGUNGU + list(GYEONGGI_DISTRICT_TO_CITY.keys()) + ["경기도"]
-    region_name_col = _select_region_column(df, name_dims, region_candidates=region_candidates)
+    region_name_col = _select_region_column(
+        df,
+        name_dims,
+        code_dims,
+        region_candidates=region_candidates,
+        region_scope=region_scope,
+    )
     region_code_col = _matching_code_col(region_name_col, code_dims) if region_name_col else None
     category_name_col = None
     category_code_col = None
