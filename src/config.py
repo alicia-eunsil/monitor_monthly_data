@@ -156,7 +156,6 @@ DATASETS_MONTHLY = [
         include_in_events=False,
         include_in_summary=False,
         required_for_scope=False,
-        extra_params={"newEstPrdCnt": "3"},
     ),
 ]
 

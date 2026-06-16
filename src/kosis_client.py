@@ -77,15 +77,37 @@ class KosisClient:
 
     def fetch(self, config: DatasetConfig, end_prd_de: str) -> List[Dict[str, Any]]:
         params = config.to_params(api_key=self.api_key, end_prd_de=end_prd_de)
-        if self._should_proactively_split_period(params):
-            if str(getattr(config, "key", "")).strip() == "activity":
-                params = dict(params)
-                params.pop("outputFields", None)
-                self._log("activity chunked request: dropped outputFields preemptively")
-            self._log("large period range detected; using proactive period chunking")
-            return self._fetch_chunked_by_period(config, params)
-        rows = self._fetch_with_fallbacks(config, params)
-        return self._resolve_dt_only_rows(config, params, rows)
+        attempts = [params]
+        if str(params.get("prdSe", "")).upper() == "Q":
+            alt_params = self._alternate_quarter_period_params(params)
+            if alt_params != params:
+                attempts.append(alt_params)
+
+        last_error: Optional[Exception] = None
+        for idx, attempt_params in enumerate(attempts, start=1):
+            try:
+                if self._should_proactively_split_period(attempt_params):
+                    chunk_params = dict(attempt_params)
+                    if str(getattr(config, "key", "")).strip() == "activity":
+                        chunk_params.pop("outputFields", None)
+                        self._log("activity chunked request: dropped outputFields preemptively")
+                    self._log(f"large period range detected; using proactive period chunking attempt={idx}")
+                    rows = self._fetch_chunked_by_period(config, chunk_params)
+                else:
+                    rows = self._fetch_with_fallbacks(config, attempt_params)
+                    rows = self._resolve_dt_only_rows(config, attempt_params, rows)
+                if rows or idx == len(attempts):
+                    return rows
+                self._log(f"quarter request returned 0 rows; retrying alternate period format attempt={idx + 1}")
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if idx == len(attempts):
+                    raise
+                self._log(f"quarter request failed; retrying alternate period format: {exc}")
+
+        if last_error is not None:
+            raise last_error
+        return []
 
     def fetch_with_debug(self, config: DatasetConfig, end_prd_de: str) -> tuple[List[Dict[str, Any]], List[str]]:
         self._debug_logs = []
@@ -348,7 +370,8 @@ class KosisClient:
             max_units = self._MAX_QUARTERS_PER_REQUEST
             start_idx = self._quarter_index(start)
             end_idx = self._quarter_index(end)
-            to_text = self._index_to_yyyyqq
+            quarter_style = self._quarter_format_style(start or end)
+            to_text = lambda idx: self._index_to_yyyyqq(idx, quarter_style)
         else:
             max_units = self._MAX_MONTHS_PER_REQUEST
             start_idx = self._month_index(start)
@@ -402,8 +425,9 @@ class KosisClient:
         if start_idx >= end_idx:
             return start_yyyyqq, end_yyyyqq
         mid_idx = (start_idx + end_idx) // 2
-        left_end = KosisClient._index_to_yyyyqq(mid_idx)
-        right_start = KosisClient._index_to_yyyyqq(mid_idx + 1)
+        style = KosisClient._quarter_format_style(start_yyyyqq or end_yyyyqq)
+        left_end = KosisClient._index_to_yyyyqq(mid_idx, style)
+        right_start = KosisClient._index_to_yyyyqq(mid_idx + 1, style)
         return left_end, right_start
 
     @staticmethod
@@ -458,10 +482,42 @@ class KosisClient:
         raise ValueError(f"Unsupported quarter format: {yyyyqq}")
 
     @staticmethod
-    def _index_to_yyyyqq(index: int) -> str:
+    def _index_to_yyyyqq(index: int, style: str = "numeric2") -> str:
         year = index // 4
         quarter = (index % 4) + 1
+        if style == "q":
+            return f"{year:04d}Q{quarter}"
+        if style == "numeric1":
+            return f"{year:04d}{quarter}"
         return f"{year:04d}{quarter:02d}"
+
+    @staticmethod
+    def _quarter_format_style(yyyyqq: str) -> str:
+        text = str(yyyyqq).strip()
+        if re.match(r"^\d{4}[Qq][1-4]$", text):
+            return "q"
+        digits = re.sub(r"\D", "", text)
+        if len(digits) == 5 and digits[-1] in {"1", "2", "3", "4"}:
+            return "numeric1"
+        return "numeric2"
+
+    @staticmethod
+    def _alternate_quarter_text(yyyyqq: str) -> str:
+        index = KosisClient._quarter_index(yyyyqq)
+        style = KosisClient._quarter_format_style(yyyyqq)
+        if style == "q":
+            return KosisClient._index_to_yyyyqq(index, "numeric2")
+        return KosisClient._index_to_yyyyqq(index, "q")
+
+    def _alternate_quarter_period_params(self, params: Dict[str, str]) -> Dict[str, str]:
+        alt = dict(params)
+        start = str(alt.get("startPrdDe", "")).strip()
+        end = str(alt.get("endPrdDe", "")).strip()
+        if start:
+            alt["startPrdDe"] = self._alternate_quarter_text(start)
+        if end:
+            alt["endPrdDe"] = self._alternate_quarter_text(end)
+        return alt
 
     def _log(self, message: str) -> None:
         if len(self._debug_logs) < self._MAX_DEBUG_LOGS:

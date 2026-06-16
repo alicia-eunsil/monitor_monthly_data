@@ -182,7 +182,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-DATA_MODEL_VERSION = "2026-06-16-quarterly-unemployment-v2"
+DATA_MODEL_VERSION = "2026-06-16-quarterly-unemployment-v3"
 REQUIRED_SCOPE_COLUMNS = {"dataset_key", "region_name", "indicator_name", "category_name", "period", "value", "prd_se"}
 SHOW_AI_FEATURES = str(os.getenv("SHOW_AI_FEATURES", "false")).strip().lower() in {"1", "true", "yes", "y"}
 
@@ -1212,15 +1212,15 @@ page_options = [
     "③ 연령별 취업자",
     "④ 종사상지위별 취업자",
     "⑤ 산업별 취업자수",
-    "⑥ 분기별 연령별 실업자 현황",
-    "⑦ 직종별 취업자수",
+    "⑥ 직종별 취업자수",
+    "⑦ 분기별 연령별 실업자 현황",
     "⑧ 요약",
     "⑨ 시군 유형화·정책매칭",
 ]
 active_page = st.radio("메뉴", page_options, horizontal=True, key="active_page", label_visibility="collapsed")
 
 quarterly_dataset_missing = (
-    active_page == "⑥ 분기별 연령별 실업자 현황"
+    active_page == "⑦ 분기별 연령별 실업자 현황"
     and region_scope == "province"
     and visible_data[visible_data["dataset_key"] == "age_unemployment_q"].empty
 )
@@ -1296,7 +1296,17 @@ elif active_page == "⑤ 산업별 취업자수":
         is_gyeonggi31_mode,
         scope_tag=region_scope,
     )
-elif active_page == "⑥ 분기별 연령별 실업자 현황":
+elif active_page == "⑥ 직종별 취업자수":
+    _render_dataset(
+        visible_data,
+        "occupation",
+        region_pool,
+        default_region,
+        active_datasets,
+        is_gyeonggi31_mode,
+        scope_tag=region_scope,
+    )
+elif active_page == "⑦ 분기별 연령별 실업자 현황":
     if region_scope != "province":
         st.info("이 메뉴는 시도 기준 분기 데이터 전용입니다.")
     else:
@@ -1309,16 +1319,6 @@ elif active_page == "⑥ 분기별 연령별 실업자 현황":
             is_gyeonggi31_mode,
             scope_tag=region_scope,
         )
-elif active_page == "⑦ 직종별 취업자수":
-    _render_dataset(
-        visible_data,
-        "occupation",
-        region_pool,
-        default_region,
-        active_datasets,
-        is_gyeonggi31_mode,
-        scope_tag=region_scope,
-    )
 elif active_page == "⑧ 요약":
     summary_title_placeholder = st.empty()
     if region_scope == "gyeonggi31":
