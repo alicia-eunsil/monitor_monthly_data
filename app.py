@@ -760,9 +760,14 @@ def _render_dataset(
     is_gyeonggi31_mode: bool,
     scope_tag: str,
 ) -> None:
-    cfg = next(x for x in datasets if x.key == dataset_key)
+    cfg = next((x for x in datasets if x.key == dataset_key), None)
+    if cfg is None:
+        available_keys = [str(getattr(x, "key", "")).strip() for x in datasets]
+        st.error("데이터셋 설정을 찾지 못했습니다.")
+        st.caption(f"진단: scope={scope_tag}, dataset_key={dataset_key}, configured={available_keys}")
+        return
     age_like_dataset_keys = {"age", "age_unemployment_q"}
-    category_radio_dataset_keys = {"industry", "occupation", "age", "status", "age_unemployment_q"}
+    category_radio_dataset_keys = {"industry", "occupation", "age", "status", "age_unemployment_q", "inactive_population"}
     subset = _get_cached_dataset_subset(df, scope_tag=scope_tag, dataset_key=dataset_key)
     st.subheader(cfg.title)
     if subset.empty:
