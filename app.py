@@ -274,6 +274,71 @@ def _order_quarterly_age_unemployment_categories(categories: List[str]) -> List[
     return sorted(categories, key=_rank)
 
 
+def _norm_inactive_population_category(text: object) -> str:
+    s = str(text or "").strip()
+    s = re.sub(r"\s+", "", s)
+    return s
+
+
+def _inactive_population_rank(text: object) -> tuple[int, str]:
+    n = _norm_inactive_population_category(text)
+    if n in {"계", "합계", "전체"}:
+        return (0, str(text))
+    if "육아" == n:
+        return (1, str(text))
+    if "가사" == n:
+        return (2, str(text))
+    if "통학" == n:
+        return (3, str(text))
+    if "정규교육기관통학" in n:
+        return (4, str(text))
+    if "입시학원통학" in n:
+        return (5, str(text))
+    if "취업을위한학원" in n or "취업을위한기관통학" in n or "직업훈련기관" in n:
+        return (6, str(text))
+    if "연로" == n:
+        return (7, str(text))
+    if "심신장애" == n:
+        return (8, str(text))
+    if "기타" in n and "육아" in n and "가사" in n and "통학" in n:
+        return (9, str(text))
+    if "그외" == n:
+        return (10, str(text))
+    if "취업준비" in n:
+        return (11, str(text))
+    if "진학준비" in n:
+        return (12, str(text))
+    if "군입대대기" in n:
+        return (13, str(text))
+    if "쉬었음" in n:
+        return (14, str(text))
+    return (999, str(text))
+
+
+def _order_inactive_population_categories(categories: List[str]) -> List[str]:
+    return sorted(categories, key=_inactive_population_rank)
+
+
+def _format_inactive_population_category(text: object) -> str:
+    raw = str(text or "").strip()
+    n = _norm_inactive_population_category(raw)
+    if n in {"통학", "그외"}:
+        return f"▸ {raw}"
+    if (
+        "정규교육기관통학" in n
+        or "입시학원통학" in n
+        or "취업을위한학원" in n
+        or "취업을위한기관통학" in n
+        or "직업훈련기관" in n
+        or "취업준비" in n
+        or "진학준비" in n
+        or "군입대대기" in n
+        or "쉬었음" in n
+    ):
+        return f"└ {raw}"
+    return raw
+
+
 def _clear_derived_caches() -> None:
     st.session_state.pop("_dataset_subset_cache", None)
     st.session_state.pop("_series_stats_cache", None)
@@ -896,6 +961,8 @@ def _render_dataset(
         else:
             if dataset_key == "industry":
                 categories = _order_province_industry_categories(categories)
+            if dataset_key == "inactive_population":
+                categories = _order_inactive_population_categories(categories)
             if dataset_key == "age_unemployment_q":
                 categories = _order_quarterly_age_unemployment_categories(categories)
             elif dataset_key in age_like_dataset_keys:
@@ -908,6 +975,9 @@ def _render_dataset(
             if category_input not in categories:
                 category_input = categories[0]
                 st.session_state[category_state_key] = category_input
+            category_format_func = None
+            if dataset_key == "inactive_population":
+                category_format_func = _format_inactive_population_category
             with category_container:
                 if dataset_key in category_radio_dataset_keys:
                     category_input = st.radio(
@@ -916,6 +986,7 @@ def _render_dataset(
                         index=categories.index(category_input),
                         key=category_state_key,
                         horizontal=True,
+                        format_func=category_format_func,
                     )
                 else:
                     category_input = st.selectbox(
@@ -923,6 +994,7 @@ def _render_dataset(
                         categories,
                         index=categories.index(category_input),
                         key=category_state_key,
+                        format_func=category_format_func,
                     )
         else:
             category_input = ""
