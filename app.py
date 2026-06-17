@@ -1,6 +1,5 @@
 ﻿from __future__ import annotations
 
-import os
 import re
 import subprocess
 from datetime import datetime
@@ -12,7 +11,6 @@ import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
-import os
 
 import src.config as app_config
 from src.core.category_rules import (
@@ -185,6 +183,7 @@ st.markdown(
 DATA_MODEL_VERSION = "2026-06-17-inactive-population-v8"
 REQUIRED_SCOPE_COLUMNS = {"dataset_key", "region_name", "indicator_name", "category_name", "period", "value", "prd_se"}
 SHOW_AI_FEATURES = str(os.getenv("SHOW_AI_FEATURES", "false")).strip().lower() in {"1", "true", "yes", "y"}
+SHOW_DEBUG_DIAGNOSTICS = str(os.getenv("SHOW_DEBUG_DIAGNOSTICS", "false")).strip().lower() in {"1", "true", "yes", "y"}
 
 
 def _is_valid_scope_data(scope_data: object, required_scopes: List[str]) -> bool:
@@ -827,22 +826,24 @@ def _render_dataset(
 ) -> None:
     cfg = next((x for x in datasets if x.key == dataset_key), None)
     if cfg is None:
-        available_keys = [str(getattr(x, "key", "")).strip() for x in datasets]
         st.error("데이터셋 설정을 찾지 못했습니다.")
-        st.caption(f"진단: scope={scope_tag}, dataset_key={dataset_key}, configured={available_keys}")
+        if SHOW_DEBUG_DIAGNOSTICS:
+            available_keys = [str(getattr(x, "key", "")).strip() for x in datasets]
+            st.caption(f"진단: scope={scope_tag}, dataset_key={dataset_key}, configured={available_keys}")
         return
     age_like_dataset_keys = {"age", "age_unemployment_q"}
     category_radio_dataset_keys = {"industry", "occupation", "age", "status", "age_unemployment_q", "inactive_population"}
     subset = _get_cached_dataset_subset(df, scope_tag=scope_tag, dataset_key=dataset_key)
     st.subheader(cfg.title)
     if subset.empty:
-        counts = _dataset_row_counts(df)
         st.warning("해당 데이터가 없습니다.")
-        st.caption(f"진단: scope={scope_tag}, dataset_key={dataset_key}, available={counts}")
-        diagnostics = _dataset_missing_diagnostics(scope_tag, dataset_key)
-        if diagnostics:
-            with st.expander("분기 데이터 진단", expanded=True):
-                st.code("\n".join(diagnostics))
+        if SHOW_DEBUG_DIAGNOSTICS:
+            counts = _dataset_row_counts(df)
+            st.caption(f"진단: scope={scope_tag}, dataset_key={dataset_key}, available={counts}")
+            diagnostics = _dataset_missing_diagnostics(scope_tag, dataset_key)
+            if diagnostics:
+                with st.expander("진단 로그", expanded=True):
+                    st.code("\n".join(diagnostics))
         return
 
     region_options = [r for r in region_pool if r in subset["region_name"].unique()]
@@ -1287,7 +1288,7 @@ if empty_data_warnings:
     for msg in empty_data_warnings:
         st.write(f"- {msg}")
 
-if debug_logs:
+if SHOW_DEBUG_DIAGNOSTICS and debug_logs:
     with st.sidebar:
         with st.expander("진단 로그 보기", expanded=bool(load_errors)):
             st.code("\n".join(debug_logs[-300:]))
