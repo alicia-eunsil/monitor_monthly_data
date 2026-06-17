@@ -165,6 +165,7 @@ DATASETS_MONTHLY = [
         itm_id="T50+",
         obj_l1="ALL",
         obj_l2="ALL",
+        obj_l3="ALL",
         prd_se="M",
         start_prd_de="200001",
         has_category=True,
