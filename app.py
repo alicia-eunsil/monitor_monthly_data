@@ -975,27 +975,28 @@ def _render_dataset(
             if category_input not in categories:
                 category_input = categories[0]
                 st.session_state[category_state_key] = category_input
-            category_format_func = None
-            if dataset_key == "inactive_population":
-                category_format_func = _format_inactive_population_category
             with category_container:
                 if dataset_key in category_radio_dataset_keys:
-                    category_input = st.radio(
-                        cfg.category_label,
-                        categories,
-                        index=categories.index(category_input),
-                        key=category_state_key,
-                        horizontal=True,
-                        format_func=category_format_func,
-                    )
+                    radio_kwargs = {
+                        "label": cfg.category_label,
+                        "options": categories,
+                        "index": categories.index(category_input),
+                        "key": category_state_key,
+                        "horizontal": True,
+                    }
+                    if dataset_key == "inactive_population":
+                        radio_kwargs["format_func"] = _format_inactive_population_category
+                    category_input = st.radio(**radio_kwargs)
                 else:
-                    category_input = st.selectbox(
-                        cfg.category_label,
-                        categories,
-                        index=categories.index(category_input),
-                        key=category_state_key,
-                        format_func=category_format_func,
-                    )
+                    select_kwargs = {
+                        "label": cfg.category_label,
+                        "options": categories,
+                        "index": categories.index(category_input),
+                        "key": category_state_key,
+                    }
+                    if dataset_key == "inactive_population":
+                        select_kwargs["format_func"] = _format_inactive_population_category
+                    category_input = st.selectbox(**select_kwargs)
         else:
             category_input = ""
             st.session_state[category_state_key] = ""
