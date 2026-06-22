@@ -6,7 +6,6 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
-from urllib.parse import parse_qs, urlparse
 
 import altair as alt
 import numpy as np
@@ -83,15 +82,6 @@ st.markdown(
 }
 .stApp div[data-baseweb="tab"] button {
   font-size: 1.0rem;
-}
-.stApp [data-testid="stDialog"] [role="dialog"],
-.stApp [data-testid="stDialog"] > div,
-.stApp div[role="dialog"] {
-  width: min(1200px, 96vw) !important;
-  max-width: min(1200px, 96vw) !important;
-}
-.stApp [data-testid="stDialog"] iframe {
-  width: 100% !important;
 }
 .stApp div[role="radiogroup"][aria-label="메뉴"] {
   display: flex;
@@ -480,102 +470,6 @@ def _require_access_gate() -> None:
 
 def _time_labels(datasets: List[DatasetConfig]) -> Dict[str, str]:
     return time_labels([str(cfg.prd_se) for cfg in datasets])
-
-
-def _extract_youtube_video_id(raw_url: str) -> str:
-    url = str(raw_url or "").strip()
-    if not url:
-        return ""
-
-    parsed = urlparse(url)
-    host = parsed.netloc.lower()
-    path = parsed.path.strip("/")
-
-    if "youtube.com" in host:
-        query = parse_qs(parsed.query)
-        video_id = (query.get("v") or [""])[0].strip()
-        if video_id:
-            return video_id
-        if path.startswith("live/"):
-            live_id = path.split("/", 1)[1].strip()
-            if live_id:
-                return live_id
-        if path.startswith("shorts/"):
-            short_id = path.split("/", 1)[1].strip()
-            if short_id:
-                return short_id
-        if path.startswith("embed/"):
-            embed_id = path.split("/", 1)[1].strip()
-            if embed_id:
-                return embed_id
-    elif "youtu.be" in host and path:
-        short_id = path.split("/", 1)[0].strip()
-        if short_id:
-            return short_id
-
-    direct_id = re.fullmatch(r"[A-Za-z0-9_-]{11}", url)
-    if direct_id:
-        return url
-    return ""
-
-
-def _render_youtube_player(video_id: str, audio_only_mode: bool, player_nonce: int = 0) -> None:
-    embed_url = (
-        f"https://www.youtube.com/embed/{video_id}"
-        f"?autoplay=1&rel=0&playsinline=1&enablejsapi=1&nonce={int(player_nonce)}"
-    )
-    if audio_only_mode:
-        hidden_player_html = (
-            f'<iframe src="{embed_url}" '
-            'allow="autoplay; encrypted-media; picture-in-picture" '
-            'style="position:absolute; left:-99999px; width:1px; height:1px; border:0;" '
-            'title="youtube-audio-only"></iframe>'
-        )
-        st.components.v1.html(hidden_player_html, height=1, scrolling=False)
-    else:
-        st.components.v1.iframe(embed_url, width=1100, height=560, scrolling=False)
-
-
-def _render_youtube_display_content() -> None:
-    st.caption("유튜브 URL 또는 영상 ID를 입력하면 재생됩니다.")
-    if "_youtube_active_video_id" not in st.session_state:
-        st.session_state["_youtube_active_video_id"] = ""
-    if "_youtube_last_input" not in st.session_state:
-        st.session_state["_youtube_last_input"] = ""
-    if "_youtube_player_nonce" not in st.session_state:
-        st.session_state["_youtube_player_nonce"] = 0
-
-    input_url = st.text_input(
-        "YouTube URL",
-        key="youtube_popup_input_url",
-        placeholder="예: https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    )
-    play_clicked = st.button("재생", key="youtube_play_btn", use_container_width=True)
-    parsed_video_id = _extract_youtube_video_id(input_url)
-    input_changed = input_url != str(st.session_state.get("_youtube_last_input", ""))
-    st.session_state["_youtube_last_input"] = input_url
-
-    # Enter 입력으로 rerun되는 경우와 재생 버튼 클릭 모두 즉시 반영
-    if parsed_video_id and (play_clicked or input_changed):
-        st.session_state["_youtube_active_video_id"] = parsed_video_id
-        st.session_state["_youtube_player_nonce"] = int(st.session_state.get("_youtube_player_nonce", 0)) + 1
-        st.rerun()
-    elif play_clicked and not parsed_video_id:
-        st.session_state["_youtube_active_video_id"] = ""
-        st.warning("유효한 YouTube URL(또는 11자리 영상 ID)을 입력해 주세요.")
-
-    audio_only_mode = st.toggle("오디오 전용(화면 숨김)", key="youtube_audio_only_mode", value=False)
-    active_video_id = str(st.session_state.get("_youtube_active_video_id", "")).strip()
-    player_nonce = int(st.session_state.get("_youtube_player_nonce", 0))
-    if active_video_id:
-        _render_youtube_player(video_id=active_video_id, audio_only_mode=audio_only_mode, player_nonce=player_nonce)
-        if audio_only_mode:
-            st.caption("오디오 전용 모드: 화면은 숨기고 소리만 재생 중입니다.")
-        st.caption(f"영상 ID: {active_video_id}")
-
-    if st.button("닫기", key="youtube_popup_close_btn"):
-        st.session_state["_show_youtube_popup"] = False
-        st.rerun()
 
 
 def _card(
@@ -1132,41 +1026,16 @@ def _render_dataset(
 
 _require_access_gate()
 
-if "_show_youtube_popup" not in st.session_state:
-    st.session_state["_show_youtube_popup"] = False
-
-if hasattr(st, "dialog"):
-    @st.dialog("경제활동인구 모니터링")
-    def _open_youtube_dialog() -> None:
-        _render_youtube_display_content()
-else:
-    def _open_youtube_dialog() -> None:
-        pass
-
-title_col, button_col = st.columns([0.94, 0.06])
-with title_col:
-    git_meta = _latest_git_commit_meta()
-    st.markdown(
-        (
-            "<h1 style='margin:0;'>경제활동인구 모니터링 "
-            f"<span style='font-size:0.50em; font-weight:500; color:#9ca3af;'>"
-            f"(Commit: {git_meta.get('sha', '-')} | {git_meta.get('committed_at', '-')})"
-            "</span></h1>"
-        ),
-        unsafe_allow_html=True,
-    )
-with button_col:
-    if st.button("Y", key="open_youtube_dialog_btn", use_container_width=True, help="유튜브 디스플레이 열기"):
-        st.session_state["_show_youtube_popup"] = True
-
-if hasattr(st, "dialog") and st.session_state.get("_show_youtube_popup", False):
-    _open_youtube_dialog()
-    # Open request is one-shot; avoid reopening on unrelated reruns (tab switch, data load, etc.)
-    st.session_state["_show_youtube_popup"] = False
-elif not hasattr(st, "dialog") and st.session_state.get("_show_youtube_popup", False):
-    with st.expander("경제활동인구 모니터링", expanded=True):
-        _render_youtube_display_content()
-    st.session_state["_show_youtube_popup"] = False
+git_meta = _latest_git_commit_meta()
+st.markdown(
+    (
+        "<h1 style='margin:0;'>경제활동인구 모니터링 "
+        f"<span style='font-size:0.50em; font-weight:500; color:#9ca3af;'>"
+        f"(Commit: {git_meta.get('sha', '-')} | {git_meta.get('committed_at', '-')})"
+        "</span></h1>"
+    ),
+    unsafe_allow_html=True,
+)
 
 with st.sidebar:
     st.subheader("데이터 제어")
