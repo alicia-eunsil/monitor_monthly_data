@@ -870,7 +870,12 @@ def _render_activity_comparison_dashboard(
             .mark_rect()
             .encode(
                 x=alt.X("yearmonth(period):T", title=labels["point"]),
-                y=alt.Y("region_name:N", title="시도", sort=latest_metric_order),
+                y=alt.Y(
+                    "region_name:N",
+                    title="시도",
+                    sort=latest_metric_order,
+                    axis=alt.Axis(labelLimit=180, labelPadding=8),
+                ),
                 color=alt.Color(
                     f"{metric_col}:Q",
                     title=metric_title,
@@ -884,6 +889,7 @@ def _render_activity_comparison_dashboard(
                 ],
             )
             .properties(height=max(360, len(province_regions) * 24))
+            .configure_view(stroke=None)
         )
         st.altair_chart(heatmap, use_container_width=True)
 
@@ -938,7 +944,7 @@ def _render_activity_comparison_dashboard(
             "최근값표시": "최근값",
             "전월비표시": "전월비",
             "전년동월비표시": "전년동월비",
-            "전년동월비율표시": "전년동월비율",
+            "전년동월비율표시": "전년동월 증감률",
             "최근6개월": "최근6개월 추세",
         }
     )
