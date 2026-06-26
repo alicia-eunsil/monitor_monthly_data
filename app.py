@@ -813,6 +813,7 @@ def _render_activity_comparison_dashboard(
     if national_region and national_region in selected_regions:
         national_df = chart_df[chart_df["region_name"] == national_region].copy()
         if not national_df.empty:
+            national_domain = _auto_y_domain(national_df["value"], pad_ratio=0.03)
             national_chart = (
                 alt.Chart(national_df)
                 .mark_line(color="#111827", strokeWidth=4)
@@ -822,6 +823,7 @@ def _render_activity_comparison_dashboard(
                         "value:Q",
                         title=f"전국 취업자 ({unit})" if unit else "전국 취업자",
                         axis=alt.Axis(orient="right"),
+                        scale=alt.Scale(domain=national_domain),
                     ),
                     tooltip=trend_tooltips,
                 )
