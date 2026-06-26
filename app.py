@@ -654,6 +654,288 @@ def _render_extreme_table(df: pd.DataFrame) -> None:
     )
 
 
+def _render_activity_comparison_dashboard(
+    df: pd.DataFrame,
+    region_pool: List[str],
+    scope_tag: str,
+) -> None:
+    st.subheader("전국·시도 취업자 비교")
+    subset = _get_cached_dataset_subset(df, scope_tag=scope_tag, dataset_key="activity")
+    if subset.empty:
+        st.warning("취업자 비교에 사용할 경제활동인구현황 데이터가 없습니다.")
+        return
+
+    indicators = sorted(subset["indicator_name"].dropna().astype(str).unique().tolist())
+    employment_indicator = ""
+    for token in ["취업자수", "취업자", "취업"]:
+        employment_indicator = next((name for name in indicators if token in str(name)), "")
+        if employment_indicator:
+            break
+    if not employment_indicator and indicators:
+        employment_indicator = indicators[0]
+
+    work = subset[subset["indicator_name"].astype(str) == str(employment_indicator)].copy()
+    work = work[work["region_name"].isin(region_pool)].copy()
+    work["period"] = pd.to_datetime(work["period"], errors="coerce")
+    work["value"] = pd.to_numeric(work["value"], errors="coerce")
+    work["yoy_abs"] = pd.to_numeric(work["yoy_abs"], errors="coerce")
+    work["yoy_pct"] = pd.to_numeric(work["yoy_pct"], errors="coerce")
+    work = work.dropna(subset=["period", "value"]).sort_values(["region_name", "period"])
+    if work.empty:
+        st.warning("취업자 비교에 사용할 시계열 데이터가 없습니다.")
+        return
+
+    prd_se = str(work["prd_se"].dropna().iloc[-1]).upper() if "prd_se" in work.columns and not work["prd_se"].dropna().empty else "M"
+    labels = time_labels([prd_se])
+    unit = str(work["unit"].dropna().iloc[-1]) if "unit" in work.columns and not work["unit"].dropna().empty else ""
+    yoy_abs_unit = "%p" if "%" in unit else unit
+    available_regions = work["region_name"].dropna().astype(str).str.strip().unique().tolist()
+    national_region = "전국" if "전국" in available_regions else ""
+    province_regions = [region for region in region_pool if region in available_regions and region != national_region]
+    if not province_regions:
+        st.info("시도 비교에 필요한 지역 데이터가 아직 충분하지 않습니다.")
+        return
+
+    work["mom_abs"] = work.groupby("region_name")["value"].diff()
+    prev_value = work.groupby("region_name")["value"].shift(1)
+    valid_prev = prev_value.notna() & (prev_value != 0)
+    work["mom_pct"] = np.nan
+    work.loc[valid_prev, "mom_pct"] = (work.loc[valid_prev, "value"] / prev_value.loc[valid_prev] - 1.0) * 100.0
+
+    latest_period = pd.Timestamp(work["period"].max())
+    latest_rows = work[work["period"] == latest_period].copy()
+    latest_rows = latest_rows[latest_rows["region_name"].isin(([national_region] if national_region else []) + province_regions)].copy()
+    if latest_rows.empty:
+        st.info("최신 비교 기준 데이터가 없습니다.")
+        return
+
+    province_latest = latest_rows[latest_rows["region_name"].isin(province_regions)].copy()
+    increase_count = int((province_latest["yoy_abs"] > 0).sum()) if "yoy_abs" in province_latest.columns else 0
+    decrease_count = int((province_latest["yoy_abs"] < 0).sum()) if "yoy_abs" in province_latest.columns else 0
+    flat_count = max(len(province_latest) - increase_count - decrease_count, 0)
+
+    latest_yoy = province_latest.dropna(subset=["yoy_abs"]).sort_values("yoy_abs", ascending=False)
+    top_up = latest_yoy.iloc[0] if not latest_yoy.empty else None
+    top_down = latest_yoy.iloc[-1] if not latest_yoy.empty else None
+
+    default_highlights: List[str] = []
+    if not latest_yoy.empty:
+        default_highlights = (
+            latest_yoy.head(3)["region_name"].astype(str).tolist()
+            + latest_yoy.tail(3)["region_name"].astype(str).tolist()
+        )
+    default_highlights = list(dict.fromkeys([region for region in default_highlights if region in province_regions]))
+
+    ctrl_col1, ctrl_col2 = st.columns([1.2, 1.8])
+    with ctrl_col1:
+        window_sel = st.radio(
+            "기간",
+            ["최근 3년", "최근 5년", "최근 10년", "전체"],
+            horizontal=True,
+            key=f"{scope_tag}_activity_compare_window",
+        )
+    with ctrl_col2:
+        highlight_regions = st.multiselect(
+            "강조 지역",
+            province_regions,
+            default=default_highlights,
+            key=f"{scope_tag}_activity_compare_highlights",
+        )
+
+    chart_df = work.copy()
+    if window_sel != "전체":
+        years = 3 if "3년" in window_sel else 5 if "5년" in window_sel else 10
+        cutoff = latest_period - pd.DateOffset(years=years)
+        chart_df = chart_df[chart_df["period"] >= cutoff].copy()
+
+    latest_period_text = _fmt_period(latest_period, prd_se)
+    national_value = "-"
+    if national_region:
+        national_latest = latest_rows[latest_rows["region_name"] == national_region]
+        if not national_latest.empty:
+            national_value = _fmt_num(national_latest["value"].iloc[-1], unit)
+
+    summary_cols = st.columns(4)
+    with summary_cols[0]:
+        _card("전국 최신 취업자", national_value, latest_period_text, keep_empty_slots=True)
+    with summary_cols[1]:
+        _card("증가 시도", f"{increase_count}곳", f"감소 {decrease_count}곳 / 보합 {flat_count}곳", keep_empty_slots=True)
+    with summary_cols[2]:
+        up_value = _fmt_num(top_up["yoy_abs"], yoy_abs_unit) if top_up is not None else "-"
+        up_region = str(top_up["region_name"]) if top_up is not None else "-"
+        _card("증가폭 최대", up_region, up_value, keep_empty_slots=True)
+    with summary_cols[3]:
+        down_value = _fmt_num(top_down["yoy_abs"], yoy_abs_unit) if top_down is not None else "-"
+        down_region = str(top_down["region_name"]) if top_down is not None else "-"
+        _card("감소폭 최대", down_region, down_value, keep_empty_slots=True)
+
+    st.caption(f"최신 기준 {labels['point']}: {latest_period_text} · 지표: {employment_indicator}")
+    st.markdown("#### 전국 + 시도 추세")
+    trend_tooltips = [
+        alt.Tooltip("region_name:N", title="지역"),
+        alt.Tooltip("yearmonth(period):T", title=labels["point"]),
+        alt.Tooltip("value:Q", title=f"취업자 ({unit})" if unit else "취업자", format=",.2f"),
+        alt.Tooltip("yoy_abs:Q", title=f"{labels['yoy']}대비 증감 ({yoy_abs_unit})" if yoy_abs_unit else f"{labels['yoy']}대비 증감", format=",.2f"),
+        alt.Tooltip("yoy_pct:Q", title=f"{labels['yoy']}대비 증감률(%)", format=".2f"),
+    ]
+    province_base = chart_df[chart_df["region_name"].isin(province_regions)].copy()
+    trend_layers: List[alt.Chart] = []
+    if not province_base.empty:
+        trend_layers.append(
+            alt.Chart(province_base)
+            .mark_line(color="#cbd5e1", opacity=0.75)
+            .encode(
+                x=alt.X("period:T", title=labels["point"]),
+                y=alt.Y("value:Q", title=f"취업자 ({unit})" if unit else "취업자"),
+                detail="region_name:N",
+                tooltip=trend_tooltips,
+            )
+        )
+    if highlight_regions:
+        highlight_df = chart_df[chart_df["region_name"].isin(highlight_regions)].copy()
+        if not highlight_df.empty:
+            trend_layers.append(
+                alt.Chart(highlight_df)
+                .mark_line(strokeWidth=2.7)
+                .encode(
+                    x=alt.X("period:T", title=labels["point"]),
+                    y=alt.Y("value:Q", title=f"취업자 ({unit})" if unit else "취업자"),
+                    color=alt.Color("region_name:N", title="강조 지역"),
+                    tooltip=trend_tooltips,
+                )
+            )
+    if national_region:
+        national_df = chart_df[chart_df["region_name"] == national_region].copy()
+        if not national_df.empty:
+            trend_layers.append(
+                alt.Chart(national_df)
+                .mark_line(color="#111827", strokeWidth=4)
+                .encode(
+                    x=alt.X("period:T", title=labels["point"]),
+                    y=alt.Y("value:Q", title=f"취업자 ({unit})" if unit else "취업자"),
+                    tooltip=trend_tooltips,
+                )
+            )
+    if trend_layers:
+        st.altair_chart(alt.layer(*trend_layers).properties(height=360), use_container_width=True)
+    else:
+        st.info("추세 차트에 표시할 데이터가 없습니다.")
+
+    st.markdown("#### 시도별 증가·감소 히트맵")
+    heatmap_metric = st.radio(
+        "히트맵 기준",
+        ["전년동월대비 증감", "전년동월대비 증감률"],
+        horizontal=True,
+        key=f"{scope_tag}_activity_compare_heatmap_metric",
+    )
+    metric_col = "yoy_abs" if heatmap_metric == "전년동월대비 증감" else "yoy_pct"
+    metric_title = f"{labels['yoy']}대비 증감 ({yoy_abs_unit})" if metric_col == "yoy_abs" and yoy_abs_unit else (
+        f"{labels['yoy']}대비 증감" if metric_col == "yoy_abs" else f"{labels['yoy']}대비 증감률(%)"
+    )
+    heatmap_df = chart_df[chart_df["region_name"].isin(province_regions)].dropna(subset=[metric_col]).copy()
+    if heatmap_df.empty:
+        st.info("히트맵에 표시할 비교 데이터가 없습니다.")
+    else:
+        latest_metric_order = (
+            heatmap_df.sort_values(["period"])
+            .groupby("region_name", as_index=False)
+            .tail(1)
+            .sort_values(metric_col, ascending=False)["region_name"]
+            .astype(str)
+            .tolist()
+        )
+        heatmap_df["region_name"] = pd.Categorical(heatmap_df["region_name"], categories=latest_metric_order, ordered=True)
+        heatmap = (
+            alt.Chart(heatmap_df)
+            .mark_rect()
+            .encode(
+                x=alt.X("yearmonth(period):T", title=labels["point"]),
+                y=alt.Y("region_name:N", title="시도", sort=latest_metric_order),
+                color=alt.Color(
+                    f"{metric_col}:Q",
+                    title=metric_title,
+                    scale=alt.Scale(domainMid=0, range=["#1d4ed8", "#f8fafc", "#b91c1c"]),
+                ),
+                tooltip=[
+                    alt.Tooltip("region_name:N", title="시도"),
+                    alt.Tooltip("yearmonth(period):T", title=labels["point"]),
+                    alt.Tooltip(f"{metric_col}:Q", title=metric_title, format=",.2f"),
+                    alt.Tooltip("value:Q", title=f"취업자 ({unit})" if unit else "취업자", format=",.2f"),
+                ],
+            )
+            .properties(height=max(360, len(province_regions) * 24))
+        )
+        st.altair_chart(heatmap, use_container_width=True)
+
+    st.markdown("#### 최근 기준 요약표")
+    sort_sel = st.radio(
+        "정렬 기준",
+        ["전년동월대비 증가순", "전년동월대비 감소순", "최근값 순"],
+        horizontal=True,
+        key=f"{scope_tag}_activity_compare_sort",
+    )
+
+    table_df = work[work["region_name"].isin(([national_region] if national_region else []) + province_regions)].copy()
+    latest_table = table_df.sort_values(["region_name", "period"]).groupby("region_name", as_index=False).tail(1).copy()
+
+    def _sparkline(series: pd.Series) -> str:
+        values = pd.to_numeric(series, errors="coerce").dropna().tail(6).tolist()
+        if not values:
+            return "-"
+        if len(values) == 1:
+            return "•"
+        symbols: List[str] = []
+        for prev, curr in zip(values[:-1], values[1:]):
+            if curr > prev:
+                symbols.append("↗")
+            elif curr < prev:
+                symbols.append("↘")
+            else:
+                symbols.append("→")
+        return "".join(symbols)
+
+    trend_map = (
+        table_df.sort_values(["region_name", "period"])
+        .groupby("region_name")["value"]
+        .apply(_sparkline)
+        .to_dict()
+    )
+    latest_table["최근6개월"] = latest_table["region_name"].map(trend_map).fillna("-")
+    latest_table["최근값표시"] = latest_table["value"].map(lambda v: _fmt_num(v, unit))
+    latest_table["전월비표시"] = latest_table["mom_abs"].map(lambda v: _fmt_num(v, unit))
+    latest_table["전년동월비표시"] = latest_table["yoy_abs"].map(lambda v: _fmt_num(v, yoy_abs_unit))
+    latest_table["전년동월비율표시"] = latest_table["yoy_pct"].map(lambda v: _fmt_num(v, "%"))
+
+    province_table = latest_table[latest_table["region_name"].isin(province_regions)].copy()
+    if sort_sel == "전년동월대비 증가순":
+        province_table = province_table.sort_values("yoy_abs", ascending=False, na_position="last")
+    elif sort_sel == "전년동월대비 감소순":
+        province_table = province_table.sort_values("yoy_abs", ascending=True, na_position="last")
+    else:
+        province_table = province_table.sort_values("value", ascending=False, na_position="last")
+
+    table_frames = []
+    if national_region:
+        national_table = latest_table[latest_table["region_name"] == national_region].copy()
+        if not national_table.empty:
+            table_frames.append(national_table)
+    table_frames.append(province_table)
+    display_df = pd.concat(table_frames, ignore_index=True) if table_frames else province_table
+    display_df = display_df[
+        ["region_name", "최근값표시", "전월비표시", "전년동월비표시", "전년동월비율표시", "최근6개월"]
+    ].rename(
+        columns={
+            "region_name": "지역",
+            "최근값표시": "최근값",
+            "전월비표시": "전월비",
+            "전년동월비표시": "전년동월비",
+            "전년동월비율표시": "전년동월비율",
+            "최근6개월": "최근6개월 추세",
+        }
+    )
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+
 def _extreme_rows(stats: Dict[str, object], prefix: str, unit: str, prd_se: str) -> pd.DataFrame:
     yoy_label = "전년동기" if str(prd_se).upper() == "H" else "전년동월"
     labels = {
@@ -1222,7 +1504,8 @@ page_options = [
     "⑦ 연령별 실업자",
     "⑧ 비경제활동인구",
     "⑨ 요약",
-    "⑩ 시군 유형화·정책매칭",
+    "⑩ 전국·시도 취업자 비교",
+    "⑪ 시군 유형화·정책매칭",
 ]
 active_page = st.radio("메뉴", page_options, horizontal=True, key="active_page", label_visibility="collapsed")
 
@@ -1502,7 +1785,16 @@ elif active_page == "⑨ 요약":
             selected_month=selected_report_month,
             show_ai=SHOW_AI_FEATURES,
         )
-elif active_page == "⑩ 시군 유형화·정책매칭":
+elif active_page == "⑩ 전국·시도 취업자 비교":
+    if region_scope != "province":
+        st.info("이 메뉴는 전국·시도 월간 데이터 전용입니다.")
+    else:
+        _render_activity_comparison_dashboard(
+            visible_data,
+            region_pool,
+            scope_tag=region_scope,
+        )
+elif active_page == "⑪ 시군 유형화·정책매칭":
     _render_sigungu_typology_tab(visible_data, is_gyeonggi31_mode=is_gyeonggi31_mode, datasets=active_datasets)
 
 st.markdown(
