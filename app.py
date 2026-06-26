@@ -865,16 +865,31 @@ def _render_activity_comparison_dashboard(
             .tolist()
         )
         heatmap_df["region_name"] = pd.Categorical(heatmap_df["region_name"], categories=latest_metric_order, ordered=True)
-        heatmap = (
+        heatmap_height = max(360, len(province_regions) * 24)
+        label_df = pd.DataFrame({"region_name": latest_metric_order})
+        label_df["region_name"] = pd.Categorical(label_df["region_name"], categories=latest_metric_order, ordered=True)
+
+        label_chart = (
+            alt.Chart(label_df)
+            .mark_text(align="left", baseline="middle", dx=4, color="#334155")
+            .encode(
+                x=alt.value(0),
+                y=alt.Y("region_name:N", sort=latest_metric_order, axis=None),
+                text=alt.Text("region_name:N"),
+            )
+            .properties(width=170, height=heatmap_height)
+        )
+
+        heatmap_core = (
             alt.Chart(heatmap_df)
             .mark_rect()
             .encode(
                 x=alt.X("yearmonth(period):T", title=labels["point"]),
                 y=alt.Y(
                     "region_name:N",
-                    title="시도",
+                    title=None,
                     sort=latest_metric_order,
-                    axis=alt.Axis(labelLimit=0, labelPadding=8, minExtent=140),
+                    axis=None,
                 ),
                 color=alt.Color(
                     f"{metric_col}:Q",
@@ -888,7 +903,11 @@ def _render_activity_comparison_dashboard(
                     alt.Tooltip("value:Q", title=f"취업자 ({unit})" if unit else "취업자", format=",.2f"),
                 ],
             )
-            .properties(height=max(360, len(province_regions) * 24))
+            .properties(height=heatmap_height)
+        )
+        heatmap = (
+            alt.hconcat(label_chart, heatmap_core, spacing=8)
+            .resolve_scale(y="shared")
             .configure_view(stroke=None)
         )
         st.altair_chart(heatmap, use_container_width=True)
