@@ -802,8 +802,8 @@ def _render_activity_comparison_dashboard(
                     y=alt.Y("value:Q", title=f"취업자 ({unit})" if unit else "취업자"),
                     color=alt.Color("region_name:N", title="강조 지역"),
                     tooltip=trend_tooltips,
-                )
             )
+        )
     if national_region:
         national_df = chart_df[chart_df["region_name"] == national_region].copy()
         if not national_df.empty:
@@ -812,12 +812,18 @@ def _render_activity_comparison_dashboard(
                 .mark_line(color="#111827", strokeWidth=4)
                 .encode(
                     x=alt.X("period:T", title=labels["point"]),
-                    y=alt.Y("value:Q", title=f"취업자 ({unit})" if unit else "취업자"),
+                    y=alt.Y(
+                        "value:Q",
+                        title=f"전국 취업자 ({unit})" if unit else "전국 취업자",
+                        axis=alt.Axis(orient="right"),
+                    ),
                     tooltip=trend_tooltips,
                 )
             )
     if trend_layers:
-        st.altair_chart(alt.layer(*trend_layers).properties(height=360), use_container_width=True)
+        trend_chart = alt.layer(*trend_layers).resolve_scale(y="independent").properties(height=360)
+        st.altair_chart(trend_chart, use_container_width=True)
+        st.caption("시도는 왼쪽 축, 전국은 오른쪽 보조축 기준입니다.")
     else:
         st.info("추세 차트에 표시할 데이터가 없습니다.")
 
