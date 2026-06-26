@@ -874,7 +874,7 @@ def _render_activity_comparison_dashboard(
                     "region_name:N",
                     title="시도",
                     sort=latest_metric_order,
-                    axis=alt.Axis(labelLimit=180, labelPadding=8),
+                    axis=alt.Axis(labelLimit=0, labelPadding=8, minExtent=140),
                 ),
                 color=alt.Color(
                     f"{metric_col}:Q",
