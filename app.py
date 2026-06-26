@@ -904,13 +904,13 @@ def _render_activity_comparison_dashboard(
                 ],
             )
             .properties(height=heatmap_height)
-        )
-        heatmap = (
-            alt.hconcat(label_chart, heatmap_core, spacing=8)
-            .resolve_scale(y="shared")
             .configure_view(stroke=None)
         )
-        st.altair_chart(heatmap, use_container_width=True)
+        label_col, heatmap_col = st.columns([1.2, 8.8], vertical_alignment="top")
+        with label_col:
+            st.altair_chart(label_chart.configure_view(stroke=None), use_container_width=True)
+        with heatmap_col:
+            st.altair_chart(heatmap_core, use_container_width=True)
 
     st.markdown("#### 최근 기준 요약표")
 
