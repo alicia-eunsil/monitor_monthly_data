@@ -903,7 +903,7 @@ def _render_activity_comparison_dashboard(
                     alt.Tooltip("value:Q", title=f"취업자 ({unit})" if unit else "취업자", format=",.2f"),
                 ],
             )
-            .properties(width=900, height=heatmap_height)
+            .properties(height=heatmap_height)
         )
         heatmap = (
             alt.hconcat(label_chart, heatmap_core, spacing=8)
