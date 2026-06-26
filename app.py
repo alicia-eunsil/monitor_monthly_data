@@ -779,14 +779,14 @@ def _render_activity_comparison_dashboard(
         alt.Tooltip("yoy_pct:Q", title=f"{labels['yoy']}대비 증감률(%)", format=".2f"),
     ]
     province_base = chart_df[chart_df["region_name"].isin(province_regions)].copy()
-    trend_layers: List[alt.Chart] = []
+    province_layers: List[alt.Chart] = []
     if not province_base.empty:
-        trend_layers.append(
+        province_layers.append(
             alt.Chart(province_base)
             .mark_line(color="#cbd5e1", opacity=0.75)
             .encode(
                 x=alt.X("period:T", title=labels["point"]),
-                y=alt.Y("value:Q", title=f"취업자 ({unit})" if unit else "취업자"),
+                y=alt.Y("value:Q", title=f"시도 취업자 ({unit})" if unit else "시도 취업자"),
                 detail="region_name:N",
                 tooltip=trend_tooltips,
             )
@@ -794,20 +794,23 @@ def _render_activity_comparison_dashboard(
     if highlight_regions:
         highlight_df = chart_df[chart_df["region_name"].isin(highlight_regions)].copy()
         if not highlight_df.empty:
-            trend_layers.append(
+            province_layers.append(
                 alt.Chart(highlight_df)
                 .mark_line(strokeWidth=2.7)
                 .encode(
                     x=alt.X("period:T", title=labels["point"]),
-                    y=alt.Y("value:Q", title=f"취업자 ({unit})" if unit else "취업자"),
+                    y=alt.Y("value:Q", title=f"시도 취업자 ({unit})" if unit else "시도 취업자"),
                     color=alt.Color("region_name:N", title="강조 지역"),
                     tooltip=trend_tooltips,
+                )
             )
-        )
+    province_chart = alt.layer(*province_layers) if province_layers else None
+
+    national_chart = None
     if national_region:
         national_df = chart_df[chart_df["region_name"] == national_region].copy()
         if not national_df.empty:
-            trend_layers.append(
+            national_chart = (
                 alt.Chart(national_df)
                 .mark_line(color="#111827", strokeWidth=4)
                 .encode(
@@ -820,10 +823,15 @@ def _render_activity_comparison_dashboard(
                     tooltip=trend_tooltips,
                 )
             )
-    if trend_layers:
-        trend_chart = alt.layer(*trend_layers).resolve_scale(y="independent").properties(height=360)
+    if province_chart is not None and national_chart is not None:
+        trend_chart = alt.layer(province_chart, national_chart).resolve_scale(y="independent").properties(height=360)
         st.altair_chart(trend_chart, use_container_width=True)
         st.caption("시도는 왼쪽 축, 전국은 오른쪽 보조축 기준입니다.")
+    elif province_chart is not None:
+        st.altair_chart(province_chart.properties(height=360), use_container_width=True)
+    elif national_chart is not None:
+        st.altair_chart(national_chart.properties(height=360), use_container_width=True)
+        st.caption("전국은 오른쪽 보조축 기준입니다.")
     else:
         st.info("추세 차트에 표시할 데이터가 없습니다.")
 
