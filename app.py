@@ -888,12 +888,6 @@ def _render_activity_comparison_dashboard(
         st.altair_chart(heatmap, use_container_width=True)
 
     st.markdown("#### 최근 기준 요약표")
-    sort_sel = st.radio(
-        "정렬 기준",
-        ["전년동월대비 증가순", "전년동월대비 감소순", "최근값 순"],
-        horizontal=True,
-        key=f"{scope_tag}_activity_compare_sort",
-    )
 
     table_df = work[work["region_name"].isin(([national_region] if national_region else []) + province_regions)].copy()
     latest_table = table_df.sort_values(["region_name", "period"]).groupby("region_name", as_index=False).tail(1).copy()
@@ -927,12 +921,7 @@ def _render_activity_comparison_dashboard(
     latest_table["전년동월비율표시"] = latest_table["yoy_pct"].map(lambda v: _fmt_num(v, "%"))
 
     province_table = latest_table[latest_table["region_name"].isin(province_regions)].copy()
-    if sort_sel == "전년동월대비 증가순":
-        province_table = province_table.sort_values("yoy_abs", ascending=False, na_position="last")
-    elif sort_sel == "전년동월대비 감소순":
-        province_table = province_table.sort_values("yoy_abs", ascending=True, na_position="last")
-    else:
-        province_table = province_table.sort_values("value", ascending=False, na_position="last")
+    province_table = province_table.sort_values("yoy_abs", ascending=False, na_position="last")
 
     table_frames = []
     if national_region:
