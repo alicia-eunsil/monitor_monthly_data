@@ -726,6 +726,12 @@ def _render_activity_comparison_dashboard(
         )
     default_highlights = list(dict.fromkeys([region for region in default_highlights if region in province_regions]))
 
+    default_display_regions: List[str] = []
+    if national_region:
+        default_display_regions.append(national_region)
+    default_display_regions.extend(default_highlights)
+    default_display_regions = list(dict.fromkeys([region for region in default_display_regions if region in ([national_region] if national_region else []) + province_regions]))
+
     ctrl_col1, ctrl_col2 = st.columns([1.2, 1.8])
     with ctrl_col1:
         window_sel = st.radio(
@@ -735,11 +741,12 @@ def _render_activity_comparison_dashboard(
             key=f"{scope_tag}_activity_compare_window",
         )
     with ctrl_col2:
-        highlight_regions = st.multiselect(
-            "강조 지역",
-            province_regions,
-            default=default_highlights,
-            key=f"{scope_tag}_activity_compare_highlights",
+        display_region_options = ([national_region] if national_region else []) + province_regions
+        selected_regions = st.multiselect(
+            "표시 지역",
+            display_region_options,
+            default=default_display_regions,
+            key=f"{scope_tag}_activity_compare_regions",
         )
 
     chart_df = work.copy()
@@ -778,7 +785,14 @@ def _render_activity_comparison_dashboard(
         alt.Tooltip("yoy_abs:Q", title=f"{labels['yoy']}대비 증감 ({yoy_abs_unit})" if yoy_abs_unit else f"{labels['yoy']}대비 증감", format=",.2f"),
         alt.Tooltip("yoy_pct:Q", title=f"{labels['yoy']}대비 증감률(%)", format=".2f"),
     ]
-    province_base = chart_df[chart_df["region_name"].isin(province_regions)].copy()
+    if not selected_regions:
+        selected_regions = default_display_regions if default_display_regions else display_region_options
+
+    selected_chart_df = chart_df[chart_df["region_name"].isin(selected_regions)].copy()
+    selected_domain = _auto_y_domain(selected_chart_df["value"]) if not selected_chart_df.empty else None
+    province_base = chart_df[
+        chart_df["region_name"].isin([region for region in selected_regions if region != national_region])
+    ].copy()
     trend_layers: List[alt.Chart] = []
     if not province_base.empty:
         trend_layers.append(
@@ -786,25 +800,34 @@ def _render_activity_comparison_dashboard(
             .mark_line(color="#cbd5e1", opacity=0.75)
             .encode(
                 x=alt.X("period:T", title=labels["point"]),
-                y=alt.Y("value:Q", title=f"취업자 ({unit})" if unit else "취업자"),
+                y=alt.Y(
+                    "value:Q",
+                    title=f"취업자 ({unit})" if unit else "취업자",
+                    scale=alt.Scale(domain=selected_domain),
+                ),
                 detail="region_name:N",
                 tooltip=trend_tooltips,
             )
         )
-    if highlight_regions:
-        highlight_df = chart_df[chart_df["region_name"].isin(highlight_regions)].copy()
-        if not highlight_df.empty:
-            trend_layers.append(
-                alt.Chart(highlight_df)
-                .mark_line(strokeWidth=2.7)
-                .encode(
-                    x=alt.X("period:T", title=labels["point"]),
-                    y=alt.Y("value:Q", title=f"취업자 ({unit})" if unit else "취업자"),
-                    color=alt.Color("region_name:N", title="강조 지역"),
-                    tooltip=trend_tooltips,
-                )
+    highlight_df = chart_df[
+        chart_df["region_name"].isin([region for region in selected_regions if region != national_region])
+    ].copy()
+    if not highlight_df.empty:
+        trend_layers.append(
+            alt.Chart(highlight_df)
+            .mark_line(strokeWidth=2.7)
+            .encode(
+                x=alt.X("period:T", title=labels["point"]),
+                y=alt.Y(
+                    "value:Q",
+                    title=f"취업자 ({unit})" if unit else "취업자",
+                    scale=alt.Scale(domain=selected_domain),
+                ),
+                color=alt.Color("region_name:N", title="표시 지역"),
+                tooltip=trend_tooltips,
             )
-    if national_region:
+        )
+    if national_region and national_region in selected_regions:
         national_df = chart_df[chart_df["region_name"] == national_region].copy()
         if not national_df.empty:
             trend_layers.append(
@@ -812,7 +835,11 @@ def _render_activity_comparison_dashboard(
                 .mark_line(color="#111827", strokeWidth=4)
                 .encode(
                     x=alt.X("period:T", title=labels["point"]),
-                    y=alt.Y("value:Q", title=f"취업자 ({unit})" if unit else "취업자"),
+                    y=alt.Y(
+                        "value:Q",
+                        title=f"취업자 ({unit})" if unit else "취업자",
+                        scale=alt.Scale(domain=selected_domain),
+                    ),
                     tooltip=trend_tooltips,
                 )
             )
