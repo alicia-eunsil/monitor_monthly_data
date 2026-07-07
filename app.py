@@ -654,17 +654,6 @@ def _render_extreme_table(df: pd.DataFrame) -> None:
     )
 
 
-def _render_touch_value_table(df: pd.DataFrame, title: str, columns: List[str], limit_rows: int = 24) -> None:
-    if df.empty:
-        return
-    with st.expander(title, expanded=False):
-        st.dataframe(
-            df[columns].tail(limit_rows),
-            use_container_width=True,
-            hide_index=True,
-        )
-
-
 def _render_activity_comparison_dashboard(
     df: pd.DataFrame,
     region_pool: List[str],
@@ -851,20 +840,6 @@ def _render_activity_comparison_dashboard(
         st.caption("전국은 오른쪽 보조축 기준입니다.")
     else:
         st.info("추세 차트에 표시할 데이터가 없습니다.")
-
-    trend_table = chart_df[chart_df["region_name"].isin(selected_regions)].copy()
-    if not trend_table.empty:
-        trend_table = trend_table.sort_values(["period", "region_name"]).copy()
-        trend_table["기간"] = trend_table["period"].dt.strftime("%Y-%m")
-        trend_table["지역"] = trend_table["region_name"].astype(str)
-        trend_table["취업자"] = trend_table["value"].map(lambda value: _fmt_num(value, unit))
-        trend_table["전년대비 증감"] = trend_table["yoy_abs"].map(lambda value: _fmt_num(value, yoy_abs_unit))
-        trend_table["전년대비 증감률(%)"] = trend_table["yoy_pct"].map(lambda value: _fmt_num(value, "%"))
-        _render_touch_value_table(
-            trend_table,
-            "터치/아이패드용 값 보기",
-            ["기간", "지역", "취업자", "전년대비 증감", "전년대비 증감률(%)"],
-        )
 
     st.markdown("#### 시도별 증가·감소 히트맵")
     heatmap_metric = st.radio(
@@ -1285,6 +1260,27 @@ def _render_dataset(
                 value_class,
             )
 
+    yoy_card_specs = [
+        ("전년동월대비 증감", stats.get("yoy_abs_latest_value"), latest_period, False, ""),
+        ("전체기간 최고", stats.get("yoy_abs_max_all_value"), _fmt_period(stats.get("yoy_abs_max_all_period"), prd_se), bool(stats.get("yoy_abs_is_new_max_all")), "value-max"),
+        ("전체기간 최저", stats.get("yoy_abs_min_all_value"), _fmt_period(stats.get("yoy_abs_min_all_period"), prd_se), bool(stats.get("yoy_abs_is_new_min_all")), "value-min"),
+        ("최근 10년 중 최고", stats.get("yoy_abs_max_10y_value"), _fmt_period(stats.get("yoy_abs_max_10y_period"), prd_se), bool(stats.get("yoy_abs_is_new_max_10y")), "value-max"),
+        ("최근 10년 중 최저", stats.get("yoy_abs_min_10y_value"), _fmt_period(stats.get("yoy_abs_min_10y_period"), prd_se), bool(stats.get("yoy_abs_is_new_min_10y")), "value-min"),
+        ("최근 5년 중 최고", stats.get("yoy_abs_max_5y_value"), _fmt_period(stats.get("yoy_abs_max_5y_period"), prd_se), bool(stats.get("yoy_abs_is_new_max_5y")), "value-max"),
+        ("최근 5년 중 최저", stats.get("yoy_abs_min_5y_value"), _fmt_period(stats.get("yoy_abs_min_5y_period"), prd_se), bool(stats.get("yoy_abs_is_new_min_5y")), "value-min"),
+    ]
+    st.markdown("#### 전년동월대비 증감")
+    yoy_card_cols = st.columns(len(yoy_card_specs))
+    for col, (title, raw_value, sub_text, is_new, value_class) in zip(yoy_card_cols, yoy_card_specs):
+        with col:
+            _card(
+                title,
+                _fmt_num(raw_value, yoy_abs_unit),
+                str(sub_text),
+                bool(is_new),
+                value_class,
+            )
+
     chart_df = series_df
     window_options = ["전체", "최근 10년", "최근 5년"]
     st.markdown("<hr style='margin:18px 0 8px 0; border:0; border-top:1px solid #e5e7eb;'>", unsafe_allow_html=True)
@@ -1324,11 +1320,6 @@ def _render_dataset(
         )
         st.altair_chart(level_chart, use_container_width=True)
 
-        level_table = level_df.copy()
-        level_table["기간"] = level_table["period"].dt.strftime("%Y-%m")
-        level_table["값"] = level_table["value"].map(lambda value: _fmt_num(value, unit))
-        _render_touch_value_table(level_table, "터치/아이패드용 값 보기", ["기간", "값"])
-
     st.markdown(f"#### {labels['yoy']}대비 증감(막대) / 증감률(선)")
     yoy_df = chart_df[["period", "yoy_abs", "yoy_pct"]].dropna(
         subset=["yoy_abs", "yoy_pct"],
@@ -1357,16 +1348,6 @@ def _render_dataset(
         ).encode(y="zero:Q")
         combo = alt.layer(bars, line, zero).resolve_scale(y="independent").properties(height=320)
         st.altair_chart(combo, use_container_width=True)
-
-        yoy_table = yoy_df.copy()
-        yoy_table["기간"] = yoy_table["period"].dt.strftime("%Y-%m")
-        yoy_table["전년대비 증감"] = yoy_table["yoy_abs"].map(lambda value: _fmt_num(value, yoy_abs_unit))
-        yoy_table["전년대비 증감률(%)"] = yoy_table["yoy_pct"].map(lambda value: _fmt_num(value, "%"))
-        _render_touch_value_table(
-            yoy_table,
-            "터치/아이패드용 값 보기",
-            ["기간", "전년대비 증감", "전년대비 증감률(%)"],
-        )
 
     st.markdown("#### 리포트 요약")
     summary_df = pd.concat(
