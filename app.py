@@ -1240,8 +1240,15 @@ def _render_dataset(
     )
 
     st.caption(f"최신 기준{labels['point']}: {latest_period}")
+    latest_yoy_abs_value = stats.get("yoy_abs_latest_value")
+    latest_yoy_abs_text = _fmt_num(latest_yoy_abs_value, yoy_abs_unit)
+    latest_yoy_abs_sub = (
+        f"{latest_period}<br>전년동월대비 {latest_yoy_abs_text}"
+        if str(latest_yoy_abs_text).strip() != "-"
+        else str(latest_period)
+    )
     card_specs = [
-        ("최신", stats.get("level_latest_value"), latest_period, False, ""),
+        ("최신", stats.get("level_latest_value"), latest_yoy_abs_sub, False, ""),
         ("전체기간 최고", stats.get("level_max_all_value"), _fmt_period(stats.get("level_max_all_period"), prd_se), bool(stats.get("level_is_new_max_all")), "value-max"),
         ("전체기간 최저", stats.get("level_min_all_value"), _fmt_period(stats.get("level_min_all_period"), prd_se), bool(stats.get("level_is_new_min_all")), "value-min"),
         ("최근 10년 중 최고", stats.get("level_max_10y_value"), _fmt_period(stats.get("level_max_10y_period"), prd_se), bool(stats.get("level_is_new_max_10y")), "value-max"),
@@ -1255,27 +1262,6 @@ def _render_dataset(
             _card(
                 title,
                 _fmt_num(raw_value, unit),
-                str(sub_text),
-                bool(is_new),
-                value_class,
-            )
-
-    yoy_card_specs = [
-        ("전년동월대비 증감", stats.get("yoy_abs_latest_value"), latest_period, False, ""),
-        ("전체기간 최고", stats.get("yoy_abs_max_all_value"), _fmt_period(stats.get("yoy_abs_max_all_period"), prd_se), bool(stats.get("yoy_abs_is_new_max_all")), "value-max"),
-        ("전체기간 최저", stats.get("yoy_abs_min_all_value"), _fmt_period(stats.get("yoy_abs_min_all_period"), prd_se), bool(stats.get("yoy_abs_is_new_min_all")), "value-min"),
-        ("최근 10년 중 최고", stats.get("yoy_abs_max_10y_value"), _fmt_period(stats.get("yoy_abs_max_10y_period"), prd_se), bool(stats.get("yoy_abs_is_new_max_10y")), "value-max"),
-        ("최근 10년 중 최저", stats.get("yoy_abs_min_10y_value"), _fmt_period(stats.get("yoy_abs_min_10y_period"), prd_se), bool(stats.get("yoy_abs_is_new_min_10y")), "value-min"),
-        ("최근 5년 중 최고", stats.get("yoy_abs_max_5y_value"), _fmt_period(stats.get("yoy_abs_max_5y_period"), prd_se), bool(stats.get("yoy_abs_is_new_max_5y")), "value-max"),
-        ("최근 5년 중 최저", stats.get("yoy_abs_min_5y_value"), _fmt_period(stats.get("yoy_abs_min_5y_period"), prd_se), bool(stats.get("yoy_abs_is_new_min_5y")), "value-min"),
-    ]
-    st.markdown("#### 전년동월대비 증감")
-    yoy_card_cols = st.columns(len(yoy_card_specs))
-    for col, (title, raw_value, sub_text, is_new, value_class) in zip(yoy_card_cols, yoy_card_specs):
-        with col:
-            _card(
-                title,
-                _fmt_num(raw_value, yoy_abs_unit),
                 str(sub_text),
                 bool(is_new),
                 value_class,
