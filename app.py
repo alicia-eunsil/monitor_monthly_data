@@ -120,7 +120,7 @@ st.markdown(
   background: #ffffff;
 }
 .summary-card {
-  height: 158px;
+  height: 184px;
   display: flex;
   flex-direction: column;
 }
@@ -129,10 +129,10 @@ st.markdown(
   line-height: 1.25;
 }
 .summary-card .metric-value {
-  min-height: 1.8em;
+  min-height: 2.0em;
 }
 .summary-card .metric-sub {
-  min-height: 3.3em;
+  min-height: 4.8em;
   line-height: 1.4;
 }
 .summary-avg-card .metric-sub {
