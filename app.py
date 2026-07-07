@@ -1241,7 +1241,17 @@ def _render_dataset(
 
     st.caption(f"최신 기준{labels['point']}: {latest_period}")
     latest_yoy_abs_value = stats.get("yoy_abs_latest_value")
-    latest_yoy_abs_text = _fmt_num(latest_yoy_abs_value, yoy_abs_unit)
+    latest_yoy_abs_arrow = "→"
+    latest_yoy_abs_display_value = latest_yoy_abs_value
+    if pd.notna(latest_yoy_abs_value):
+        if float(latest_yoy_abs_value) > 0:
+            latest_yoy_abs_arrow = "▲"
+        elif float(latest_yoy_abs_value) < 0:
+            latest_yoy_abs_arrow = "▼"
+            latest_yoy_abs_display_value = abs(float(latest_yoy_abs_value))
+        else:
+            latest_yoy_abs_display_value = 0
+    latest_yoy_abs_text = f"{latest_yoy_abs_arrow} {_fmt_num(latest_yoy_abs_display_value, yoy_abs_unit)}"
     latest_yoy_abs_sub = (
         f"{latest_period}<br>전년동월대비 {latest_yoy_abs_text}"
         if str(latest_yoy_abs_text).strip() != "-"
