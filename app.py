@@ -1498,9 +1498,15 @@ is_gyeonggi31_mode = region_scope == "gyeonggi31"
 active_datasets = datasets_for_scope(region_scope)
 event_datasets = [cfg for cfg in active_datasets if getattr(cfg, "include_in_events", True)]
 summary_datasets = [cfg for cfg in active_datasets if getattr(cfg, "include_in_summary", True)]
-st.caption(f"조회범위: {scope_label}")
 
 data = scope_data.get(region_scope, pd.DataFrame())
+latest_scope_period = "-"
+if not data.empty and "period" in data.columns:
+    latest_scope_ts = pd.to_datetime(data["period"], errors="coerce").max()
+    if pd.notna(latest_scope_ts):
+        latest_scope_prd_se = str(data["prd_se"].dropna().iloc[-1]).upper() if "prd_se" in data.columns and not data["prd_se"].dropna().empty else "M"
+        latest_scope_period = _fmt_period(latest_scope_ts, latest_scope_prd_se)
+st.caption(f"조회범위: {scope_label} / 최신 기준월: {latest_scope_period}")
 
 if data.empty:
     st.session_state.pop("_schema_recovery_attempted", None)
