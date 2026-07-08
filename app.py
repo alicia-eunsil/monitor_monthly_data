@@ -1254,7 +1254,7 @@ def _render_dataset(
     latest_yoy_abs_text = f"{latest_yoy_abs_arrow} {_fmt_num(latest_yoy_abs_display_value, yoy_abs_unit)}"
     latest_yoy_abs_sub = f"전년동월대비 {latest_yoy_abs_text}" if str(latest_yoy_abs_text).strip() != "-" else ""
     card_specs = [
-        ("년월", stats.get("level_latest_value"), latest_yoy_abs_sub, False, ""),
+        (latest_period, stats.get("level_latest_value"), latest_yoy_abs_sub, False, ""),
         ("전체기간 최고", stats.get("level_max_all_value"), _fmt_period(stats.get("level_max_all_period"), prd_se), bool(stats.get("level_is_new_max_all")), "value-max"),
         ("전체기간 최저", stats.get("level_min_all_value"), _fmt_period(stats.get("level_min_all_period"), prd_se), bool(stats.get("level_is_new_min_all")), "value-min"),
         ("최근 10년 중 최고", stats.get("level_max_10y_value"), _fmt_period(stats.get("level_max_10y_period"), prd_se), bool(stats.get("level_is_new_max_10y")), "value-max"),
