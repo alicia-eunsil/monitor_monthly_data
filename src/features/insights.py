@@ -1089,37 +1089,25 @@ def render_ai_insights(
                 f"{analysis_region} {fmt_num(gy_meta.get('latest_gg_yoy_abs'), unit)})"
             )
 
-            ds_options = {
-                "산업별 취업자수": "industry",
-                "연령별 취업자": "age",
-                "직종별 취업자수": "occupation",
-                "종사상지위별 취업자": "status",
-            }
-            ds_label = st.radio(
-                "분해 축",
-                list(ds_options.keys()),
-                horizontal=True,
-                key=f"ai_compare_axis_{analysis_region}_{base_region}",
-            )
-            ds_key = ds_options[ds_label]
+            def _render_compare_block(ds_label: str, ds_key: str, *, render_trend: bool = False) -> None:
+                st.markdown(f"##### {ds_label} 비교 및 기여도")
+                comparison_df, comparison_meta = compute_comparison_breakdown(
+                    analysis_df,
+                    region_name=analysis_region,
+                    dataset_key=ds_key,
+                    base_region=base_region,
+                )
+                lag = infer_lag_from_df(analysis_df)
+                internal_df, internal_meta = compute_contribution_table(
+                    analysis_df,
+                    region=analysis_region,
+                    dataset_key=ds_key,
+                    lag=lag,
+                )
+                if not comparison_meta.get("ok"):
+                    st.info(str(comparison_meta.get("message", f"{ds_label} 비교 데이터를 계산할 수 없습니다.")))
+                    return
 
-            st.markdown(f"##### {ds_label} 비교 및 기여도")
-            comparison_df, comparison_meta = compute_comparison_breakdown(
-                analysis_df,
-                region_name=analysis_region,
-                dataset_key=ds_key,
-                base_region=base_region,
-            )
-            lag = infer_lag_from_df(analysis_df)
-            internal_df, internal_meta = compute_contribution_table(
-                analysis_df,
-                region=analysis_region,
-                dataset_key=ds_key,
-                lag=lag,
-            )
-            if not comparison_meta.get("ok"):
-                st.info(str(comparison_meta.get("message", f"{ds_label} 비교 데이터를 계산할 수 없습니다.")))
-            else:
                 st.markdown("###### AI 해설 - 상위지역 대비")
                 st.markdown(
                     build_ai_comparison_commentary(comparison_df, comparison_meta, ds_label, labels),
@@ -1127,7 +1115,6 @@ def render_ai_insights(
                 )
 
                 base_delta_col = f"{base_region} 증감"
-                base_share_col = f"{base_region} 기여율(%)"
                 contrib_col = f"{base_region} 증감 대비 지역 기여율(%)"
                 chart_df = comparison_df.copy()
                 st.markdown(f"###### 상위지역 대비 기여 ({base_region} 기준)")
@@ -1197,7 +1184,7 @@ def render_ai_insights(
                     st.markdown("###### AI 해설 - 지역 내부")
                     st.info(str(internal_meta.get("message", "지역 내부 해설 데이터를 계산할 수 없습니다.")))
 
-                if ds_key == "industry":
+                if render_trend:
                     st.markdown("##### 산업별 추이 진단")
                     trend_df, trend_meta = compute_industry_comparison_trend(
                         analysis_df,
@@ -1292,7 +1279,7 @@ def render_ai_insights(
                                     .mark_line(point=True)
                                     .encode(
                                         x=alt.X("period:T", title=labels.get("point", "월")),
-                                        y=alt.Y("region_contrib_to_nat_pct:Q", title=contrib_col),
+                                        y=alt.Y("region_contrib_to_nat_pct:Q", title=f"{base_region} 증감 대비 {analysis_region} 기여율(%)"),
                                         color=alt.Color("category_name:N", title="산업"),
                                         tooltip=[
                                             alt.Tooltip("yearmonth(period):T", title=labels.get("point", "월")),
@@ -1305,6 +1292,11 @@ def render_ai_insights(
                                 st.altair_chart(trend_chart, use_container_width=True)
                             else:
                                 st.info("표시할 산업을 1개 이상 선택해 주세요.")
+
+                st.markdown("---")
+
+            _render_compare_block("산업별 취업자수", "industry", render_trend=True)
+            _render_compare_block("연령별 취업자", "age")
 
             st.markdown("##### 전국대비 추이(참고)")
             plot_df = gy_trend[["period", "share_pct", "contrib_pct"]].dropna(subset=["period"], how="any").copy()
