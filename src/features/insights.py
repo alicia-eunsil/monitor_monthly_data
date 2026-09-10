@@ -832,7 +832,7 @@ def compute_comparison_breakdown(
         np.nan,
         view["yoy_abs_nat"] / base_total_delta * 100.0,
     )
-    view["지역 산업 기여율(%)"] = np.where(
+    view["지역 내부 기여율(%)"] = np.where(
         region_total_delta == 0,
         np.nan,
         view["yoy_abs_reg"] / region_total_delta * 100.0,
@@ -854,7 +854,7 @@ def compute_comparison_breakdown(
             f"{base_region} 증감",
             "지역 증감",
             f"{base_region} 기여율(%)",
-            "지역 산업 기여율(%)",
+            "지역 내부 기여율(%)",
             f"{base_region} 증감 대비 지역 기여율(%)",
         ]
     ].sort_values(f"{base_region} 증감 대비 지역 기여율(%)", ascending=False)
@@ -1296,6 +1296,7 @@ def render_ai_insights(
                 st.markdown("---")
 
             _render_compare_block("산업별 취업자수", "industry", render_trend=True)
+            _render_compare_block("직종별 취업자수", "occupation")
             _render_compare_block("연령별 취업자", "age")
 
             st.markdown("##### 전국대비 추이(참고)")
