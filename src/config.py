@@ -70,8 +70,12 @@ def default_end_period() -> str:
 def default_end_period_by_prd_se(prd_se: str) -> str:
     prd = str(prd_se).upper()
     if prd == "H":
-        # Regional employment survey fixed latest half-year point.
-        return "202502"
+        today = date.today()
+        if today.month >= 8:
+            return f"{today.year}01"
+        if today.month >= 2:
+            return f"{today.year - 1}02"
+        return f"{today.year - 1}01"
     if prd == "Q":
         today = date.today()
         current_quarter = ((today.month - 1) // 3) + 1
