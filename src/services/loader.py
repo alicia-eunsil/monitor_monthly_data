@@ -456,12 +456,22 @@ def load_data_with_local_cache(
     missing_scopes = [scope for scope in requested_scopes if not _is_valid_scope_frame(scope_data.get(scope))]
 
     schema_mismatch = str(manifest.get("schema_version", "")) != str(data_model_version)
+    scope_schema_mismatches = [
+        scope
+        for scope in requested_scopes
+        if str(((manifest.get("scopes", {}) or {}).get(scope, {}) or {}).get("schema_version", ""))
+        != str(data_model_version)
+    ]
     last_check_at = _parse_utc_iso(str(manifest.get("last_check_at_utc", "")))
     now_utc = datetime.now(timezone.utc)
     check_due = last_check_at is None or (now_utc - last_check_at) >= timedelta(hours=max(1, int(check_interval_hours)))
 
     scopes_to_refresh: List[str] = []
-    if force_refresh or schema_mismatch:
+    if force_refresh:
+        scopes_to_refresh = requested_scopes
+    elif scope_schema_mismatches:
+        scopes_to_refresh = scope_schema_mismatches
+    elif schema_mismatch:
         scopes_to_refresh = requested_scopes
     elif missing_scopes:
         scopes_to_refresh = missing_scopes
@@ -510,6 +520,7 @@ def load_data_with_local_cache(
                 scope_meta = (manifest.get("scopes", {}) or {}).get(scope, {})
                 scope_meta.update(
                     {
+                        "schema_version": str(data_model_version),
                         "latest_period": _latest_period_text(dedup_df),
                         "rows": int(len(dedup_df)),
                         "updated_at_utc": _now_utc_iso(),

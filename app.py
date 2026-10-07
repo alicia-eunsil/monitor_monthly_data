@@ -171,7 +171,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-DATA_MODEL_VERSION = "2026-10-07-dynamic-halfyear-v9"
+DATA_MODEL_VERSION = "2026-10-07-scope-cache-version-v10"
 REQUIRED_SCOPE_COLUMNS = {"dataset_key", "region_name", "indicator_name", "category_name", "period", "value", "prd_se"}
 SHOW_AI_FEATURES = str(os.getenv("SHOW_AI_FEATURES", "false")).strip().lower() in {"1", "true", "yes", "y"}
 SHOW_DEBUG_DIAGNOSTICS = str(os.getenv("SHOW_DEBUG_DIAGNOSTICS", "false")).strip().lower() in {"1", "true", "yes", "y"}
