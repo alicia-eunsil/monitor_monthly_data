@@ -511,6 +511,159 @@ def build_activity_snapshot(df: pd.DataFrame, region: str, lag: int) -> tuple[pd
     return out, meta
 
 
+def _shapley_ratio_effects(
+    prev_numerator: float,
+    latest_numerator: float,
+    prev_denominator: float,
+    latest_denominator: float,
+) -> tuple[float, float]:
+    values = [prev_numerator, latest_numerator, prev_denominator, latest_denominator]
+    if any(pd.isna(value) for value in values) or prev_denominator == 0 or latest_denominator == 0:
+        return np.nan, np.nan
+    numerator_effect = 0.5 * (
+        (latest_numerator / prev_denominator - prev_numerator / prev_denominator)
+        + (latest_numerator / latest_denominator - prev_numerator / latest_denominator)
+    ) * 100.0
+    denominator_effect = 0.5 * (
+        (prev_numerator / latest_denominator - prev_numerator / prev_denominator)
+        + (latest_numerator / latest_denominator - latest_numerator / prev_denominator)
+    ) * 100.0
+    return float(numerator_effect), float(denominator_effect)
+
+
+def compute_rate_factor_decomposition(
+    df: pd.DataFrame,
+    region: str,
+) -> tuple[pd.DataFrame, Dict[str, Any]]:
+    lag = infer_lag_from_df(df)
+    snapshot, snapshot_meta = build_activity_snapshot(df, region=region, lag=lag)
+    meta: Dict[str, Any] = {
+        "ok": False,
+        "message": str(snapshot_meta.get("message", "")),
+        "region": str(region),
+        "prd_se": str(snapshot_meta.get("prd_se", "M")),
+        "latest_period": snapshot_meta.get("latest_period", pd.NaT),
+        "prev_period": snapshot_meta.get("prev_period", pd.NaT),
+    }
+    if not snapshot_meta.get("ok") or snapshot.empty:
+        return pd.DataFrame(), meta
+
+    metric_rows = {
+        str(row["norm_indicator"]): row
+        for _, row in snapshot.iterrows()
+        if str(row.get("norm_indicator", "")).strip()
+    }
+
+    def _metric(name: str) -> Optional[pd.Series]:
+        return metric_rows.get(norm_indicator_name(name))
+
+    specs = [
+        ("고용률", "취업자", "15세이상인구"),
+        ("실업률", "실업자", "경제활동인구"),
+    ]
+    rows: List[Dict[str, Any]] = []
+    missing_metrics: List[str] = []
+    for rate_name, numerator_name, denominator_name in specs:
+        rate_row = _metric(rate_name)
+        numerator_row = _metric(numerator_name)
+        denominator_row = _metric(denominator_name)
+        if rate_row is None or numerator_row is None or denominator_row is None:
+            missing_metrics.append(rate_name)
+            continue
+
+        prev_numerator = float(numerator_row["prev_value"])
+        latest_numerator = float(numerator_row["latest_value"])
+        prev_denominator = float(denominator_row["prev_value"])
+        latest_denominator = float(denominator_row["latest_value"])
+        numerator_effect, denominator_effect = _shapley_ratio_effects(
+            prev_numerator,
+            latest_numerator,
+            prev_denominator,
+            latest_denominator,
+        )
+        rate_delta = float(rate_row["delta_value"])
+        derived_delta = numerator_effect + denominator_effect
+        if pd.notna(rate_delta) and pd.notna(derived_delta) and abs(derived_delta) > 1e-12:
+            scale = rate_delta / derived_delta
+            numerator_effect *= scale
+            denominator_effect *= scale
+
+        if pd.isna(numerator_effect) or pd.isna(denominator_effect):
+            dominant = "계산 불가"
+        elif abs(abs(numerator_effect) - abs(denominator_effect)) < 0.05:
+            dominant = "두 요인 유사"
+        elif abs(numerator_effect) >= abs(denominator_effect):
+            dominant = f"{numerator_name} 변동"
+        else:
+            dominant = f"{denominator_name} 변동"
+
+        rows.append(
+            {
+                "지표": rate_name,
+                "이전 값": float(rate_row["prev_value"]),
+                "최신 값": float(rate_row["latest_value"]),
+                "지표 증감(%p)": rate_delta,
+                "분자 요인": numerator_name,
+                "분자 증감": latest_numerator - prev_numerator,
+                "분자 영향(%p)": numerator_effect,
+                "분모 요인": denominator_name,
+                "분모 증감": latest_denominator - prev_denominator,
+                "분모 영향(%p)": denominator_effect,
+                "주요 영향": dominant,
+                "단위": str(numerator_row.get("unit", "")),
+            }
+        )
+
+    result = pd.DataFrame(rows)
+    if result.empty:
+        meta["message"] = "고용률·실업률 요인분해에 필요한 지표가 부족합니다."
+        return result, meta
+    meta.update({"ok": True, "missing_metrics": missing_metrics})
+    return result, meta
+
+
+def render_rate_factor_decomposition(df: pd.DataFrame, region: str, labels: Dict[str, str]) -> None:
+    table, meta = compute_rate_factor_decomposition(df, region=region)
+    st.markdown("#### 고용률·실업률 변동 요인")
+    if not meta.get("ok") or table.empty:
+        st.info(str(meta.get("message", "고용률·실업률 요인분해를 계산할 수 없습니다.")))
+        return
+
+    prd_se = str(meta.get("prd_se", "H"))
+    latest_text = fmt_period(meta.get("latest_period"), prd_se)
+    prev_text = fmt_period(meta.get("prev_period"), prd_se)
+    yoy_label = labels.get("yoy", "전년동기")
+    st.caption(
+        f"{prev_text} → {latest_text} · {yoy_label} 대비 변화를 분자와 분모 효과로 분해한 추정치입니다."
+    )
+
+    display_rows: List[Dict[str, str]] = []
+    for _, row in table.iterrows():
+        unit = str(row.get("단위", ""))
+        display_rows.append(
+            {
+                "지표": str(row["지표"]),
+                f"{yoy_label} 증감": f"{float(row['지표 증감(%p)']):+,.2f}%p",
+                "분자 요인": f"{row['분자 요인']} ({fmt_num(row['분자 증감'], unit)})",
+                "분자 영향": f"{float(row['분자 영향(%p)']):+,.2f}%p",
+                "분모 요인": f"{row['분모 요인']} ({fmt_num(row['분모 증감'], unit)})",
+                "분모 영향": f"{float(row['분모 영향(%p)']):+,.2f}%p",
+                "주요 영향": str(row["주요 영향"]),
+            }
+        )
+    st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
+
+    for _, row in table.iterrows():
+        numerator_direction = "증가" if row["분자 증감"] > 0 else "감소" if row["분자 증감"] < 0 else "변동 없음"
+        denominator_direction = "증가" if row["분모 증감"] > 0 else "감소" if row["분모 증감"] < 0 else "변동 없음"
+        st.markdown(
+            f"- **{row['지표']}**은(는) {yoy_label} 대비 **{float(row['지표 증감(%p)']):+,.2f}%p** 변했습니다. "
+            f"{row['분자 요인']} {numerator_direction} 효과는 **{float(row['분자 영향(%p)']):+,.2f}%p**, "
+            f"{row['분모 요인']} {denominator_direction} 효과는 **{float(row['분모 영향(%p)']):+,.2f}%p**로, "
+            f"주요 영향은 **{row['주요 영향']}**입니다."
+        )
+
+
 def fmt_contrib_items(table: pd.DataFrame, unit: str, positive: bool, top_n: int = 3) -> str:
     if table.empty:
         return "-"
@@ -1063,6 +1216,9 @@ def render_ai_insights(
         region = str(st.session_state.get("ai_region", region_default))
         if region not in region_pool and region_pool:
             region = region_default
+    if region in GYEONGGI_SIGUNGU:
+        render_rate_factor_decomposition(analysis_df, region=region, labels=labels)
+        st.markdown("---")
     st.markdown(f"#### 영향요인분해({base_region} 내 {region or '지역'} 비중)")
     if skip_base_comparison:
         st.info("상단 시도 선택이 `전국`이어서 전국 대비 지역 비교 분석은 생략합니다.")
