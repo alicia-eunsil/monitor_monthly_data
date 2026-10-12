@@ -25,6 +25,17 @@ ALLOWED_AGE_CONTRIB_CATEGORIES = {
     "60세이상",
 }
 ALLOWED_INDUSTRY_CONTRIB_TOKENS = {"A", "BC", "D~U"}
+HALFYEAR_ACTIVITY_INDICATOR_CODES = {
+    "15세이상인구": "T1",
+    "경제활동인구": "T2",
+    "취업자": "T3",
+    "실업자": "T4",
+    "비경제활동인구": "T5",
+    "경제활동참가율": "T6",
+    "고용률": "T7",
+    "실업률": "T8",
+    "15~64세 고용률": "T11",
+}
 
 
 def _seeded_openai_key() -> str:
@@ -481,10 +492,24 @@ def build_activity_snapshot(df: pd.DataFrame, region: str, lag: int) -> tuple[pd
         return pd.DataFrame(), meta
 
     base["norm_indicator"] = base["indicator_name"].apply(norm_indicator_name)
+    if "indicator_code" in base.columns:
+        base["norm_indicator_code"] = base["indicator_code"].astype(str).str.strip().str.upper()
+    else:
+        base["norm_indicator_code"] = ""
     rows: List[Dict[str, Any]] = []
     for ind in ACTIVITY_INDICATOR_ORDER:
         norm = norm_indicator_name(ind)
-        ind_df = base[base["norm_indicator"] == norm].copy()
+        ind_df = pd.DataFrame()
+        if meta["prd_se"] in {"H", "S"}:
+            indicator_code = HALFYEAR_ACTIVITY_INDICATOR_CODES.get(ind, "")
+            if indicator_code:
+                ind_df = base[base["norm_indicator_code"] == indicator_code].copy()
+        if ind_df.empty:
+            ind_df = base[base["norm_indicator"] == norm].copy()
+        if ind_df.empty:
+            name_matches = base["norm_indicator"].str.startswith(norm, na=False)
+            is_rse = base["norm_indicator"].str.contains("RSE", case=False, na=False)
+            ind_df = base[name_matches & ~is_rse].copy()
         if ind_df.empty:
             continue
         latest_rows = ind_df[ind_df["period"] == latest_period]
