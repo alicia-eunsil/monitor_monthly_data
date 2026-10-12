@@ -33,7 +33,11 @@ from src.core.formatters import (
     remark_new as _remark_new,
     time_labels,
 )
-from src.features.insights import build_activity_snapshot as _build_activity_snapshot, render_ai_insights as _render_ai_insights
+from src.features.insights import (
+    build_activity_snapshot as _build_activity_snapshot,
+    compute_rate_factor_decomposition as _compute_rate_factor_decomposition,
+    render_ai_insights as _render_ai_insights,
+)
 from src.features.new_history import (
     collect_new_events as _collect_new_events,
     get_report_period_options as _get_report_period_options,
@@ -333,6 +337,7 @@ def _clear_derived_caches() -> None:
     st.session_state.pop("_dataset_subset_cache", None)
     st.session_state.pop("_series_stats_cache", None)
     st.session_state.pop("_events_cache", None)
+    st.session_state.pop("_sigungu_rate_comparison_cache", None)
 
 
 def _get_cached_dataset_subset(df: pd.DataFrame, scope_tag: str, dataset_key: str) -> pd.DataFrame:
@@ -380,6 +385,60 @@ def _get_cached_events(event_source: pd.DataFrame, scope_tag: str) -> pd.DataFra
     events = _collect_new_events(event_source)
     cache[key] = events
     return events
+
+
+def _get_sigungu_rate_comparison(df: pd.DataFrame, regions: List[str]) -> pd.DataFrame:
+    cache = st.session_state.setdefault("_sigungu_rate_comparison_cache", {})
+    key = (_frame_signature(df), tuple(regions))
+    if key in cache:
+        return cache[key]
+
+    rows: List[Dict[str, object]] = []
+    for region in regions:
+        factor_df, meta = _compute_rate_factor_decomposition(df, region=region)
+        if not meta.get("ok") or factor_df.empty:
+            continue
+        row: Dict[str, object] = {
+            "시군": region,
+            "기준": _fmt_period(meta.get("latest_period"), str(meta.get("prd_se", "H"))),
+        }
+        for _, factor in factor_df.iterrows():
+            rate_name = str(factor.get("지표", "")).strip()
+            if rate_name not in {"고용률", "실업률"}:
+                continue
+            numerator_name = str(factor.get("분자 요인", "")).strip()
+            denominator_name = str(factor.get("분모 요인", "")).strip()
+            rate_delta = pd.to_numeric(factor.get("지표 증감(%p)"), errors="coerce")
+            numerator_delta = pd.to_numeric(factor.get("분자 증감"), errors="coerce")
+            denominator_delta = pd.to_numeric(factor.get("분모 증감"), errors="coerce")
+            numerator_effect = pd.to_numeric(factor.get("분자 영향(%p)"), errors="coerce")
+            denominator_effect = pd.to_numeric(factor.get("분모 영향(%p)"), errors="coerce")
+            row[f"{rate_name} 증감(%p)"] = rate_delta
+            row[f"{numerator_name} 증감"] = numerator_delta
+            row[f"{numerator_name} 영향(%p)"] = numerator_effect
+            row[f"{denominator_name} 증감"] = denominator_delta
+            row[f"{denominator_name} 영향(%p)"] = denominator_effect
+
+            if pd.isna(rate_delta):
+                rate_direction = "변화 확인 불가"
+            elif abs(float(rate_delta)) < 0.05:
+                rate_direction = "보합"
+            else:
+                rate_direction = "상승" if float(rate_delta) > 0 else "하락"
+            if pd.isna(numerator_effect) or pd.isna(denominator_effect):
+                driver_summary = "원인 확인 불가"
+            elif abs(float(numerator_effect)) >= abs(float(denominator_effect)):
+                delta_direction = "증가" if float(numerator_delta) > 0 else "감소" if float(numerator_delta) < 0 else "보합"
+                driver_summary = f"{numerator_name} {delta_direction} 영향"
+            else:
+                delta_direction = "증가" if float(denominator_delta) > 0 else "감소" if float(denominator_delta) < 0 else "보합"
+                driver_summary = f"{denominator_name} {delta_direction} 영향"
+            row[f"{rate_name} 요약"] = f"{rate_direction} · {driver_summary}"
+        rows.append(row)
+
+    result = pd.DataFrame(rows)
+    cache[key] = result
+    return result
 
 
 def _seeded_api_key() -> str:
@@ -642,6 +701,227 @@ def _render_current_level_summary(df: pd.DataFrame, region: str, labels: Dict[st
             sub_text = f"{line_3y}<br>{line_5y}"
             _card(title, "", sub_text, card_class="summary-card summary-avg-card", keep_empty_slots=True)
     st.markdown("---")
+
+
+def _render_sigungu_comparison_summary(df: pd.DataFrame, regions: List[str]) -> str:
+    comparison = _get_sigungu_rate_comparison(df, regions)
+    if comparison.empty:
+        st.info("전체 시군을 비교할 수 있는 고용률·실업률 데이터가 없습니다.")
+        return ""
+
+    numeric_columns = [
+        "고용률 증감(%p)",
+        "취업자 증감",
+        "취업자 영향(%p)",
+        "15세이상인구 증감",
+        "15세이상인구 영향(%p)",
+        "실업률 증감(%p)",
+        "실업자 증감",
+        "실업자 영향(%p)",
+        "경제활동인구 증감",
+        "경제활동인구 영향(%p)",
+    ]
+    for column in numeric_columns:
+        if column not in comparison.columns:
+            comparison[column] = np.nan
+        comparison[column] = pd.to_numeric(comparison[column], errors="coerce")
+    for column in ["고용률 요약", "실업률 요약"]:
+        if column not in comparison.columns:
+            comparison[column] = "-"
+
+    st.markdown("#### 31개 시군 고용률·실업률 영향요인 비교")
+    st.caption("증감률 자체뿐 아니라 취업자·실업자와 분모 인구 변화가 미친 영향을 함께 비교합니다.")
+
+    employment_up = int((comparison["고용률 증감(%p)"] > 0).sum())
+    employment_down = int((comparison["고용률 증감(%p)"] < 0).sum())
+    unemployment_up = int((comparison["실업률 증감(%p)"] > 0).sum())
+    unemployment_down = int((comparison["실업률 증감(%p)"] < 0).sum())
+    denominator_led = (
+        comparison["15세이상인구 영향(%p)"].abs().ge(comparison["취업자 영향(%p)"].abs())
+        | comparison["경제활동인구 영향(%p)"].abs().ge(comparison["실업자 영향(%p)"].abs())
+    )
+    metric_cols = st.columns(4)
+    with metric_cols[0]:
+        _card("고용률 상승 시군", f"{employment_up}곳", f"하락 {employment_down}곳", keep_empty_slots=True)
+    with metric_cols[1]:
+        _card("실업률 상승 시군", f"{unemployment_up}곳", f"하락 {unemployment_down}곳", keep_empty_slots=True)
+    with metric_cols[2]:
+        _card("분모 영향 우세", f"{int(denominator_led.sum())}곳", "두 지표 중 하나 이상", keep_empty_slots=True)
+    with metric_cols[3]:
+        latest_label = str(comparison["기준"].dropna().iloc[0]) if not comparison["기준"].dropna().empty else "-"
+        _card("비교 기준", latest_label, f"분석 가능 {len(comparison)}개 시군", keep_empty_slots=True)
+
+    filter_col, sort_col = st.columns(2)
+    with filter_col:
+        filter_option = st.selectbox(
+            "지역 필터",
+            ["전체", "고용률 상승", "고용률 하락", "실업률 상승", "실업률 하락", "분모 영향 우세"],
+            key="summary_sigungu_comparison_filter",
+        )
+    with sort_col:
+        sort_option = st.selectbox(
+            "정렬 기준",
+            ["고용률 증감 높은 순", "고용률 증감 낮은 순", "실업률 증감 높은 순", "실업률 증감 낮은 순", "분모 영향 큰 순"],
+            key="summary_sigungu_comparison_sort",
+        )
+
+    view = comparison.copy()
+    filter_masks = {
+        "고용률 상승": view["고용률 증감(%p)"] > 0,
+        "고용률 하락": view["고용률 증감(%p)"] < 0,
+        "실업률 상승": view["실업률 증감(%p)"] > 0,
+        "실업률 하락": view["실업률 증감(%p)"] < 0,
+        "분모 영향 우세": denominator_led,
+    }
+    if filter_option in filter_masks:
+        view = view[filter_masks[filter_option]].copy()
+
+    if sort_option == "분모 영향 큰 순":
+        view["_sort_value"] = view[["15세이상인구 영향(%p)", "경제활동인구 영향(%p)"]].abs().max(axis=1)
+        view = view.sort_values("_sort_value", ascending=False)
+    else:
+        sort_specs = {
+            "고용률 증감 높은 순": ("고용률 증감(%p)", False),
+            "고용률 증감 낮은 순": ("고용률 증감(%p)", True),
+            "실업률 증감 높은 순": ("실업률 증감(%p)", False),
+            "실업률 증감 낮은 순": ("실업률 증감(%p)", True),
+        }
+        sort_column, ascending = sort_specs[sort_option]
+        view = view.sort_values(sort_column, ascending=ascending)
+    view = view.reset_index(drop=True)
+
+    st.markdown("##### 시군 종합표")
+    st.caption("표의 행을 선택하면 ‘선택 시군 상세’ 탭의 지역이 함께 변경됩니다.")
+    display_columns = [
+        "시군",
+        "고용률 증감(%p)",
+        "고용률 요약",
+        "취업자 영향(%p)",
+        "15세이상인구 영향(%p)",
+        "실업률 증감(%p)",
+        "실업률 요약",
+        "실업자 영향(%p)",
+        "경제활동인구 영향(%p)",
+        "기준",
+    ]
+    table_event = st.dataframe(
+        view[display_columns],
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="summary_sigungu_comparison_table",
+        column_config={
+            column: st.column_config.NumberColumn(column, format="%+.2f")
+            for column in display_columns
+            if column.endswith("(%p)")
+        },
+    )
+    selected_region = ""
+    try:
+        selected_rows = list(table_event.selection.rows)
+    except (AttributeError, TypeError):
+        selected_rows = []
+    if selected_rows and selected_rows[0] < len(view):
+        selected_region = str(view.iloc[selected_rows[0]]["시군"])
+
+    st.markdown("##### 영향요인 히트맵")
+    effect_columns = {
+        "취업자 영향(%p)": "고용률 · 취업자",
+        "15세이상인구 영향(%p)": "고용률 · 15세이상인구",
+        "실업자 영향(%p)": "실업률 · 실업자",
+        "경제활동인구 영향(%p)": "실업률 · 경제활동인구",
+    }
+    heatmap = comparison[["시군", *effect_columns]].melt(
+        id_vars="시군",
+        var_name="요인",
+        value_name="영향(%p)",
+    )
+    heatmap["요인"] = heatmap["요인"].map(effect_columns)
+    region_order = comparison.sort_values("고용률 증감(%p)", ascending=False)["시군"].tolist()
+    factor_order = list(effect_columns.values())
+    heatmap_chart = (
+        alt.Chart(heatmap.dropna(subset=["영향(%p)"]))
+        .mark_rect()
+        .encode(
+            x=alt.X("요인:N", title=None, sort=factor_order, axis=alt.Axis(labelAngle=0)),
+            y=alt.Y("시군:N", title=None, sort=region_order, axis=alt.Axis(labelLimit=130)),
+            color=alt.Color(
+                "영향(%p):Q",
+                title="영향(%p)",
+                scale=alt.Scale(domainMid=0, range=["#1d4ed8", "#f8fafc", "#b91c1c"]),
+            ),
+            tooltip=[
+                alt.Tooltip("시군:N", title="시군"),
+                alt.Tooltip("요인:N", title="영향요인"),
+                alt.Tooltip("영향(%p):Q", title="영향", format="+.2f"),
+            ],
+        )
+        .properties(height=max(620, len(region_order) * 23))
+        .configure_view(stroke=None)
+    )
+    st.altair_chart(heatmap_chart, use_container_width=True)
+    st.caption("빨간색은 해당 비율을 높인 영향, 파란색은 낮춘 영향을 뜻합니다.")
+
+    st.markdown("##### 분자·분모 변화 4분면")
+
+    def _quadrant_chart(
+        frame: pd.DataFrame,
+        x_column: str,
+        y_column: str,
+        color_column: str,
+        x_title: str,
+        y_title: str,
+    ) -> alt.Chart:
+        plot_df = frame.dropna(subset=[x_column, y_column, color_column]).copy()
+        base = alt.Chart(plot_df)
+        points = base.mark_circle(size=95, opacity=0.82).encode(
+            x=alt.X(f"{x_column}:Q", title=x_title),
+            y=alt.Y(f"{y_column}:Q", title=y_title),
+            color=alt.Color(
+                f"{color_column}:Q",
+                title="증감(%p)",
+                scale=alt.Scale(domainMid=0, range=["#1d4ed8", "#f8fafc", "#b91c1c"]),
+            ),
+            tooltip=[
+                alt.Tooltip("시군:N", title="시군"),
+                alt.Tooltip(f"{x_column}:Q", title=x_title, format="+.2f"),
+                alt.Tooltip(f"{y_column}:Q", title=y_title, format="+.2f"),
+                alt.Tooltip(f"{color_column}:Q", title="비율 증감", format="+.2f"),
+            ],
+        )
+        horizontal_zero = alt.Chart(pd.DataFrame({"zero": [0]})).mark_rule(color="#94a3b8", strokeDash=[4, 4]).encode(y="zero:Q")
+        vertical_zero = alt.Chart(pd.DataFrame({"zero": [0]})).mark_rule(color="#94a3b8", strokeDash=[4, 4]).encode(x="zero:Q")
+        return alt.layer(horizontal_zero, vertical_zero, points).properties(height=420)
+
+    chart_col1, chart_col2 = st.columns(2)
+    with chart_col1:
+        st.markdown("**고용률: 취업자와 15세 이상 인구**")
+        st.altair_chart(
+            _quadrant_chart(
+                comparison,
+                "취업자 증감",
+                "15세이상인구 증감",
+                "고용률 증감(%p)",
+                "취업자 증감",
+                "15세 이상 인구 증감",
+            ),
+            use_container_width=True,
+        )
+    with chart_col2:
+        st.markdown("**실업률: 실업자와 경제활동인구**")
+        st.altair_chart(
+            _quadrant_chart(
+                comparison,
+                "실업자 증감",
+                "경제활동인구 증감",
+                "실업률 증감(%p)",
+                "실업자 증감",
+                "경제활동인구 증감",
+            ),
+            use_container_width=True,
+        )
+    return selected_region
 
 
 def _render_extreme_table(df: pd.DataFrame) -> None:
@@ -1653,96 +1933,106 @@ elif active_page == "⑧ 비경제활동인구":
             scope_tag=region_scope,
         )
 elif active_page == "⑨ 요약":
-    summary_title_placeholder = st.empty()
     if region_scope == "gyeonggi31":
         summary_scope = "31개 시군"
         sigungu_options = _get_report_region_options(events, summary_scope)
         if not sigungu_options:
             sigungu_options = sorted(visible_data["region_name"].dropna().astype(str).str.strip().unique().tolist())
 
-        selected_sigungu = ""
-        selected_report_month = None
-        c1, c2 = st.columns(2)
-        with c1:
-            if sigungu_options:
-                default_sigungu = str(st.session_state.get("summary_sigungu", sigungu_options[0]))
-                if default_sigungu not in sigungu_options:
-                    default_sigungu = sigungu_options[0]
-                selected_sigungu = st.selectbox(
-                    "시군 선택",
-                    sigungu_options,
-                    index=sigungu_options.index(default_sigungu),
-                    key="summary_sigungu",
-                )
-            else:
-                st.selectbox(
-                    "시군 선택",
-                    ["선택 가능한 시군 없음"],
-                    index=0,
-                    key="summary_sigungu_empty",
-                    disabled=True,
-                )
+        detail_tab, comparison_tab = st.tabs(["선택 시군 상세", "전체 시군 비교"])
+        with comparison_tab:
+            selected_from_comparison = _render_sigungu_comparison_summary(
+                visible_data,
+                sigungu_options if sigungu_options else region_pool,
+            )
+        if selected_from_comparison and selected_from_comparison in sigungu_options:
+            st.session_state["summary_sigungu"] = selected_from_comparison
 
-        report_month_options = _get_report_period_options(
-            events,
-            summary_scope,
-            selected_region=selected_sigungu or None,
-        )
-        with c2:
-            if report_month_options:
-                default_month = str(st.session_state.get("report_month", report_month_options[0]))
-                if default_month not in report_month_options:
-                    default_month = report_month_options[0]
-                selected_report_month = st.selectbox(
-                    f"리포트 기준{labels['point']}",
-                    report_month_options,
-                    index=report_month_options.index(default_month),
-                    key="report_month",
-                )
-            else:
-                st.selectbox(
-                    f"리포트 기준{labels['point']}",
-                    ["선택 가능한 기간 없음"],
-                    index=0,
-                    key="report_month_empty",
-                    disabled=True,
-                )
+        with detail_tab:
+            selected_sigungu = ""
+            selected_report_month = None
+            c1, c2 = st.columns(2)
+            with c1:
+                if sigungu_options:
+                    default_sigungu = str(st.session_state.get("summary_sigungu", sigungu_options[0]))
+                    if default_sigungu not in sigungu_options:
+                        default_sigungu = sigungu_options[0]
+                    selected_sigungu = st.selectbox(
+                        "시군 선택",
+                        sigungu_options,
+                        index=sigungu_options.index(default_sigungu),
+                        key="summary_sigungu",
+                    )
+                else:
+                    st.selectbox(
+                        "시군 선택",
+                        ["선택 가능한 시군 없음"],
+                        index=0,
+                        key="summary_sigungu_empty",
+                        disabled=True,
+                    )
 
-        summary_title_placeholder.subheader("요약")
-        _render_current_level_summary(data, selected_sigungu or "", labels)
-        _render_new_monthly_report(
-            events,
-            report_scope=summary_scope,
-            datasets=summary_datasets,
-            source_df=data,
-            compact=True,
-            include_consecutive_summary=False,
-            selected_region=selected_sigungu or None,
-            selected_month=selected_report_month,
-        )
-        _render_consecutive_change_summary(
-            events=events,
-            report_scope=summary_scope,
-            datasets=summary_datasets,
-            source_df=data,
-            selected_region=selected_sigungu or None,
-            selected_month=selected_report_month,
-        )
-        st.markdown("---")
-        _render_ai_insights(
-            visible_data,
-            sigungu_options if sigungu_options else region_pool,
-            labels,
-            card_fn=_card,
-            datasets=summary_datasets,
-            events=events,
-            report_scope=summary_scope,
-            source_df=data,
-            fixed_region=selected_sigungu or None,
-            selected_month=selected_report_month,
-            show_ai=SHOW_AI_FEATURES,
-        )
+            report_month_options = _get_report_period_options(
+                events,
+                summary_scope,
+                selected_region=selected_sigungu or None,
+            )
+            with c2:
+                if report_month_options:
+                    default_month = str(st.session_state.get("report_month", report_month_options[0]))
+                    if default_month not in report_month_options:
+                        default_month = report_month_options[0]
+                    selected_report_month = st.selectbox(
+                        f"리포트 기준{labels['point']}",
+                        report_month_options,
+                        index=report_month_options.index(default_month),
+                        key="report_month",
+                    )
+                else:
+                    st.selectbox(
+                        f"리포트 기준{labels['point']}",
+                        ["선택 가능한 기간 없음"],
+                        index=0,
+                        key="report_month_empty",
+                        disabled=True,
+                    )
+
+            st.subheader("요약")
+            _render_current_level_summary(data, selected_sigungu or "", labels)
+            _render_new_monthly_report(
+                events,
+                report_scope=summary_scope,
+                datasets=summary_datasets,
+                source_df=data,
+                compact=True,
+                include_consecutive_summary=False,
+                selected_region=selected_sigungu or None,
+                selected_month=selected_report_month,
+            )
+            _render_consecutive_change_summary(
+                events=events,
+                report_scope=summary_scope,
+                datasets=summary_datasets,
+                source_df=data,
+                selected_region=selected_sigungu or None,
+                selected_month=selected_report_month,
+            )
+            st.markdown("---")
+            _render_ai_insights(
+                visible_data,
+                sigungu_options if sigungu_options else region_pool,
+                labels,
+                card_fn=_card,
+                datasets=summary_datasets,
+                events=events,
+                report_scope=summary_scope,
+                source_df=data,
+                fixed_region=selected_sigungu or None,
+                selected_month=selected_report_month,
+                show_ai=SHOW_AI_FEATURES,
+            )
     else:
+        summary_title_placeholder = st.empty()
         summary_scope = "17개 시도"
         province_options = _get_report_region_options(events, summary_scope)
         fallback_provinces = [
